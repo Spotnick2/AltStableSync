@@ -1,0 +1,25 @@
+# The embedded LibGlass-1.0: the packager fetches it (.pkgmeta externals) and
+# Tools/deploy.ps1 copies it from the checkout. Never committed. LibStub is
+# vendored and tracked.
+Libs/LibGlass-1.0/
+Libs/LibAccountSync-1.0/
+
+# Packaged zips - never committed.
+dist/
+
+# SavedVariables captures pulled off the client: real character names, GUIDs,
+# macros and bindings.
+*.sv.lua
+AltStableSync*.lua.bak
+docs/captures/
+
+# Local scratch
+*.log
+*.zip
+
+# Agent/editor local state. Skills are shared project tooling and are tracked;
+# settings.local.json stays local.
+.claude/*
+!.claude/skills/
+.vscode/
+.idea/

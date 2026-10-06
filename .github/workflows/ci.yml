@@ -1,0 +1,41 @@
+name: CI
+
+# Syntax check + unit tests under Lua 5.1 (WoW's Lua). No packager step while
+# the addon is personal-use; add a BigWigs dry run (-d) here before any release.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Lua 5.1
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq lua5.1
+
+      # find, not globs: a glob reaches one level only, and an unmatched
+      # pattern is passed through literally.
+      - name: Syntax-check every Lua file
+        run: |
+          count=$(find . -name '*.lua' -not -path './.git/*' | wc -l)
+          test "$count" -gt 0 || { echo "no Lua files found - the check would prove nothing"; exit 1; }
+          echo "checking $count files"
+          find . -name '*.lua' -not -path './.git/*' -print0 | xargs -0 luac5.1 -p
+
+      - name: Unit tests
+        run: |
+          set -e
+          failed=0
+          for t in tests/test_*.lua; do
+            echo "-- $t --"
+            lua5.1 "$t" || failed=$((failed + 1))
+          done
+          test "$failed" -eq 0

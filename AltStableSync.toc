@@ -1,0 +1,13 @@
+## Interface: 16001
+## Title: AltStableSync
+## Notes: Sync action bars, macros and keybindings across same-class characters, with backups. Companion to AltStable.
+## IconTexture: 8197123
+## Author: Spotnick
+## Version: @project-version@
+## OptionalDeps: AltStable
+## SavedVariables: AltStableSyncDB AltStableSyncLAS
+## SavedVariablesPerCharacter: AltStableSyncChar
+
+Libs\LibGlass-1.0\LibGlass-1.0.xml
+Libs\LibStub\LibStub.lua
+Core.lua
