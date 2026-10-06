@@ -1,0 +1,34 @@
+package-as: AltStableSync
+
+# Personal use for now: nothing publishes this, but the layout stays
+# packager-ready so a later CurseForge release is a tag, not a rework.
+enable-nolib-creation: no
+
+# LibStub is vendored in Libs/. LibGlass-1.0 is the external, pinned to a TAG
+# (never "latest"), bumped only in a release made anyway. LibAccountSync-1.0
+# joins here with the cross-account issue (#18), not before.
+# Comments on their own lines only - the packager's YAML reader keeps an inline
+# "# ..." as part of the value (measured in GlassUnitFrames' migration).
+externals:
+  Libs/LibGlass-1.0:
+    url: https://github.com/Spotnick2/LibGlass
+    tag: r2
+
+# YAML list, not markdown bullets. Ignores match from the package root, and
+# CurseForge's packager does not honour an external's own ignore list, so the
+# library's development files are repeated here. Its LICENSE ships (MIT).
+ignore:
+  - .github
+  - .claude
+  - docs
+  - tests
+  - Tools
+  - AGENTS.md
+  - CLAUDE.md
+  - README.md
+  - Libs/LibGlass-1.0/tests
+  - Libs/LibGlass-1.0/docs
+  - Libs/LibGlass-1.0/Tools
+  - Libs/LibGlass-1.0/AGENTS.md
+  - Libs/LibGlass-1.0/CLAUDE.md
+  - Libs/LibGlass-1.0/README.md

@@ -1,0 +1,128 @@
+------------------------------------------------------------
+-- Core.lua - AltStableSync namespace, SavedVariables, events, slash command
+--
+-- SavedVariables (declared in AltStableSync.toc):
+--   AltStableSyncDB   account-wide: schema, profiles, backups, origin
+--   AltStableSyncLAS  account-wide: the LibAccountSync store ONLY (#18). Kept
+--                     in its own variable so it can be wiped on a flavour
+--                     change (#11) and never travels with a profile.
+--   AltStableSyncChar per character: assignment, autoApply, pending
+--
+-- SavedVariables are read at ADDON_LOADED, never at file scope: the client
+-- runs the SV file AFTER the addon's files, overwriting anything assigned here.
+------------------------------------------------------------
+
+AltStableSync = AltStableSync or {}
+local ASS = AltStableSync
+
+local ADDON_NAME = "AltStableSync"
+
+-- The schema this build reads and writes. A DB with a NEWER schema came from a
+-- newer AltStableSync: refuse it and touch nothing (DESIGN.md "Safety model").
+-- No migration framework until a real change needs one.
+local SCHEMA = 1
+ASS.SCHEMA = SCHEMA
+
+-- The client build docs/forever-api-notes.md was measured on. A different
+-- build says so once at login (see the client-update skill).
+local MEASURED_ON_BUILD = "70235"
+ASS.MEASURED_ON_BUILD = MEASURED_ON_BUILD
+
+local PREFIX = "|cff00ccff[AltStableSync]|r "
+
+local function Print(msg)
+    if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage(PREFIX .. tostring(msg)) end
+end
+ASS.Print = Print
+
+------------------------------------------------------------
+-- SavedVariables
+------------------------------------------------------------
+
+-- Returns true when the DB is usable. On a newer schema the addon disables
+-- itself for the session (ASS.disabled holds the reason) and leaves the
+-- tables exactly as loaded, so the newer build that wrote them gets them back.
+local function InitSavedVariables()
+    if type(AltStableSyncDB) ~= "table" then AltStableSyncDB = {} end
+    if type(AltStableSyncChar) ~= "table" then AltStableSyncChar = {} end
+    local db = AltStableSyncDB
+
+    if db.schema ~= nil and (type(db.schema) ~= "number" or db.schema > SCHEMA) then
+        ASS.disabled = "saved data has schema " .. tostring(db.schema)
+            .. ", this build reads " .. SCHEMA .. " - update AltStableSync"
+        return false
+    end
+
+    db.schema = db.schema or SCHEMA
+    if type(db.profiles) ~= "table" then db.profiles = {} end
+    if type(db.backups) ~= "table" then db.backups = {} end
+    ASS.db = db
+    ASS.char = AltStableSyncChar
+    return true
+end
+
+------------------------------------------------------------
+-- Build check
+------------------------------------------------------------
+
+local function CheckBuild()
+    if not GetBuildInfo then return end
+    local _, build = GetBuildInfo()
+    if not build or build == MEASURED_ON_BUILD then return end
+    Print("client build " .. tostring(build) .. " is not the measured build "
+        .. MEASURED_ON_BUILD .. " - sync behaviour on this build is unverified.")
+end
+
+------------------------------------------------------------
+-- Slash command
+------------------------------------------------------------
+
+local function CountKeys(t)
+    local n = 0
+    for _ in pairs(t or {}) do n = n + 1 end
+    return n
+end
+
+local function SlashHandler(msg)
+    local cmd = (msg or ""):match("^%s*(%S*)"):lower()
+    if ASS.disabled then
+        Print("disabled: " .. ASS.disabled)
+        return
+    end
+    if cmd == "" or cmd == "status" then
+        local version = C_AddOns and C_AddOns.GetAddOnMetadata
+            and C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version") or "?"
+        Print(("version %s, schema %d, %d profile(s), %d character backup set(s)"):format(
+            tostring(version), ASS.db.schema, CountKeys(ASS.db.profiles), CountKeys(ASS.db.backups)))
+    else
+        Print("commands: /altsync status")
+    end
+end
+ASS.SlashHandler = SlashHandler
+
+SLASH_ALTSTABLESYNC1 = "/altsync"
+SlashCmdList = SlashCmdList or {}
+SlashCmdList.ALTSTABLESYNC = SlashHandler
+
+------------------------------------------------------------
+-- Events
+------------------------------------------------------------
+
+local frame = CreateFrame("Frame")
+frame:RegisterEvent("ADDON_LOADED")
+frame:RegisterEvent("PLAYER_LOGIN")
+frame:SetScript("OnEvent", function(self, event, arg1)
+    if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
+        self:UnregisterEvent("ADDON_LOADED")
+        if not InitSavedVariables() then Print("disabled: " .. ASS.disabled) end
+    elseif event == "PLAYER_LOGIN" then
+        CheckBuild()
+    end
+end)
+
+-- Test seam: file-local internals for tests/, harmless in game.
+ASS._test = {
+    InitSavedVariables = InitSavedVariables,
+    CheckBuild = CheckBuild,
+    frame = frame,
+}
