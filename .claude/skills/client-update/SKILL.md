@@ -19,7 +19,7 @@ file exists.
 | 1. Dump + convert | owner + the AltStable session | `/apidump`, `/reload`, `Convert-Dump.ps1` in AltStable |
 | 2. Diff | you | `pwsh ..\AltStable\Tools\ForeverAPIDump\Compare-Dumps.ps1` |
 | 3. Sync-surface check | you | grep this repo for every changed name (below) |
-| 4. Behaviour | **owner** pastes `/run` lines; you judge them | the probe lines in `docs/forever-api-notes.md` |
+| 4. Behaviour | **owner** pastes `/run` lines; you judge them | the probe lines recorded with each `## Build` section of `docs/forever-api-notes.md` (from #2 on) |
 | 5. Bump PR | you | edits, tests, branch, PR (commit/push only when asked; never merge without approval) |
 
 If no dump exists for the new build, say so and stop — never bump on an unmeasured build.
@@ -39,7 +39,7 @@ lives on — any change here is a **finding, not a note**:
 
 ## 4. Behaviour
 
-The dump proves shape, not behaviour. The `/run` lines recorded under the probe section of
+The dump proves shape, not behaviour. The `/run` lines recorded with the `## Build` sections of
 `docs/forever-api-notes.md` are re-run by the owner; compare against the recorded values. Chat
 lines are capped at 255 characters — anything longer belongs in a probe slash command, not chat.
 "It persisted" needs a **full client exit**, never a `/reload`.
@@ -49,7 +49,8 @@ lines are capped at 255 characters — anything longer belongs in a probe slash 
 Branch `build-<build>` from `main`:
 
 1. `Core.lua` — `MEASURED_ON_BUILD = "<build>"` (silences the login warning).
-2. `tests/wow_stubs.lua` — `GetBuildInfo()` returns the new build.
+2. `tests/wow_stubs.lua` — `WoW.build = "<build>"` in `WoW.reset()` (`GetBuildInfo()` reads it;
+   don't hard-code the build in `GetBuildInfo`, the tests override `WoW.build`).
 3. `docs/forever-api-notes.md` — a `## Build <version>.<build>` section: the diff summary, the
    behaviour lines as pasted, the verdict.
 

@@ -2,14 +2,7 @@
 -- test_core.lua - SavedVariables init, schema refusal, build check, slash
 ------------------------------------------------------------
 
-local passed, failed = 0, 0
-local function check(name, ok, detail)
-    if ok then passed = passed + 1
-    else failed = failed + 1; print("  FAIL: " .. name .. (detail and ("  -- " .. detail) or "")) end
-end
-local function eq(name, got, want)
-    check(name, got == want, "got " .. tostring(got) .. ", want " .. tostring(want))
-end
+dofile("tests/harness.lua")
 local function anyLine(pattern)
     for _, l in ipairs(WoW.chat()) do if l:find(pattern) then return true end end
     return false
@@ -50,12 +43,16 @@ end
 -- Every refusal leaves ALL THREE SavedVariables exactly as loaded: same
 -- object, same keys, nothing added. The client writes them back at logout, so
 -- anything changed here is data lost for the build that wrote it.
-local function snapshot(v)
-    if type(v) ~= "table" then return v end
-    local keys = {}
-    for k, x in pairs(v) do keys[#keys + 1] = tostring(k) .. "=" .. tostring(x) end
-    table.sort(keys)
-    return table.concat(keys, ",")
+local function snapshot(v, seen)
+    if type(v) ~= "table" then return type(v) .. ":" .. tostring(v) end
+    seen = seen or {}
+    if seen[v] then return "<cycle>" end
+    seen[v] = true
+    local parts = {}
+    for k, x in pairs(v) do parts[#parts + 1] = tostring(k) .. "=" .. snapshot(x, seen) end
+    table.sort(parts)
+    seen[v] = nil
+    return "{" .. table.concat(parts, ",") .. "}"
 end
 
 local function refused(name, db, char, wantReason)
@@ -94,7 +91,7 @@ end
 refused("schema 0", { schema = 0, profiles = {} }, nil, "schema 0")
 refused("schema -1", { schema = -1 }, nil, "schema -1")
 refused("schema 0.5", { schema = 0.5 }, nil, "schema 0.5")
-refused("string schema", { schema = "1" }, nil, "schema 1")
+refused("string schema", { schema = "1" }, nil, 'schema "1" (string)')
 -- Populated but unschemed: not a fresh start.
 refused("no schema, data", { profiles = { p1 = {} } }, nil, "has data but no schema")
 -- Malformed roots and fields are refused, never replaced with {}.
@@ -110,6 +107,15 @@ do
     local A = load({}, nil)
     check("empty DB: usable", A.disabled == nil)
     eq("empty DB: schema stamped", AltStableSyncDB.schema, 1)
+end
+
+-- /altsync before our ADDON_LOADED: a clear message, not a nil index.
+do
+    WoW.reset()
+    assert(loadfile("Core.lua"))("AltStableSync", {})
+    local ok, err = pcall(AltStableSync.SlashHandler, "status")
+    check("slash before init: no error", ok, tostring(err))
+    check("slash before init: says so", anyLine("not initialised"))
 end
 
 -- ADDON_LOADED for another addon does nothing.
@@ -144,5 +150,4 @@ do
     check("help line", anyLine("commands:"))
 end
 
-print(("test_core: %d passed, %d failed"):format(passed, failed))
-os.exit(failed == 0 and 0 or 1)
+finish("test_core")

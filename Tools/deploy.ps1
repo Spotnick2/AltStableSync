@@ -41,7 +41,10 @@ foreach ($line in Get-Content -LiteralPath (Join-Path $RepoRoot ".pkgmeta")) {
     if ($line -match '^\S') { $inBlock = $false }
     if ($inBlock -and $line -match '^\s+(commit|tag):\s*(\S+)\s*$') { $pin = $Matches[2]; break }
 }
-if ($pin) {
+if (-not $pin) {
+    # A reformatted .pkgmeta must not switch the pin check off silently.
+    Write-Host "  WARNING: could not read the LibGlass pin from .pkgmeta - the checkout was not checked against it" -ForegroundColor Yellow
+} else {
     $want = $null; $head = $null; $dirty = $null
     try {
         $want = (git -C $glassRoot rev-parse --verify --quiet "$pin^{commit}" 2>$null)
@@ -93,9 +96,14 @@ foreach ($item in $leftovers) {
 
 # @project-version@ is substituted in the DEPLOYED copy only. Never commit a
 # literal version over the keyword (it has happened twice on sibling projects).
-$rev = $null
-try { $rev = (git -C $RepoRoot rev-parse --short HEAD 2>$null) } catch { $rev = $null }
-$label = if ($rev) { "dev-$rev" } else { "dev" }
+$rev = $null; $dirty = $null
+try {
+    $rev = (git -C $RepoRoot rev-parse --short HEAD 2>$null)
+    $dirty = (git -C $RepoRoot status --porcelain 2>$null)
+} catch { $rev = $null }
+# -dirty: the deployed code is not that commit, so an in-game check must not
+# be recorded against it.
+$label = if ($rev) { "dev-$rev$(if ($dirty) { '-dirty' })" } else { "dev" }
 $toc = Join-Path $dest "$Addon.toc"
 (Get-Content $toc -Raw).Replace('@project-version@', $label) | Set-Content $toc -NoNewline
 Write-Host "  version -> $label (deployed copy only)" -ForegroundColor DarkGray

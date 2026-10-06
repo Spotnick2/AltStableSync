@@ -6,11 +6,7 @@
 -- packager keyword (it has happened twice on sibling projects), is caught here.
 ------------------------------------------------------------
 
-local passed, failed = 0, 0
-local function check(name, ok, detail)
-    if ok then passed = passed + 1
-    else failed = failed + 1; print("  FAIL: " .. name .. (detail and ("  -- " .. detail) or "")) end
-end
+dofile("tests/harness.lua")
 
 local function read(path)
     local h = io.open(path, "rb")
@@ -73,5 +69,4 @@ for _, dir in ipairs({ "docs", "tests", "Tools", ".claude", ".github" }) do
     check(".pkgmeta ignores " .. dir, pkg:find("\n  %- " .. dir:gsub("%.", "%%.") .. "\r?\n") ~= nil)
 end
 
-print(("test_packaging: %d passed, %d failed"):format(passed, failed))
-os.exit(failed == 0 and 0 or 1)
+finish("test_packaging")

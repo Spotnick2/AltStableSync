@@ -66,6 +66,9 @@ land).
 - `Libs/LibGlass-1.0/` — the glass material, a `.pkgmeta` external pinned to a tag, **gitignored**,
   deployed from `..\LibGlass` by `Tools/deploy.ps1`. Material changes are LibGlass PRs, never edits
   here; never edit `..\LibGlass` from this repo's session.
+- `Libs/LibStub/` — vendored on purpose although LibGlass's XML brings its own: LibAccountSync
+  (#18) and any non-LibGlass library must not depend on LibGlass's load order to find LibStub.
+  LibStub's version guard makes the second copy a no-op.
 - `Libs/LibAccountSync-1.0/` — joins with #18 (cross-account sync), same embedding rules. It
   **cannot** carry beta → live: project and region are part of its proof, by design.
 - `tests/` — Lua 5.1 unit tests. `Tools/` — deploy and transfer scripts (never ship).

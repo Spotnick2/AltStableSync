@@ -18,7 +18,7 @@ local ASS = AltStableSync
 local ADDON_NAME = "AltStableSync"
 
 -- The schema this build reads and writes. A DB with a NEWER schema came from a
--- newer AltStableSync: refuse it and touch nothing (DESIGN.md "Safety model").
+-- newer AltStableSync: refuse it and touch nothing (AGENTS.md safety rule 8).
 -- No migration framework until a real change needs one.
 local SCHEMA = 1
 ASS.SCHEMA = SCHEMA
@@ -27,6 +27,10 @@ ASS.SCHEMA = SCHEMA
 -- build says so once at login (see the client-update skill).
 local MEASURED_ON_BUILD = "70235"
 ASS.MEASURED_ON_BUILD = MEASURED_ON_BUILD
+
+-- The DB fields that must be tables. One list serves both the validation and
+-- the defaults, so a new field can't get a default without a type check.
+local DB_TABLES = { "profiles", "backups" }
 
 local PREFIX = "|cff00ccff[AltStableSync]|r "
 
@@ -54,11 +58,14 @@ local function Validate(db, char)
         if db.schema == nil then
             if next(db) ~= nil then return "AltStableSyncDB has data but no schema" end
         elseif db.schema ~= SCHEMA then
-            return "saved data has schema " .. tostring(db.schema)
+            -- %q, so a string "1" reads as "1" (string), never as a match.
+            local shown = type(db.schema) == "number" and tostring(db.schema)
+                or ("%q (%s)"):format(tostring(db.schema), type(db.schema))
+            return "saved data has schema " .. shown
                 .. ", this build reads " .. SCHEMA
                 .. (type(db.schema) == "number" and db.schema > SCHEMA and " - update AltStableSync" or "")
         end
-        for _, field in ipairs({ "profiles", "backups" }) do
+        for _, field in ipairs(DB_TABLES) do
             if db[field] ~= nil and type(db[field]) ~= "table" then
                 return "AltStableSyncDB." .. field .. " is a " .. type(db[field]) .. ", not a table"
             end
@@ -84,8 +91,7 @@ local function InitSavedVariables()
     AltStableSyncChar = AltStableSyncChar or {}
     local db = AltStableSyncDB
     db.schema = db.schema or SCHEMA
-    db.profiles = db.profiles or {}
-    db.backups = db.backups or {}
+    for _, field in ipairs(DB_TABLES) do db[field] = db[field] or {} end
     ASS.db = db
     ASS.char = AltStableSyncChar
     return true
@@ -117,6 +123,10 @@ local function SlashHandler(msg)
     local cmd = (msg or ""):match("^%s*(%S*)"):lower()
     if ASS.disabled then
         Print("disabled: " .. ASS.disabled)
+        return
+    end
+    if not ASS.db then
+        Print("not initialised yet (SavedVariables not loaded)")
         return
     end
     if cmd == "" or cmd == "status" then

@@ -29,4 +29,5 @@ canonical `C:\Projects\References\PORTING-TBC-TO-FOREVER.md`, not here.
 Spec/talent APIs, `GetActionInfo` shapes, rank → family mapping, macro persistence across a full
 restart, binding-set behaviour and persistence, login readiness event order, Edit Mode round-trip,
 CVar persistence, `WOW_PROJECT_ID` / region for the flavour fingerprint. Results land below as
-`## Measured on <build>` sections.
+`## Build <version>.<build>` sections, each with the exact `/run` lines used, so a client update can
+re-run them (see the client-update skill).
