@@ -198,32 +198,47 @@ end
 -- ranks: low-rank flags and base-spell mapping
 ----------------------------------------------------------------------------
 
-function P.ranks()
-    Section("ranks  (IsSpellBookItemLowRank / GetBaseSpell / FindBaseSpellByID)")
-    local book = SpellBook()
-    Record(("%-44s %d items"):format("player spellbook", #book))
-    local byName, shown = {}, 0
-    for _, e in ipairs(book) do
-        local name = e.info.name
-        if name then byName[name] = (byName[name] or 0) + 1 end
-    end
-    for _, e in ipairs(book) do
-        local info = e.info
-        local okL, low = pcall(C_SpellBook.IsSpellBookItemLowRank, e.index, BANK)
-        local multi = info.name and byName[info.name] and byName[info.name] > 1
-        if (multi or (okL and low)) and shown < 12 and info.spellID then
-            shown = shown + 1
-            Record(("%-44s id=%s sub=%s lowRank=%s passive=%s"):format(
-                "#" .. e.index .. " " .. tostring(info.name), ValStr(info.spellID), ValStr(info.subName),
-                okL and ValStr(low) or "THREW", ValStr(info.isPassive)))
-            Call("  C_Spell.GetBaseSpell(id)", C_Spell.GetBaseSpell, info.spellID)
-            Call("  FindBaseSpellByID(id)", FindBaseSpellByID, info.spellID)
-            Call("  C_Spell.GetOverrideSpell(id)", C_Spell.GetOverrideSpell, info.spellID)
-            Call("  C_SpellBook.FindSpellBookSlotForSpell(id)", C_SpellBook.FindSpellBookSlotForSpell, info.spellID)
-            Call("  C_Spell.GetSpellSubtext(id)", C_Spell.GetSpellSubtext, info.spellID)
+-- Castable player spells grouped by name, each group's entries carrying the
+-- client's own low-rank flag. Book order is NOT assumed to be rank order.
+local function RankGroups()
+    local groups, order = {}, {}
+    for _, e in ipairs(SpellBook()) do
+        local i = e.info
+        if i.spellID and i.name and not i.isPassive then
+            local okL, low = pcall(C_SpellBook.IsSpellBookItemLowRank, e.index, BANK)
+            local g = groups[i.name]
+            if not g then g = {}; groups[i.name] = g; order[#order + 1] = i.name end
+            local dup = false
+            for _, x in ipairs(g) do if x.id == i.spellID then dup = true end end
+            if not dup then
+                g[#g + 1] = { id = i.spellID, index = e.index, sub = i.subName, low = okL and low or nil, lowOk = okL }
+            end
         end
     end
-    if shown == 0 then Record("no multi-rank spells in this spellbook - try a character above level ~10") end
+    local multi = {}
+    for _, name in ipairs(order) do
+        if #groups[name] > 1 then multi[#multi + 1] = { name = name, ranks = groups[name] } end
+    end
+    return multi
+end
+
+function P.ranks()
+    Section("ranks  (IsSpellBookItemLowRank / GetBaseSpell / FindBaseSpellByID)")
+    local multi = RankGroups()
+    Record(("%-44s %d"):format("castable spells with >1 rank in the book", #multi))
+    for gi = 1, math.min(#multi, 6) do
+        local g = multi[gi]
+        Record("-- " .. g.name)
+        for _, r in ipairs(g.ranks) do
+            Record(("   id=%-7s sub=%-10s lowRank=%s"):format(tostring(r.id), ValStr(r.sub),
+                r.lowOk and ValStr(r.low) or "THREW"))
+            Call("     C_Spell.GetBaseSpell(id)", C_Spell.GetBaseSpell, r.id)
+            Call("     FindBaseSpellByID(id)", FindBaseSpellByID, r.id)
+            Call("     C_Spell.GetOverrideSpell(id)", C_Spell.GetOverrideSpell, r.id)
+            Call("     C_SpellBook.FindSpellBookSlotForSpell(id)", C_SpellBook.FindSpellBookSlotForSpell, r.id)
+        end
+    end
+    if #multi == 0 then Record("no multi-rank spells in this spellbook - try a character above level ~10") end
 end
 
 ----------------------------------------------------------------------------
@@ -246,27 +261,33 @@ local function readiness()
         okA and tostring(a) or "!", okB and tostring(b) or "!", #SpellBook())
 end
 
+local loginCounts, loginSaved = {}, false
 loginFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 ~= ADDON then return end
-    local n = 0
-    for _, l in ipairs(loginLog) do if l.event == event then n = n + 1 end end
-    if n == 0 then
-        loginLog[#loginLog + 1] = { event = event, ms = math.floor((debugprofilestop() - loginT0) + 0.5),
-                                    arg = arg1 ~= nil and tostring(arg1) or nil, state = readiness() }
-    elseif n == 1 then
-        loginLog[#loginLog + 1] = { event = event .. " (again; later repeats not logged)",
-                                    ms = math.floor((debugprofilestop() - loginT0) + 0.5) }
+    local n = (loginCounts[event] or 0) + 1
+    loginCounts[event] = n
+    local ms = math.floor((debugprofilestop() - loginT0) + 0.5)
+    if n == 1 then
+        loginLog[#loginLog + 1] = { event = event, ms = ms, arg = arg1 ~= nil and tostring(arg1) or nil, state = readiness() }
+    elseif n == 2 then
+        loginLog[#loginLog + 1] = { event = event .. " #2 (later repeats only counted)", ms = ms, state = readiness() }
     end
     if event == "ADDON_LOADED" then
         local db, cdb = DB(), CharDB()
         db.loadCount = (db.loadCount or 0) + 1
         cdb.loadCount = (cdb.loadCount or 0) + 1
-    elseif event == "PLAYER_ENTERING_WORLD" then
-        -- The log so far, kept for reading off disk (last 5 logins).
+    elseif event == "PLAYER_ENTERING_WORLD" and not loginSaved then
+        -- One copy of the startup log per addon load, 5 s after entering the
+        -- world, kept for reading off disk (last 5 loads).
+        loginSaved = true
         C_Timer.After(5, function()
+            local copy = {}
+            for i, l in ipairs(loginLog) do copy[i] = l end
+            local counts = {}
+            for k, v in pairs(loginCounts) do counts[k] = v end
             local cdb = CharDB()
             cdb.logins = cdb.logins or {}
-            table.insert(cdb.logins, { at = Stamp(), build = Build(), log = loginLog })
+            table.insert(cdb.logins, { at = Stamp(), build = Build(), log = copy, counts = counts })
             while #cdb.logins > 5 do table.remove(cdb.logins, 1) end
         end)
     end
@@ -277,6 +298,10 @@ function P.login()
     for _, l in ipairs(loginLog) do
         Record(("%7d ms  %-34s %s %s"):format(l.ms, l.event, l.arg and ("arg=" .. l.arg) or "", l.state or ""))
     end
+    local parts = {}
+    for k, v in pairs(loginCounts) do parts[#parts + 1] = k .. "=" .. v end
+    table.sort(parts)
+    Record("event counts: " .. table.concat(parts, "  "))
     Record("now: " .. readiness())
     Record("(only meaningful after a fresh login or /reload)")
 end
@@ -286,7 +311,9 @@ end
 ----------------------------------------------------------------------------
 
 function P.editmode()
-    Section("editmode  (ConvertLayoutInfoToString round trip)")
+    -- Codec stability only: this does NOT prove SaveLayouts persists an
+    -- imported layout (that is #15's job, not a read-only probe's).
+    Section("editmode  (string codec round trip - codec only, no SaveLayouts)")
     if not C_EditMode then Record("C_EditMode ABSENT"); return end
     local ok, layouts = pcall(C_EditMode.GetLayouts)
     if not ok or type(layouts) ~= "table" then Record("GetLayouts THREW " .. tostring(layouts)); return end
@@ -303,6 +330,9 @@ function P.editmode()
     local okB, back = pcall(C_EditMode.ConvertStringToLayoutInfo, s)
     if not okB or type(back) ~= "table" then Record("ConvertStringToLayoutInfo THREW " .. tostring(back)); return end
     Record(("%-44s name=%s type=%s systems=%d"):format("ConvertStringToLayoutInfo", ValStr(back.layoutName), ValStr(back.layoutType), #(back.systems or {})))
+    Record(("%-44s name %s, type %s, systems %s"):format("decoded vs original",
+        tostring(back.layoutName == info.layoutName), tostring(back.layoutType == info.layoutType),
+        tostring(#(back.systems or {}) == #(info.systems or {}))))
     local okR, s2 = pcall(C_EditMode.ConvertLayoutInfoToString, back)
     Record(("%-44s %s"):format("re-encode identical", okR and tostring(s2 == s) or ("THREW " .. tostring(s2))))
 end
@@ -342,9 +372,11 @@ function P.encoding()
     if not okB then Record("EncodeBase64 THREW " .. tostring(b64)); return end
     local t1 = debugprofilestop()
     Record(("%-44s cbor=%d deflate=%d base64=%d bytes, %.1f ms"):format("encode", #cbor, #z, #b64, t1 - t0))
+    -- Explicit ifs: `ok and pcall(...)` keeps only pcall's FIRST result.
     local okD, raw = pcall(E.DecodeBase64, b64)
-    local okU, unz = okD and pcall(E.DecompressString, raw)
-    local okX, back = okU and pcall(E.DeserializeCBOR, unz)
+    local okU, unz, okX, back = false, nil, false, nil
+    if okD then okU, unz = pcall(E.DecompressString, raw) end
+    if okU then okX, back = pcall(E.DeserializeCBOR, unz) end
     Record(("%-44s decode=%s decompress=%s deserialize=%s"):format("decode", tostring(okD), tostring(okU), tostring(okX)))
     Record(("%-44s %s"):format("round trip deep-equal", tostring(okX and DeepEqual(profile, back))))
     if okX and type(back) == "table" and type(back.actions) == "table" then
@@ -362,167 +394,261 @@ local slotFrame = CreateFrame("Frame")
 pcall(slotFrame.RegisterEvent, slotFrame, "ACTIONBAR_SLOT_CHANGED")
 slotFrame:SetScript("OnEvent", function(_, _, slot) slotEvents[#slotEvents + 1] = slot end)
 
+local function SlotEmpty(slot)
+    local ok, a = pcall(GetActionInfo, slot)
+    return ok and a == nil
+end
+
+local function CursorSpell()
+    local ok, kind, a, b, c = pcall(GetCursorInfo)
+    if not ok then return nil end
+    -- GetCursorInfo's spell tuple: "spell", spellIndex, bookType, spellID.
+    return kind, a, b, c
+end
+
 function P.place()
-    Section("place  (write one EMPTY slot, read back, clear)")
+    Section("place  (write one EMPTY slot, verify, remove only what we placed)")
     if InCombatLockdown() then Record("out of combat only"); return end
     if GetCursorInfo() then Record("cursor is not empty - put it down and rerun"); return end
     local slot
     for s = 1, 120 do
-        local ok, a = pcall(GetActionInfo, s)
-        if ok and a == nil then slot = s; break end
+        if SlotEmpty(s) then slot = s; break end
     end
     if not slot then Record("no empty slot in 1-120 - clear one and rerun"); return end
-    -- The lowest known rank of a multi-rank, non-passive spell, so we also see
-    -- whether a LOW rank stays low when placed.
-    local pick, seen = nil, {}
-    for _, e in ipairs(SpellBook()) do
-        local i = e.info
-        if i.spellID and not i.isPassive and i.name then
-            if seen[i.name] and not pick then pick = seen[i.name] end
-            seen[i.name] = seen[i.name] or i
+    -- A spell the client itself flags as a LOW rank, so we also see whether a
+    -- low rank stays low when placed. Falls back to any castable spell.
+    local pick, top
+    for _, g in ipairs(RankGroups()) do
+        for _, r in ipairs(g.ranks) do
+            if r.low and not pick then pick = { id = r.id, name = g.name, sub = r.sub }; top = g.ranks end
         end
     end
     if not pick then
         for _, e in ipairs(SpellBook()) do
-            if e.info.spellID and not e.info.isPassive then pick = e.info; break end
+            if e.info.spellID and not e.info.isPassive then
+                pick = { id = e.info.spellID, name = e.info.name, sub = e.info.subName }; break
+            end
         end
     end
     if not pick then Record("no castable spell in the spellbook"); return end
-    Record(("%-44s slot %d, spell %s %q %s"):format("target", slot, pick.spellID, pick.name, tostring(pick.subName)))
+    Record(("%-44s slot %d, spell %s %q %s"):format("target", slot, pick.id, tostring(pick.name), tostring(pick.sub)))
+    if top then
+        local ids = {}
+        for _, r in ipairs(top) do ids[#ids + 1] = r.id .. (r.low and "(low)" or "") end
+        Record(("%-44s %s"):format("ranks of this spell in the book", table.concat(ids, " ")))
+    end
     local mark, ev0 = #blocked, #slotEvents
-    Call("C_Spell.PickupSpell(id)", C_Spell.PickupSpell, pick.spellID)
+
+    Call("C_Spell.PickupSpell(id)", C_Spell.PickupSpell, pick.id)
     Call("GetCursorInfo() after pickup", GetCursorInfo)
+    if CursorSpell() ~= "spell" then
+        ClearCursor()
+        Record("pickup did not put a spell on the cursor - stopped, nothing written")
+        return
+    end
+    if not SlotEmpty(slot) then
+        ClearCursor()
+        Record("slot " .. slot .. " is no longer empty - stopped, nothing written")
+        return
+    end
     Call("PlaceAction(slot)", PlaceAction, slot)
     Call("GetCursorInfo() after place", GetCursorInfo)
+    local leftover = GetCursorInfo()
     ClearCursor()
     Call("GetActionInfo(slot) after place", GetActionInfo, slot)
     Call("C_ActionBar.GetSpell(slot)", C_ActionBar and C_ActionBar.GetSpell, slot)
-    -- Clear it again: pick up what we placed, drop it.
-    Call("PickupAction(slot)", PickupAction, slot)
-    ClearCursor()
-    Call("GetActionInfo(slot) after clear", GetActionInfo, slot)
+
+    -- Remove only if the slot holds exactly what we placed (a spell action).
+    local okA, kind = pcall(GetActionInfo, slot)
+    if okA and kind == "spell" and not leftover then
+        Call("PickupAction(slot)", PickupAction, slot)
+        local ck = CursorSpell()
+        ClearCursor()
+        Record(("%-44s %s"):format("cursor after PickupAction", ValStr(ck)))
+    else
+        Record(("%-44s slot holds %s, cursor held %s - NOT removing"):format("removal skipped", ValStr(kind), ValStr(leftover)))
+    end
+    local clean = SlotEmpty(slot)
+    Record(("%-44s %s"):format("slot " .. slot .. " empty again", clean and "yes" or "NO - drag it off by hand"))
+
     C_Timer.After(0.5, function()
         local evs = {}
         for i = ev0 + 1, #slotEvents do evs[#evs + 1] = tostring(slotEvents[i]) end
         Record(("%-44s %s"):format("ACTIONBAR_SLOT_CHANGED payloads", #evs > 0 and table.concat(evs, ",") or "none"))
         Record(("%-44s %s"):format("ADDON_ACTION_BLOCKED/FORBIDDEN", TaintSince(mark)))
-        Record("If the slot is not empty now, drag it off by hand. Then /reload and play a minute: any taint?")
+        Record("Then /reload and play a minute: any taint?")
     end)
 end
 
 ----------------------------------------------------------------------------
--- Restart tests: macro, binding, CVar. Each writes a marker; /syncprobe
--- restart reads it after a FULL EXIT; /syncprobe clean undoes it.
+-- Restart tests: macro, binding, CVar. Each records a marker ONLY after the
+-- write is verified; /syncprobe restart reads it after a FULL EXIT;
+-- /syncprobe clean undoes only what the probe recorded, verifies each undo,
+-- and keeps the record of anything it could not undo.
 ----------------------------------------------------------------------------
 
 local MACRO_NAME = "SyncProbe"
 local MACRO_BODY = ("/run -- AltStableSyncProbe 256-char body test, safe to delete " .. ("x"):rep(256)):sub(1, 255)
 local BIND_KEY, BIND_CMD = "CTRL-SHIFT-F11", "TOGGLEAUTORUN"
 local CVAR = "cameraDistanceMaxZoomFactor"
+local FIRST_CHAR_MACRO = 121   -- measured (Stakeout, 69977)
 
+-- Character-scope macros only, exact name AND body.
 local function FindProbeMacro()
-    for i = 1, 200 do
-        local ok, name, _, body = pcall(GetMacroInfo, i)
-        if ok and name == MACRO_NAME and type(body) == "string" and body:find("AltStableSyncProbe", 1, true) then
-            return i, body
-        end
+    local ok, _, nChar = pcall(GetNumMacros)
+    if not ok or type(nChar) ~= "number" then return nil end
+    for i = FIRST_CHAR_MACRO, FIRST_CHAR_MACRO + nChar - 1 do
+        local okI, name, _, body = pcall(GetMacroInfo, i)
+        if okI and name == MACRO_NAME and body == MACRO_BODY then return i, body end
     end
+end
+
+local function AnyMacroNamed(name)
+    for i = 1, 200 do
+        local ok, n = pcall(GetMacroInfo, i)
+        if ok and n == name then return i end
+    end
+end
+
+local function IsCharacterSet()
+    local ok, set = pcall(GetCurrentBindingSet)
+    return ok and Enum and Enum.BindingSet and set == Enum.BindingSet.Character
 end
 
 function P.macro()
     Section("macro  (character macro, 255-char body)")
     if InCombatLockdown() then Record("out of combat only"); return end
-    local idx = FindProbeMacro()
-    if idx then Record("probe macro already exists at index " .. idx .. " - run /syncprobe restart after a full exit") return end
+    local cdb = CharDB()
+    if cdb.macroOwned then Record("probe macro already created - run /syncprobe restart after a full exit"); return end
+    local clash = AnyMacroNamed(MACRO_NAME)
+    if clash then Record("a macro named " .. MACRO_NAME .. " already exists (index " .. clash .. ") - not touching it"); return end
     local mark = #blocked
     Call("GetNumMacros() before", GetNumMacros)
     Call("CreateMacro(name, icon, body, true)", CreateMacro, MACRO_NAME, "INV_Misc_QuestionMark", MACRO_BODY, true)
-    local i2, body = FindProbeMacro()
-    Record(("%-44s index=%s bodyLen=%s"):format("read back", ValStr(i2), ValStr(body and #body)))
+    local idx, body = FindProbeMacro()
+    Record(("%-44s index=%s bodyLen=%s"):format("read back (character scope)", ValStr(idx), ValStr(body and #body)))
     Record(("%-44s %s"):format("taint", TaintSince(mark)))
-    CharDB().macroMarkedAt = Stamp()
-    Record("now EXIT THE GAME FULLY, relaunch, log this character in, /syncprobe restart")
+    if not idx then Record("create NOT verified - no marker recorded"); return end
+    cdb.macroOwned, cdb.macroMarkedAt = true, Stamp()
+    Record("armed. EXIT THE GAME FULLY, relaunch, log this character in, /syncprobe restart")
 end
 
 function P.bind()
     Section("bind  (CHARACTER binding set only)")
     if InCombatLockdown() then Record("out of combat only"); return end
-    local ok, set = pcall(GetCurrentBindingSet)
-    Record(("%-44s %s"):format("GetCurrentBindingSet()", ok and ValStr(set) or "THREW"))
-    if not (Enum and Enum.BindingSet and set == Enum.BindingSet.Character) then
+    local cdb = CharDB()
+    Call("GetCurrentBindingSet()", GetCurrentBindingSet)
+    if not IsCharacterSet() then
         Record("This character uses ACCOUNT bindings. The probe will not switch modes for you.")
         Record("To test: Options > Keybindings > tick 'Character Specific Key Bindings', then rerun.")
         return
     end
+    if cdb.bindOwned then Record("probe binding already armed - run /syncprobe restart after a full exit"); return end
     local okA, current = pcall(GetBindingAction, BIND_KEY)
-    if okA and current and current ~= "" and current ~= BIND_CMD then
+    if not okA then Record("GetBindingAction THREW - not touching bindings"); return end
+    if current and current ~= "" then
         Record(BIND_KEY .. " is already bound to " .. current .. " - not touching it")
         return
     end
     local mark = #blocked
     Call("SetBinding(key, cmd)", SetBinding, BIND_KEY, BIND_CMD)
     Call("SaveBindings(Enum.BindingSet.Character)", SaveBindings, Enum.BindingSet.Character)
-    Call("GetBindingAction(key) after", GetBindingAction, BIND_KEY)
+    local okB, after = pcall(GetBindingAction, BIND_KEY)
+    Record(("%-44s %s"):format("GetBindingAction(key) after", okB and ValStr(after) or "THREW"))
     Call("GetCurrentBindingSet() after", GetCurrentBindingSet)
     Record(("%-44s %s"):format("taint", TaintSince(mark)))
-    CharDB().bindMarkedAt = Stamp()
-    Record("now EXIT THE GAME FULLY, relaunch, log this character in, /syncprobe restart")
+    if not (okB and after == BIND_CMD) then Record("binding NOT verified - no marker recorded"); return end
+    cdb.bindOwned, cdb.bindMarkedAt = true, Stamp()
+    Record("armed. EXIT THE GAME FULLY, relaunch, log this character in, /syncprobe restart")
 end
 
+-- A CVar can be account- or character-stored, so one test at a time,
+-- recorded account-wide.
 function P.cvar()
     Section("cvar  (marker for a full-exit restart test)")
-    local ok, cur = pcall(C_CVar.GetCVar, CVAR)
+    local db = DB()
+    if db.cvarTest then
+        Record("a CVar test is already armed by " .. tostring(db.cvarTest.char) .. " - /syncprobe restart, then clean, first")
+        return
+    end
     Call("C_CVar.GetCVarInfo(" .. CVAR .. ")", C_CVar.GetCVarInfo, CVAR)
-    local db = CharDB()
-    if db.cvarOriginal == nil then db.cvarOriginal = ok and cur or false end
+    local ok, cur = pcall(C_CVar.GetCVar, CVAR)
+    if not ok or type(cur) ~= "string" then Record("cannot read the original value - not writing"); return end
     local marker = (cur == "1.5") and "1.6" or "1.5"
     Call("C_CVar.SetCVar(" .. CVAR .. ", " .. marker .. ")", C_CVar.SetCVar, CVAR, marker)
-    db.cvarMarker, db.cvarMarkedAt = marker, Stamp()
-    Record("now EXIT THE GAME FULLY, relaunch, log this character in, /syncprobe restart")
+    local okR, now = pcall(C_CVar.GetCVar, CVAR)
+    if not (okR and now == marker) then
+        pcall(C_CVar.SetCVar, CVAR, cur)
+        Record("write NOT verified (read back " .. tostring(now) .. ") - restored, no marker recorded")
+        return
+    end
+    db.cvarTest = { original = cur, marker = marker, at = Stamp(), char = UnitName("player") }
+    Record("armed (original " .. cur .. "). EXIT THE GAME FULLY, relaunch, log in, /syncprobe restart")
 end
 
 function P.restart()
     Section("restart  (run after a FULL EXIT, not /reload)")
     local db, cdb = DB(), CharDB()
     Record(("%-44s account %s, character %s"):format("probe SV loadCount", ValStr(db.loadCount), ValStr(cdb.loadCount)))
-    if cdb.macroMarkedAt then
+    if cdb.macroOwned then
         local idx, body = FindProbeMacro()
-        Record(("%-44s marked %s -> index=%s bodyLen=%s"):format("macro survived?", cdb.macroMarkedAt, ValStr(idx), ValStr(body and #body)))
+        Record(("%-44s armed %s -> index=%s bodyLen=%s"):format("macro survived?", tostring(cdb.macroMarkedAt), ValStr(idx), ValStr(body and #body)))
     end
-    if cdb.bindMarkedAt then
+    if cdb.bindOwned then
         local ok, act = pcall(GetBindingAction, BIND_KEY)
         local okS, set = pcall(GetCurrentBindingSet)
-        Record(("%-44s marked %s -> %s=%s set=%s"):format("binding survived?", cdb.bindMarkedAt, BIND_KEY,
+        Record(("%-44s armed %s -> %s=%s set=%s"):format("binding survived?", tostring(cdb.bindMarkedAt), BIND_KEY,
             ok and ValStr(act) or "THREW", okS and ValStr(set) or "THREW"))
     end
-    if cdb.cvarMarkedAt then
+    if db.cvarTest then
         local ok, v = pcall(C_CVar.GetCVar, CVAR)
-        Record(("%-44s marked %s -> %s=%s (marker %s)"):format("cvar survived?", cdb.cvarMarkedAt, CVAR,
-            ok and ValStr(v) or "THREW", ValStr(cdb.cvarMarker)))
+        Record(("%-44s armed %s by %s -> %s=%s (marker %s, original %s)"):format("cvar survived?", db.cvarTest.at,
+            tostring(db.cvarTest.char), CVAR, ok and ValStr(v) or "THREW", db.cvarTest.marker, db.cvarTest.original))
     end
-    if not (cdb.macroMarkedAt or cdb.bindMarkedAt or cdb.cvarMarkedAt) then
-        Record("no markers on this character - run /syncprobe macro | bind | cvar first")
+    if not (cdb.macroOwned or cdb.bindOwned or db.cvarTest) then
+        Record("nothing armed - run /syncprobe macro | bind | cvar first")
     end
     Record("Proof needs a FULL EXIT: say so when you paste this, or it proves nothing.")
 end
 
 function P.clean()
-    Section("clean")
+    Section("clean  (undo only what the probe recorded; verify each)")
     if InCombatLockdown() then Record("out of combat only"); return end
-    local cdb = CharDB()
-    local idx = FindProbeMacro()
-    if idx then Call("DeleteMacro(" .. idx .. ")", DeleteMacro, idx) end
-    local ok, act = pcall(GetBindingAction, BIND_KEY)
-    if ok and act == BIND_CMD and Enum and Enum.BindingSet and GetCurrentBindingSet() == Enum.BindingSet.Character then
-        Call("SetBinding(key, nil)", SetBinding, BIND_KEY)
-        Call("SaveBindings(Character)", SaveBindings, Enum.BindingSet.Character)
+    local db, cdb = DB(), CharDB()
+    local left = {}
+
+    if cdb.macroOwned then
+        local idx = FindProbeMacro()
+        if idx then Call("DeleteMacro(" .. idx .. ")", DeleteMacro, idx) end
+        if FindProbeMacro() then left[#left + 1] = "macro (still present)"
+        else cdb.macroOwned, cdb.macroMarkedAt = nil, nil end
     end
-    if cdb.cvarOriginal ~= nil then
-        if cdb.cvarOriginal ~= false then Call("C_CVar.SetCVar restore", C_CVar.SetCVar, CVAR, cdb.cvarOriginal) end
-        cdb.cvarOriginal = nil
+
+    if cdb.bindOwned then
+        local ok, act = pcall(GetBindingAction, BIND_KEY)
+        if not IsCharacterSet() then
+            left[#left + 1] = "binding (character set not active - re-enable it, then clean)"
+        elseif ok and act == BIND_CMD then
+            Call("SetBinding(key, nil)", SetBinding, BIND_KEY)
+            Call("SaveBindings(Character)", SaveBindings, Enum.BindingSet.Character)
+            local ok2, act2 = pcall(GetBindingAction, BIND_KEY)
+            if ok2 and (act2 == nil or act2 == "") then cdb.bindOwned, cdb.bindMarkedAt = nil, nil
+            else left[#left + 1] = "binding (still " .. tostring(act2) .. ")" end
+        else
+            -- Not ours any more (the player rebound it): forget, don't touch.
+            Record(BIND_KEY .. " now holds " .. tostring(act) .. " - left alone")
+            cdb.bindOwned, cdb.bindMarkedAt = nil, nil
+        end
     end
-    cdb.macroMarkedAt, cdb.bindMarkedAt, cdb.cvarMarkedAt, cdb.cvarMarker = nil, nil, nil, nil
-    Record("done")
+
+    if db.cvarTest then
+        Call("C_CVar.SetCVar restore", C_CVar.SetCVar, CVAR, db.cvarTest.original)
+        local ok, v = pcall(C_CVar.GetCVar, CVAR)
+        if ok and v == db.cvarTest.original then db.cvarTest = nil
+        else left[#left + 1] = "cvar (reads " .. tostring(v) .. ", original " .. db.cvarTest.original .. ")" end
+    end
+
+    Record(#left == 0 and "done - everything undone" or ("NOT done: " .. table.concat(left, "; ")))
 end
 
 ----------------------------------------------------------------------------
@@ -590,11 +716,16 @@ SlashCmdList.ALTSTABLESYNCPROBE = function(msg)
     local cmd = ((msg or ""):match("^%s*(%S*)") or ""):lower()
     if cmd == "copy" then ShowCopy(); return end
     lines = {}
+    -- Each section protected: one error must not lose the rest of the run.
+    local function Run(name)
+        local ok, err = pcall(P[name])
+        if not ok then Record("|cffff5555SECTION " .. name .. " ERRORED:|r " .. tostring(err)) end
+    end
     if cmd == "" or cmd == "all" then
-        for _, name in ipairs(READ_ONLY) do P[name]() end
+        for _, name in ipairs(READ_ONLY) do Run(name) end
         cmd = "all"
     elseif P[cmd] then
-        P[cmd]()
+        Run(cmd)
     else
         Out("/syncprobe [client|actions|ranks|login|editmode|encoding] | place | macro | bind | cvar | restart | clean | copy")
         return
