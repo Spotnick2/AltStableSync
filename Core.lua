@@ -39,23 +39,53 @@ ASS.Print = Print
 -- SavedVariables
 ------------------------------------------------------------
 
--- Returns true when the DB is usable. On a newer schema the addon disables
--- itself for the session (ASS.disabled holds the reason) and leaves the
--- tables exactly as loaded, so the newer build that wrote them gets them back.
-local function InitSavedVariables()
-    if type(AltStableSyncDB) ~= "table" then AltStableSyncDB = {} end
-    if type(AltStableSyncChar) ~= "table" then AltStableSyncChar = {} end
-    local db = AltStableSyncDB
+-- Why the loaded SavedVariables can't be used, or nil when they can. Pure:
+-- it inspects and never assigns, so a refusal leaves every table exactly as
+-- loaded and the client writes them back unchanged.
+local function Validate(db, char)
+    if db ~= nil then
+        if type(db) ~= "table" then
+            return "AltStableSyncDB is a " .. type(db) .. ", not a table"
+        end
+        -- Only the schema this build knows. A newer one came from a newer
+        -- AltStableSync; anything else (0, 0.5, "1") is not ours to guess at.
+        -- A populated table with no schema is foreign too: only an EMPTY one
+        -- is a fresh start.
+        if db.schema == nil then
+            if next(db) ~= nil then return "AltStableSyncDB has data but no schema" end
+        elseif db.schema ~= SCHEMA then
+            return "saved data has schema " .. tostring(db.schema)
+                .. ", this build reads " .. SCHEMA
+                .. (type(db.schema) == "number" and db.schema > SCHEMA and " - update AltStableSync" or "")
+        end
+        for _, field in ipairs({ "profiles", "backups" }) do
+            if db[field] ~= nil and type(db[field]) ~= "table" then
+                return "AltStableSyncDB." .. field .. " is a " .. type(db[field]) .. ", not a table"
+            end
+        end
+    end
+    if char ~= nil and type(char) ~= "table" then
+        return "AltStableSyncChar is a " .. type(char) .. ", not a table"
+    end
+    return nil
+end
 
-    if db.schema ~= nil and (type(db.schema) ~= "number" or db.schema > SCHEMA) then
-        ASS.disabled = "saved data has schema " .. tostring(db.schema)
-            .. ", this build reads " .. SCHEMA .. " - update AltStableSync"
+-- Returns true when the DB is usable. Otherwise the addon disables itself for
+-- the session (ASS.disabled holds the reason) WITHOUT touching anything:
+-- validation runs before the first assignment to either SavedVariable.
+local function InitSavedVariables()
+    local problem = Validate(AltStableSyncDB, AltStableSyncChar)
+    if problem then
+        ASS.disabled = problem
         return false
     end
 
+    AltStableSyncDB = AltStableSyncDB or {}
+    AltStableSyncChar = AltStableSyncChar or {}
+    local db = AltStableSyncDB
     db.schema = db.schema or SCHEMA
-    if type(db.profiles) ~= "table" then db.profiles = {} end
-    if type(db.backups) ~= "table" then db.backups = {} end
+    db.profiles = db.profiles or {}
+    db.backups = db.backups or {}
     ASS.db = db
     ASS.char = AltStableSyncChar
     return true
@@ -122,6 +152,7 @@ end)
 
 -- Test seam: file-local internals for tests/, harmless in game.
 ASS._test = {
+    Validate = Validate,
     InitSavedVariables = InitSavedVariables,
     CheckBuild = CheckBuild,
     frame = frame,

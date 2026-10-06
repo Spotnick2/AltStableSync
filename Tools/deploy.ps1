@@ -69,15 +69,24 @@ $excludeDirs = @(
     # Every dot-entry: .git (a FILE in a worktree), .github, .claude, .vscode, ...
     ".*"
 )
-$excludeFiles = @("*.log", "*.zip", "*.md", ".*")
+# Mirror .gitignore's captures too: robocopy doesn't read it, and a pulled
+# SavedVariables capture carries real names, macros and bindings.
+$excludeFiles = @("*.log", "*.zip", "*.md", ".*", "*.sv.lua", "*.bak")
 
 $roboArgs = @($RepoRoot, $dest, "/E", "/NFL", "/NDL", "/NJH", "/NJS", "/NP",
               "/XD") + $excludeDirs + @("/XF") + $excludeFiles
 robocopy @roboArgs | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "robocopy failed (code $LASTEXITCODE)" }
 
-# /E never purges: remove dot-entries an older deploy may have left, and only those.
-foreach ($item in Get-ChildItem -LiteralPath $dest -Force -Filter ".*") {
+# /E never purges: remove what an older deploy may have left that this one
+# excludes - dot-entries, the development folders, captures - and only those,
+# and only inside the addon's own folder.
+$leftovers = @(Get-ChildItem -LiteralPath $dest -Force -Filter ".*") +
+             @(foreach ($d in "Tools", "tests", "docs", "dist") {
+                   Get-Item -LiteralPath (Join-Path $dest $d) -Force -ErrorAction SilentlyContinue }) +
+             @(Get-ChildItem -LiteralPath $dest -Recurse -Force -File -Include "*.sv.lua", "*.bak" -ErrorAction SilentlyContinue)
+foreach ($item in $leftovers) {
+    if (-not $item -or -not (Test-Path -LiteralPath $item.FullName)) { continue }
     Remove-Item -LiteralPath $item.FullName -Recurse -Force
     Write-Host "  removed leftover $($item.Name)" -ForegroundColor DarkYellow
 }

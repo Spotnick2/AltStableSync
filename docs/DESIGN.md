@@ -166,16 +166,21 @@ Lua.
   - **refuses if the live `AltStableSync.lua` already exists**, unless `-Force`, which backs it up to
     `.pre-transfer-<ts>`;
   - copies to a temp file, then moves it into place;
-  - prints source, destination and the profile count.
+  - prints source, destination and size. It never parses the file; the addon reports the profile
+    count after its first load.
 
   On Nov 4 the live file will not exist yet, so this is a plain, safe copy.
 - **In-game, the first load on a new flavour** happens when `origin` ≠ the current project/region/
   build/account. The addon then:
   - wipes `AltStableSyncLAS` *before* LibAccountSync is constructed (it never carries over);
-  - moves every beta backup and character state into `imported.archive` (read-only, never attached
-    to a live GUID);
+  - moves the account-wide beta backups into `imported.archive` (read-only, never attached to a
+    live GUID);
   - keeps the profiles, flagged with build provenance;
   - stamps the new `origin`.
+
+  Per-character state (`AltStableSyncChar`) lives in per-character files the script never copies,
+  so every live character starts with fresh state, with no assignment and `ask` mode. Nothing
+  from a beta character's file is ever read on live.
 - Merging into an existing live install with collisions uses the M2 export string, not the script.
 - **Launch gate.** The first live action is capture-only on one character, then a preview, then a
   manual apply, then a full exit and restart to verify, and only then `ask`/`auto` for the rest.

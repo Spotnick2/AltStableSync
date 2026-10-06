@@ -29,22 +29,41 @@ check("character SV", toc:find("## SavedVariablesPerCharacter: AltStableSyncChar
 check("AltStable is optional, not required", toc:find("## OptionalDeps: AltStable", 1, true) ~= nil
     and not toc:find("## Dependencies:", 1, true))
 
--- Every listed file exists, except the gitignored externals the packager or
--- the deploy script fills in.
-local EXTERNAL = { ["Libs/LibGlass-1.0/"] = true }
-local listed = 0
+local files = {}
 for line in (toc .. "\n"):gmatch("([^\r\n]*)\r?\n") do
-    if line ~= "" and not line:find("^#") then
-        listed = listed + 1
-        local path = line:gsub("\\", "/")
-        local ext = false
-        for prefix in pairs(EXTERNAL) do
-            if path:sub(1, #prefix) == prefix then ext = true end
+    if line ~= "" and not line:find("^#") then files[#files + 1] = line end
+end
+
+-- The runtime entries the addon cannot load without, in this order. The
+-- glass XML comes first (it brings its own LibStub); modules follow Core.lua
+-- as they land, so this is a required subsequence, not the whole list.
+local REQUIRED = {
+    "Libs\\LibGlass-1.0\\LibGlass-1.0.xml",
+    "Libs\\LibStub\\LibStub.lua",
+    "Core.lua",
+}
+do
+    local at = 0
+    for _, want in ipairs(REQUIRED) do
+        local found
+        for i = at + 1, #files do
+            if files[i] == want then found = i; break end
         end
-        if not ext then check("listed file exists: " .. path, read(path) ~= nil) end
+        check("toc lists " .. want .. " in order", found ~= nil)
+        at = found or at
     end
 end
-check("toc lists files", listed > 0)
+
+-- Every listed file exists, except the externals the packager or the deploy
+-- script fills in - and those only at their exact expected path, so a
+-- misspelling can't hide behind the exemption.
+local EXTERNAL = { ["Libs\\LibGlass-1.0\\LibGlass-1.0.xml"] = true }
+for _, line in ipairs(files) do
+    if not EXTERNAL[line] then
+        local path = line:gsub("\\", "/")
+        check("listed file exists: " .. path, read(path) ~= nil)
+    end
+end
 
 -- .pkgmeta: the external is pinned to a tag, never latest, no inline comment.
 local pkg = read(".pkgmeta") or ""
