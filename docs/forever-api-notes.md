@@ -53,7 +53,13 @@ These were measured with `Tools/AltStableSyncProbe` (`/syncprobe`, PR #25). The 
 | Macro | `"macro", 75, "spell"` | `GetMacroInfo(75)` returns nothing |
 
 - **For a macro, the id is the spell the macro shows**, not the macro's index: 75 is Auto Shot. `GetActionText(slot)` returns the macro's **name** (`"AuS"`).
-  - **Consequence:** capture cannot identify a macro slot by its id. A macro whose spell is not learned yet (owner's point) may not report a spell id at all. The follow-up `/run` lines in #25 measure this.
+  - All four macro slots behave this way, including `/Cast Concussive Shot` with no `#showtooltip`, which reports 5116.
+  - **The cursor gives the real index.** `PickupAction(1)` then `GetCursorInfo()` returns `"macro", 122`, the true index. `PlaceAction(1)` puts it back, and it reads `"macro", 75, "spell"` again.
+  - **Consequence for capture (#6):**
+    - Identify a macro slot by `GetActionText(slot)`, which is the macro name and is always readable, whatever spell the macro shows or whether that spell is learned.
+    - Match the name against the macro list.
+    - When a name is duplicated, use the cursor round trip, out of combat, to read the true index.
+    - Never use the action's id.
 - **Macros never wait on a spell.** A macro is placed whether or not its spell is learned; it shows "?" until it is. So applying a profile must never defer a macro slot because a spell is unlearned. Only spell slots and item slots are deferred.
 - Count on one hunter, slots 1–200: 150 empty, 33 spell, 13 item, 4 macro.
 
@@ -74,7 +80,9 @@ There was **no `ADDON_ACTION_BLOCKED`/`FORBIDDEN`** during the run.
 ### Macros
 - `Constants.MacroConsts` = `{MAX_ACCOUNT_MACROS = 120, MAX_CHARACTER_MACROS = 30}`. The `MAX_*_MACROS` globals stay nil, so read the constants.
 - `CreateMacro(name, icon, <255-char body>, true)` returned **125**. The body read back at 255 characters.
-- **After a full exit, no character macro with that exact name and body was found.** It was either lost or changed (the follow-up `/run` in #25 decides which). For comparison, Stakeout measured character macros surviving a logout on 69977, with a shorter body.
+- **The macro survived the full exit, but its body changed from 255 to 256 characters.** Every body the client returns ends in a newline (`"/cast Arcane Shot\n/petattack\n"` is 29 characters), so the server **appends a trailing newline**. The probe's exact-body match missed it for that reason.
+  - **Consequence for #6:** compare macro bodies with trailing newlines normalised. Capture stores the body as the client returns it. Exact restore compares normalised bodies, and the reuse rule (name + body + scope) uses the normalised body.
+  - The 255-character limit is only kept in memory. Whether the server truncates a body that becomes 256 characters with the newline is untested; keep bodies at 254 characters or less.
 
 ### Bindings
 - `GetCurrentBindingSet()` = **2 (Character)** on this character. `Enum.BindingSet = {Default = 0, Account = 1, Character = 2, Current = 3}`. `GetNumBindings()` = 333.
@@ -122,9 +130,8 @@ Event counts: UPDATE_BINDINGS ×5, UPDATE_MACROS ×6, ACTIONBAR_SLOT_CHANGED ×2
 
 ## Still open after the 70245 run
 
-- Was the probe macro lost or changed after the exit? (follow-up `/run` in #25)
-- How do we identify the macro in an action slot, including for a macro whose spell is not learned? (follow-up in #25)
-- Does any taint appear after `/reload` following `place`?
+- Does any taint appear after `/reload` following `place`? (Nothing was reported during the run.)
+- What a macro slot whose spell is unlearned, or that has no spell, reports as its id. **Not needed:** capture uses `GetActionText`, never the id.
 
 ## Originally to measure (#2)
 
