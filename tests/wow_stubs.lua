@@ -23,7 +23,7 @@ WoW = {}
 function WoW.reset()
     WoW.frames = {}
     WoW.chatLines = {}
-    WoW.build = "70235"
+    WoW.build = "70245"
     WoW.metadata = { AltStableSync = { Version = "dev" } }
     AltStableSync = nil
     AltStableSyncDB, AltStableSyncChar, AltStableSyncLAS = nil, nil, nil
@@ -37,7 +37,7 @@ DEFAULT_CHAT_FRAME = {
 }
 
 function GetBuildInfo()
-    return "1.60.1", WoW.build, "Oct 2 2026", 16001
+    return "1.60.1", WoW.build, "Oct  5 2026", 16001
 end
 
 C_AddOns = {
