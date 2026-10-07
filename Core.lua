@@ -140,8 +140,12 @@ local function SlashHandler(msg)
 end
 ASS.SlashHandler = SlashHandler
 
+-- Write a FIELD of SlashCmdList, never the table itself: reassigning the
+-- global (even `SlashCmdList = SlashCmdList or {}`) taints it, and secure
+-- code that reads it runs tainted - measured on 70235:
+-- a /tm raid-marker macro raised ADDON_ACTION_FORBIDDEN SetRaidTarget()
+-- blamed on AltStableSync. tests/test_taint.lua guards this.
 SLASH_ALTSTABLESYNC1 = "/altsync"
-SlashCmdList = SlashCmdList or {}
 SlashCmdList.ALTSTABLESYNC = SlashHandler
 
 ------------------------------------------------------------
