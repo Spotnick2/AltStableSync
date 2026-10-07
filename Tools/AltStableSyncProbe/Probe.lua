@@ -200,18 +200,25 @@ end
 
 -- Castable player spells grouped by name, each group's entries carrying the
 -- client's own low-rank flag. Book order is NOT assumed to be rank order.
+local function IsLearnedSpell(info)
+    local T = Enum and Enum.SpellBookItemType
+    if T and T.Spell ~= nil and info.itemType ~= T.Spell then return false end
+    return info.spellID ~= nil and info.name ~= nil and not info.isPassive
+end
+
 local function RankGroups()
     local groups, order = {}, {}
     for _, e in ipairs(SpellBook()) do
         local i = e.info
-        if i.spellID and i.name and not i.isPassive then
+        if IsLearnedSpell(i) then
             local okL, low = pcall(C_SpellBook.IsSpellBookItemLowRank, e.index, BANK)
             local g = groups[i.name]
             if not g then g = {}; groups[i.name] = g; order[#order + 1] = i.name end
             local dup = false
             for _, x in ipairs(g) do if x.id == i.spellID then dup = true end end
             if not dup then
-                g[#g + 1] = { id = i.spellID, index = e.index, sub = i.subName, low = okL and low or nil, lowOk = okL }
+                g[#g + 1] = { id = i.spellID, index = e.index, sub = i.subName, low = okL and low or false, lowOk = okL,
+                              itemType = i.itemType }
             end
         end
     end
@@ -230,8 +237,8 @@ function P.ranks()
         local g = multi[gi]
         Record("-- " .. g.name)
         for _, r in ipairs(g.ranks) do
-            Record(("   id=%-7s sub=%-10s lowRank=%s"):format(tostring(r.id), ValStr(r.sub),
-                r.lowOk and ValStr(r.low) or "THREW"))
+            Record(("   id=%-7s sub=%-10s lowRank=%s itemType=%s"):format(tostring(r.id), ValStr(r.sub),
+                r.lowOk and ValStr(r.low) or "THREW", ValStr(r.itemType)))
             Call("     C_Spell.GetBaseSpell(id)", C_Spell.GetBaseSpell, r.id)
             Call("     FindBaseSpellByID(id)", FindBaseSpellByID, r.id)
             Call("     C_Spell.GetOverrideSpell(id)", C_Spell.GetOverrideSpell, r.id)
@@ -253,7 +260,7 @@ local LOGIN_EVENTS = { "ADDON_LOADED", "SPELLS_CHANGED", "UPDATE_MACROS", "UPDAT
 local loginFrame = CreateFrame("Frame")
 for _, e in ipairs(LOGIN_EVENTS) do pcall(loginFrame.RegisterEvent, loginFrame, e) end
 
-local function readiness()
+local function readinessRaw()
     local okM, m1, m2 = pcall(GetNumMacros)
     local okA, a = pcall(GetActionInfo, 1)
     local okB, b = pcall(GetBindingKey, "MOVEFORWARD")
@@ -262,11 +269,20 @@ local function readiness()
 end
 
 local loginCounts, loginSaved = {}, false
+local function readiness()
+    local ok, r = pcall(readinessRaw)
+    return ok and r or ("readiness THREW: " .. tostring(r))
+end
+
+local function NowMs()
+    return debugprofilestop and math.floor(debugprofilestop() - loginT0 + 0.5) or -1
+end
+
 loginFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 ~= ADDON then return end
     local n = (loginCounts[event] or 0) + 1
     loginCounts[event] = n
-    local ms = math.floor((debugprofilestop() - loginT0) + 0.5)
+    local ms = NowMs()
     if n == 1 then
         loginLog[#loginLog + 1] = { event = event, ms = ms, arg = arg1 ~= nil and tostring(arg1) or nil, state = readiness() }
     elseif n == 2 then
@@ -391,7 +407,6 @@ end
 
 local slotEvents = {}
 local slotFrame = CreateFrame("Frame")
-pcall(slotFrame.RegisterEvent, slotFrame, "ACTIONBAR_SLOT_CHANGED")
 slotFrame:SetScript("OnEvent", function(_, _, slot) slotEvents[#slotEvents + 1] = slot end)
 
 local function SlotEmpty(slot)
@@ -420,12 +435,12 @@ function P.place()
     local pick, top
     for _, g in ipairs(RankGroups()) do
         for _, r in ipairs(g.ranks) do
-            if r.low and not pick then pick = { id = r.id, name = g.name, sub = r.sub }; top = g.ranks end
+            if r.lowOk and r.low and not pick then pick = { id = r.id, name = g.name, sub = r.sub }; top = g.ranks end
         end
     end
     if not pick then
         for _, e in ipairs(SpellBook()) do
-            if e.info.spellID and not e.info.isPassive then
+            if IsLearnedSpell(e.info) then
                 pick = { id = e.info.spellID, name = e.info.name, sub = e.info.subName }; break
             end
         end
@@ -437,17 +452,21 @@ function P.place()
         for _, r in ipairs(top) do ids[#ids + 1] = r.id .. (r.low and "(low)" or "") end
         Record(("%-44s %s"):format("ranks of this spell in the book", table.concat(ids, " ")))
     end
-    local mark, ev0 = #blocked, #slotEvents
+    slotEvents = {}
+    pcall(slotFrame.RegisterEvent, slotFrame, "ACTIONBAR_SLOT_CHANGED")
+    local mark, ev0 = #blocked, 0
 
     Call("C_Spell.PickupSpell(id)", C_Spell.PickupSpell, pick.id)
     Call("GetCursorInfo() after pickup", GetCursorInfo)
     if CursorSpell() ~= "spell" then
         ClearCursor()
+        slotFrame:UnregisterEvent("ACTIONBAR_SLOT_CHANGED")
         Record("pickup did not put a spell on the cursor - stopped, nothing written")
         return
     end
     if not SlotEmpty(slot) then
         ClearCursor()
+        slotFrame:UnregisterEvent("ACTIONBAR_SLOT_CHANGED")
         Record("slot " .. slot .. " is no longer empty - stopped, nothing written")
         return
     end
@@ -459,19 +478,20 @@ function P.place()
     Call("C_ActionBar.GetSpell(slot)", C_ActionBar and C_ActionBar.GetSpell, slot)
 
     -- Remove only if the slot holds exactly what we placed (a spell action).
-    local okA, kind = pcall(GetActionInfo, slot)
-    if okA and kind == "spell" and not leftover then
+    local okA, kind, placedID = pcall(GetActionInfo, slot)
+    if okA and kind == "spell" and placedID == pick.id and not leftover then
         Call("PickupAction(slot)", PickupAction, slot)
         local ck = CursorSpell()
         ClearCursor()
         Record(("%-44s %s"):format("cursor after PickupAction", ValStr(ck)))
     else
-        Record(("%-44s slot holds %s, cursor held %s - NOT removing"):format("removal skipped", ValStr(kind), ValStr(leftover)))
+        Record(("%-44s slot holds %s %s, cursor held %s - NOT removing"):format("removal skipped", ValStr(kind), ValStr(placedID), ValStr(leftover)))
     end
     local clean = SlotEmpty(slot)
     Record(("%-44s %s"):format("slot " .. slot .. " empty again", clean and "yes" or "NO - drag it off by hand"))
 
     C_Timer.After(0.5, function()
+        pcall(slotFrame.UnregisterEvent, slotFrame, "ACTIONBAR_SLOT_CHANGED")
         local evs = {}
         for i = ev0 + 1, #slotEvents do evs[#evs + 1] = tostring(slotEvents[i]) end
         Record(("%-44s %s"):format("ACTIONBAR_SLOT_CHANGED payloads", #evs > 0 and table.concat(evs, ",") or "none"))
@@ -493,13 +513,17 @@ local BIND_KEY, BIND_CMD = "CTRL-SHIFT-F11", "TOGGLEAUTORUN"
 local CVAR = "cameraDistanceMaxZoomFactor"
 local FIRST_CHAR_MACRO = 121   -- measured (Stakeout, 69977)
 
--- Character-scope macros only, exact name AND body.
+local function Norm(body) return (tostring(body or ""):gsub("[\r\n]+$", "")) end
+local MARKER = "AltStableSyncProbe 256-char body test"
+
+-- Character-scope macros only, exact name AND body (trailing newlines
+-- normalised: the server appends one, measured 70245).
 local function FindProbeMacro()
     local ok, _, nChar = pcall(GetNumMacros)
     if not ok or type(nChar) ~= "number" then return nil end
     for i = FIRST_CHAR_MACRO, FIRST_CHAR_MACRO + nChar - 1 do
         local okI, name, _, body = pcall(GetMacroInfo, i)
-        if okI and name == MACRO_NAME and body == MACRO_BODY then return i, body end
+        if okI and name == MACRO_NAME and Norm(body) == Norm(MACRO_BODY) then return i, body end
     end
 end
 
@@ -608,7 +632,8 @@ function P.restart()
     if not (cdb.macroOwned or cdb.bindOwned or db.cvarTest) then
         Record("nothing armed - run /syncprobe macro | bind | cvar first")
     end
-    Record("Proof needs a FULL EXIT: say so when you paste this, or it proves nothing.")
+    Record("The loadCount goes up on /reload too - it cannot prove a full exit. Only you can:")
+    Record("say 'full exit' when you paste this, or it proves nothing.")
 end
 
 function P.clean()
@@ -617,7 +642,14 @@ function P.clean()
     local db, cdb = DB(), CharDB()
     local left = {}
 
-    if cdb.macroOwned then
+    -- Ours if recorded, or if a character macro carries our exact name and
+    -- the probe's marker (a record an older probe build dropped).
+    local orphan = false
+    if not cdb.macroOwned then
+        local idx, body = FindProbeMacro()
+        orphan = idx ~= nil and tostring(body):find(MARKER, 1, true) ~= nil
+    end
+    if cdb.macroOwned or orphan then
         local idx = FindProbeMacro()
         if idx then Call("DeleteMacro(" .. idx .. ")", DeleteMacro, idx) end
         if FindProbeMacro() then left[#left + 1] = "macro (still present)"
@@ -626,7 +658,9 @@ function P.clean()
 
     if cdb.bindOwned then
         local ok, act = pcall(GetBindingAction, BIND_KEY)
-        if not IsCharacterSet() then
+        if not ok then
+            left[#left + 1] = "binding (GetBindingAction threw - record kept)"
+        elseif not IsCharacterSet() then
             left[#left + 1] = "binding (character set not active - re-enable it, then clean)"
         elseif ok and act == BIND_CMD then
             Call("SetBinding(key, nil)", SetBinding, BIND_KEY)
@@ -642,10 +676,19 @@ function P.clean()
     end
 
     if db.cvarTest then
-        Call("C_CVar.SetCVar restore", C_CVar.SetCVar, CVAR, db.cvarTest.original)
-        local ok, v = pcall(C_CVar.GetCVar, CVAR)
-        if ok and v == db.cvarTest.original then db.cvarTest = nil
-        else left[#left + 1] = "cvar (reads " .. tostring(v) .. ", original " .. db.cvarTest.original .. ")" end
+        local okC, cur = pcall(C_CVar.GetCVar, CVAR)
+        if not okC then
+            left[#left + 1] = "cvar (GetCVar threw - record kept)"
+        elseif tonumber(cur) ~= tonumber(db.cvarTest.marker) then
+            -- The player changed it since: theirs now, leave it.
+            Record(CVAR .. " now " .. tostring(cur) .. ", not our marker - left alone")
+            db.cvarTest = nil
+        else
+            Call("C_CVar.SetCVar restore", C_CVar.SetCVar, CVAR, db.cvarTest.original)
+            local ok, v = pcall(C_CVar.GetCVar, CVAR)
+            if ok and tonumber(v) == tonumber(db.cvarTest.original) then db.cvarTest = nil
+            else left[#left + 1] = "cvar (reads " .. tostring(v) .. ", original " .. db.cvarTest.original .. ")" end
+        end
     end
 
     Record(#left == 0 and "done - everything undone" or ("NOT done: " .. table.concat(left, "; ")))

@@ -36,7 +36,7 @@ The table in issue #2 has the details and sources. The short version:
 
 ## Build 1.60.1.70245 (2026-10-06) - probe #2 run, one hunter
 
-These were measured with `Tools/AltStableSyncProbe` (`/syncprobe`, PR #25). The macro, CVar and binding markers were armed one after another, then there was **one full client exit**, then `/syncprobe restart`. Both load counters went up by exactly one, which confirms that.
+These were measured with `Tools/AltStableSyncProbe` (`/syncprobe`, PR #25). The macro, CVar and binding markers were armed one after another. Then the **owner did one full client exit** (stated by the owner) before `/syncprobe restart`. Both load counters went up by exactly one, which is consistent with that but proves nothing on its own: `/reload` bumps them too.
 
 ### Identity
 - `GetBuildInfo()` returned `"1.60.1", "70245", "Oct  5 2026", 16001, "", " "`.
@@ -60,7 +60,7 @@ These were measured with `Tools/AltStableSyncProbe` (`/syncprobe`, PR #25). The 
     - Match the name against the macro list.
     - When a name is duplicated, use the cursor round trip, out of combat, to read the true index.
     - Never use the action's id.
-- **Macros never wait on a spell.** A macro is placed whether or not its spell is learned; it shows "?" until it is. So applying a profile must never defer a macro slot because a spell is unlearned. Only spell slots and item slots are deferred.
+- **Design rule (reasoned from Blizzard behaviour, not measured here): macros never wait on a spell.** A macro is placed whether or not its spell is learned; it shows "?" until it is. So applying a profile does not defer a macro slot because a spell is unlearned. Only spell slots and item slots are deferred. #13's rehearsal checks this on a low-level alt.
 - Count on one hunter, slots 1–200: 150 empty, 33 spell, 13 item, 4 macro.
 
 ### Placing from addon code (out of combat)
@@ -75,7 +75,7 @@ There was **no `ADDON_ACTION_BLOCKED`/`FORBIDDEN`** during the run.
 - `C_SpellBook.IsSpellBookItemLowRank` returns **true for lower ranks** and false for the top rank (checked on 3 spells).
 - `C_Spell.GetBaseSpell`, `FindBaseSpellByID` and `C_Spell.GetOverrideSpell` return **the same ID for every rank**. They do **not** map one rank to another.
 - `FindSpellBookSlotForSpell(id)` returns that rank's own book slot (25 and 26 for the two Raptor Strike ranks).
-- **Consequence for #5:** the spell-family key is the spell **name** (`C_Spell.GetSpellName`). "Highest known rank" is the same-name spellbook entry that is *not* `IsSpellBookItemLowRank`. No API links ranks, so the profile stores the name.
+- **Consequence for #5:** the spell-family key is the spell **name** (`C_Spell.GetSpellName`). "Highest known rank" is the same-name spellbook entry of item type `Enum.SpellBookItemType.Spell` (not a FutureSpell or Flyout) that is *not* `IsSpellBookItemLowRank`. The first run did not filter by item type. The ranks it listed were still learned: `FindSpellBookSlotForSpell`, which skips future spells by default, found every one. No API links ranks, so the profile stores the name.
 
 ### Macros
 - `Constants.MacroConsts` = `{MAX_ACCOUNT_MACROS = 120, MAX_CHARACTER_MACROS = 30}`. The `MAX_*_MACROS` globals stay nil, so read the constants.
