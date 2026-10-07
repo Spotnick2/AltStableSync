@@ -67,23 +67,25 @@ local function ValStr(v, depth)
 end
 
 -- The return tuple with positions preserved, INCLUDING trailing nils.
+-- Returns true, ... when the call ran; false when it was ABSENT or THREW.
 local function Call(label, fn, ...)
     if type(fn) ~= "function" then
         Record(("%-44s ABSENT (%s)"):format(label, type(fn)))
-        return
+        return false
     end
     local function handle(ok, ...)
         if not ok then
             Record(("%-44s THREW: %s"):format(label, tostring((...))))
-            return
+            return false
         end
         local n = select("#", ...)
-        if n == 0 then Record(("%-44s (no returns)"):format(label)); return end
+        if n == 0 then Record(("%-44s (no returns)"):format(label)); return true end
         local parts = {}
         for i = 1, n do parts[#parts + 1] = "[" .. i .. "]=" .. ValStr((select(i, ...)), 2) end
         Record(("%-44s %d: %s"):format(label, n, table.concat(parts, "  ")))
+        return true, ...
     end
-    handle(pcall(fn, ...))
+    return handle(pcall(fn, ...))
 end
 
 local function Stamp() return date("%Y-%m-%d %H:%M:%S") end
@@ -575,14 +577,24 @@ function P.bind()
         return
     end
     local mark = #blocked
-    Call("SetBinding(key, cmd)", SetBinding, BIND_KEY, BIND_CMD)
-    Call("SaveBindings(Enum.BindingSet.Character)", SaveBindings, Enum.BindingSet.Character)
+    -- Owned before the write: whatever happens next, clean knows to undo it.
+    cdb.bindOwned, cdb.bindSavePending, cdb.bindMarkedAt = true, true, nil
+    local okSet = Call("SetBinding(key, cmd)", SetBinding, BIND_KEY, BIND_CMD)
+    local okSave = okSet and Call("SaveBindings(Enum.BindingSet.Character)", SaveBindings, Enum.BindingSet.Character)
     local okB, after = pcall(GetBindingAction, BIND_KEY)
     Record(("%-44s %s"):format("GetBindingAction(key) after", okB and ValStr(after) or "THREW"))
     Call("GetCurrentBindingSet() after", GetCurrentBindingSet)
     Record(("%-44s %s"):format("taint", TaintSince(mark)))
-    if not (okB and after == BIND_CMD) then Record("binding NOT verified - no marker recorded"); return end
-    cdb.bindOwned, cdb.bindMarkedAt = true, Stamp()
+    if not okSet and okB and (after == nil or after == "") then
+        cdb.bindOwned, cdb.bindSavePending = nil, nil   -- nothing changed
+        Record("SetBinding failed and the key is unbound - nothing to undo, not armed")
+        return
+    end
+    if not (okSave and okB and after == BIND_CMD) then
+        Record("binding NOT verified (save " .. tostring(okSave) .. ") - not armed; run /syncprobe clean")
+        return
+    end
+    cdb.bindSavePending, cdb.bindMarkedAt = nil, Stamp()
     Record("armed. EXIT THE GAME FULLY, relaunch, log this character in, /syncprobe restart")
 end
 
@@ -592,21 +604,29 @@ function P.cvar()
     Section("cvar  (marker for a full-exit restart test)")
     local db = DB()
     if db.cvarTest then
-        Record("a CVar test is already armed by " .. tostring(db.cvarTest.char) .. " - /syncprobe restart, then clean, first")
+        Record("a CVar " .. tostring(db.cvarTest.state) .. " record exists (" .. tostring(db.cvarTest.char) .. ") - /syncprobe restart and/or clean first")
         return
     end
     Call("C_CVar.GetCVarInfo(" .. CVAR .. ")", C_CVar.GetCVarInfo, CVAR)
     local ok, cur = pcall(C_CVar.GetCVar, CVAR)
     if not ok or type(cur) ~= "string" then Record("cannot read the original value - not writing"); return end
     local marker = (cur == "1.5") and "1.6" or "1.5"
+    db.cvarTest = { original = cur, marker = marker, at = Stamp(), char = UnitName("player"), state = "rollback" }
     Call("C_CVar.SetCVar(" .. CVAR .. ", " .. marker .. ")", C_CVar.SetCVar, CVAR, marker)
     local okR, now = pcall(C_CVar.GetCVar, CVAR)
     if not (okR and now == marker) then
-        pcall(C_CVar.SetCVar, CVAR, cur)
-        Record("write NOT verified (read back " .. tostring(now) .. ") - restored, no marker recorded")
+        local okS, set = pcall(C_CVar.SetCVar, CVAR, cur)
+        local okV, back = pcall(C_CVar.GetCVar, CVAR)
+        if okS and set ~= false and okV and tonumber(back) == tonumber(cur) then
+            db.cvarTest = nil
+            Record("write NOT verified (read back " .. tostring(now) .. ") - original restored and verified, not armed")
+        else
+            Record("write NOT verified AND restore not verified (reads " .. tostring(back)
+                .. ") - original " .. cur .. " kept; run /syncprobe clean")
+        end
         return
     end
-    db.cvarTest = { original = cur, marker = marker, at = Stamp(), char = UnitName("player") }
+    db.cvarTest.state = "armed"
     Record("armed (original " .. cur .. "). EXIT THE GAME FULLY, relaunch, log in, /syncprobe restart")
 end
 
@@ -618,13 +638,13 @@ function P.restart()
         local idx, body = FindProbeMacro()
         Record(("%-44s armed %s -> index=%s bodyLen=%s"):format("macro survived?", tostring(cdb.macroMarkedAt), ValStr(idx), ValStr(body and #body)))
     end
-    if cdb.bindOwned then
+    if cdb.bindOwned and not cdb.bindSavePending then
         local ok, act = pcall(GetBindingAction, BIND_KEY)
         local okS, set = pcall(GetCurrentBindingSet)
         Record(("%-44s armed %s -> %s=%s set=%s"):format("binding survived?", tostring(cdb.bindMarkedAt), BIND_KEY,
             ok and ValStr(act) or "THREW", okS and ValStr(set) or "THREW"))
     end
-    if db.cvarTest then
+    if db.cvarTest and db.cvarTest.state ~= "rollback" then
         local ok, v = pcall(C_CVar.GetCVar, CVAR)
         Record(("%-44s armed %s by %s -> %s=%s (marker %s, original %s)"):format("cvar survived?", db.cvarTest.at,
             tostring(db.cvarTest.char), CVAR, ok and ValStr(v) or "THREW", db.cvarTest.marker, db.cvarTest.original))
@@ -662,12 +682,18 @@ function P.clean()
             left[#left + 1] = "binding (GetBindingAction threw - record kept)"
         elseif not IsCharacterSet() then
             left[#left + 1] = "binding (character set not active - re-enable it, then clean)"
-        elseif ok and act == BIND_CMD then
-            Call("SetBinding(key, nil)", SetBinding, BIND_KEY)
-            Call("SaveBindings(Character)", SaveBindings, Enum.BindingSet.Character)
+        elseif act == BIND_CMD or act == nil or act == "" then
+            if act == BIND_CMD then
+                cdb.bindSavePending = true
+                Call("SetBinding(key, nil)", SetBinding, BIND_KEY)
+            end
+            local okSave = Call("SaveBindings(Character)", SaveBindings, Enum.BindingSet.Character)
             local ok2, act2 = pcall(GetBindingAction, BIND_KEY)
-            if ok2 and (act2 == nil or act2 == "") then cdb.bindOwned, cdb.bindMarkedAt = nil, nil
-            else left[#left + 1] = "binding (still " .. tostring(act2) .. ")" end
+            if okSave and ok2 and (act2 == nil or act2 == "") then
+                cdb.bindOwned, cdb.bindSavePending, cdb.bindMarkedAt = nil, nil, nil
+            else
+                left[#left + 1] = "binding (save " .. tostring(okSave) .. ", key reads " .. tostring(act2) .. " - rerun clean)"
+            end
         else
             -- Not ours any more (the player rebound it): forget, don't touch.
             Record(BIND_KEY .. " now holds " .. tostring(act) .. " - left alone")
@@ -679,14 +705,14 @@ function P.clean()
         local okC, cur = pcall(C_CVar.GetCVar, CVAR)
         if not okC then
             left[#left + 1] = "cvar (GetCVar threw - record kept)"
-        elseif tonumber(cur) ~= tonumber(db.cvarTest.marker) then
+        elseif db.cvarTest.state ~= "rollback" and tonumber(cur) ~= tonumber(db.cvarTest.marker) then
             -- The player changed it since: theirs now, leave it.
             Record(CVAR .. " now " .. tostring(cur) .. ", not our marker - left alone")
             db.cvarTest = nil
         else
-            Call("C_CVar.SetCVar restore", C_CVar.SetCVar, CVAR, db.cvarTest.original)
+            local okS, set = Call("C_CVar.SetCVar restore", C_CVar.SetCVar, CVAR, db.cvarTest.original)
             local ok, v = pcall(C_CVar.GetCVar, CVAR)
-            if ok and tonumber(v) == tonumber(db.cvarTest.original) then db.cvarTest = nil
+            if okS and set ~= false and ok and tonumber(v) == tonumber(db.cvarTest.original) then db.cvarTest = nil
             else left[#left + 1] = "cvar (reads " .. tostring(v) .. ", original " .. db.cvarTest.original .. ")" end
         end
     end
