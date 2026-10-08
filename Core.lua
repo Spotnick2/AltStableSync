@@ -25,7 +25,7 @@ ASS.SCHEMA = SCHEMA
 
 -- The client build docs/forever-api-notes.md was measured on. A different
 -- build says so once at login (see the client-update skill).
-local MEASURED_ON_BUILD = "70235"
+local MEASURED_ON_BUILD = "70245"
 ASS.MEASURED_ON_BUILD = MEASURED_ON_BUILD
 
 -- The DB fields that must be tables. One list serves both the validation and
