@@ -1,11 +1,10 @@
 # Acceptance scenarios
 
-> From the 2026-10-08 pivot handoff, verbatim apart from this header. These are **requirements, not
+> From the 2026-10-08 pivot handoff, verbatim except this header (which replaces its intro) and A41
+> (tightened to the design's file-copy rule). These are **requirements, not
 > passed tests**. Automate pure planning and state logic against Forever-shaped stubs; run client
 > behaviour in game. "Persists" always means a **full client exit and relaunch**, never `/reload`.
 > The design of record is `docs/DESIGN.md`; where they differ, DESIGN.md wins.
-
-These define the intended product, not tests already passed. Automate pure planning/state logic with measured Forever stubs. Run client-only behavior in game. “Persists” always requires a full client exit and relaunch.
 
 | ID | Scenario | Required result |
 |---|---|---|
@@ -49,7 +48,7 @@ These define the intended product, not tests already passed. Automate pure plann
 | A38 | Saved entry changes between preview and confirm | Reject stale plan, recompute and re-preview |
 | A39 | Save from older loaded revision over newer catalog version | No silent loss; Save As or refreshed replacement review |
 | A40 | Import/receive catalog later | No current character mutation; only deliberate Load applies it |
-| A41 | Beta carryover with nonempty LAS | Transfer refuses or uses reviewed sanitized payload; LAS never crosses flavors |
+| A41 | Beta carryover with nonempty LAS | Transfer refuses an `AltStableSync.lua` that contains `AltStableSyncLAS`; otherwise copies only that file and leaves both Link stores (`AltStableSyncLink.lua`) untouched. A separate, nonempty Link store does not block transfer. LAS never crosses flavors |
 | A42 | Beta build/project ID changes normally | No false flavor migration or destructive catalog reset |
 | A43 | Full exit after bars/macros/bindings apply and restore | Compare exact captured values; `/reload` alone is not accepted as persistence proof |
 | A44 | Saved entry replacement was a mistake | Previous saved version recoverable separately from runtime backup |
