@@ -159,15 +159,22 @@ end
 -- Local changes (each one is an explicit, confirmed player action)
 ------------------------------------------------------------
 
--- Save As: a new entry. meta = { class, category, name, provenance }.
-function Catalog.Create(kind, meta, modules)
+-- A new entry. `keepKeys` is for keeping an entry that arrived from the other
+-- account: its class/category stay as they are, even keys this build doesn't
+-- know (a newer build's), exactly as the receive boundary accepted them.
+local function NewEntry(kind, meta, modules, keepKeys)
     meta = meta or {}
     if kind ~= "ui" and kind ~= "loadout" then return nil, "bad-kind" end
     local class, category
     if kind == "loadout" then
         class, category = meta.class, meta.category
-        if not (ASS.Categories and ASS.Categories.List(class)) then return nil, "bad-class" end
-        if not ASS.Categories.IsValid(class, category) then return nil, "bad-category" end
+        if keepKeys then
+            if type(class) ~= "string" or class == "" then return nil, "bad-class" end
+            if type(category) ~= "string" or category == "" then return nil, "bad-category" end
+        else
+            if not (ASS.Categories and ASS.Categories.List(class)) then return nil, "bad-class" end
+            if not ASS.Categories.IsValid(class, category) then return nil, "bad-category" end
+        end
     end
     if type(modules) ~= "table" then return nil, "bad-modules" end
     local name, err = Catalog.ValidateName(kind, class, category, meta.name)
@@ -184,6 +191,12 @@ function Catalog.Create(kind, meta, modules)
     }
     Presets()[e.id] = e
     return e
+end
+
+-- Save As: a new entry. meta = { class, category, name, provenance }. The
+-- class and category must be ones this build offers.
+function Catalog.Create(kind, meta, modules)
+    return NewEntry(kind, meta, modules, false)
 end
 
 -- Save over the entry: new content, a new version descending from the old
@@ -430,9 +443,9 @@ function Catalog.Resolve(copyId, choice, expectedRootVersion, newName)
                 if not name then return nil, "name-duplicate" end
             end
             local err
-            created, err = Catalog.Create(root.kind,
+            created, err = NewEntry(root.kind,
                 { class = root.class, category = root.category, name = name, provenance = copy.provenance },
-                copy.modules)
+                copy.modules, true)
             if not created then return nil, err end
         elseif choice ~= "mine" then
             return nil, "bad-choice"

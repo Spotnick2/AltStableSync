@@ -642,6 +642,31 @@ do
     end
 end
 
+-- An entry in a category this build doesn't know (a newer build's) can be
+-- kept like any other when we deleted it and the other account edited it.
+do
+    local a, b, id = pair()
+    local newer = { id = "loadout-ffffffffffff-1", version = "ffffffffffff:1", kind = "loadout",
+                    class = "PRIEST", category = "newcategory", name = "Future", ancestors = {},
+                    modules = mods("future") }
+    use(a); eq("unknown category: received", C.Upsert(C.Copy(newer), "Kaleid"), "replace")
+    use(b); C.Upsert(C.Copy(newer), "Karuzo")
+    use(a); C.Delete(newer.id, a.db.presets[newer.id].version)
+    use(b); C.Replace(newer.id, mods("future-edit"), b.db.presets[newer.id].version)
+    send(b, a)
+    use(a)
+    local cid = newer.id .. "~" .. b.db.presets[newer.id].version
+    local r, kept = C.Resolve(cid, "theirs", a.db.presets[newer.id].version)
+    check("unknown category: kept", r ~= nil and type(kept) == "table", tostring(kept))
+    eq("unknown category: category preserved", type(kept) == "table" and kept.category, "newcategory")
+    eq("unknown category: content", type(kept) == "table" and kept.modules.actions[1].spell, "future-edit")
+    sync(a, b)
+    eq("unknown category: no live copies", liveConflicts(a) + liveConflicts(b), 0)
+    check("unknown category: converged", same(a, b))
+    -- A fresh local Save As still only offers known categories.
+    eq("unknown category: Save As still validates", select(2, loadout("PRIEST", "newcategory", "X", "x")), "bad-category")
+end
+
 -- A stale Delete can't destroy a newer version that arrived unreviewed.
 do
     local a, b, id = pair()
