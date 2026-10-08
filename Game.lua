@@ -34,25 +34,33 @@ end
 -- Macros
 ------------------------------------------------------------
 
--- Every macro: { index, name, icon, body, scope = "account" | "char" }.
+-- Every macro: { index, name, icon, body, scope = "account" | "char" }, or nil
+-- when the list can't be read (unreadable is never "no macros").
 function Game.Macros()
     local out = {}
     local ok, nAccount, nChar = pcall(GetNumMacros)
-    if not ok then return out end
+    if not ok then return nil end
+    local function read(i, scope)
+        local okI, name, icon, body = pcall(GetMacroInfo, i)
+        if not okI then return false end
+        if name then out[#out + 1] = { index = i, name = name, icon = icon, body = body, scope = scope } end
+        return true
+    end
     for i = 1, nAccount or 0 do
-        local name, icon, body = GetMacroInfo(i)
-        if name then out[#out + 1] = { index = i, name = name, icon = icon, body = body, scope = "account" } end
+        if not read(i, "account") then return nil end
     end
     for i = CHAR_FIRST, CHAR_FIRST + (nChar or 0) - 1 do
-        local name, icon, body = GetMacroInfo(i)
-        if name then out[#out + 1] = { index = i, name = name, icon = icon, body = body, scope = "char" } end
+        if not read(i, "char") then return nil end
     end
     return out
 end
 
+-- The macros named `name`, or nil when the macro list can't be read.
 function Game.MacrosNamed(name)
+    local all = Game.Macros()
+    if not all then return nil end
     local out = {}
-    for _, m in ipairs(Game.Macros()) do
+    for _, m in ipairs(all) do
         if m.name == name then out[#out + 1] = m end
     end
     return out
@@ -126,6 +134,7 @@ function Game.ActionAt(slot)
             return { kind = "unsupported", what = "macro without a name" }
         end
         local matches = Game.MacrosNamed(name)
+        if not matches then return { kind = "unsupported", what = "macros unreadable" } end
         if #matches ~= 1 then
             return { kind = "unsupported", what = "duplicate macro name", name = name }
         end
@@ -142,7 +151,10 @@ function Game.Restorable(a)
     if a == nil then return true end
     if a.kind == "spell" then return Game.SpellKnown(a.id) end
     if a.kind == "item" then return Game.ItemCount(a.id) > 0 end
-    if a.kind == "macro" then return #Game.MacrosNamed(a.name) == 1 end
+    if a.kind == "macro" then
+        local m = Game.MacrosNamed(a.name)
+        return m ~= nil and #m == 1
+    end
     return false
 end
 
@@ -162,10 +174,13 @@ end
 -- Every key bound to `command` (GetBindingKey returns them all), as a list;
 -- nil when the client call fails (unreadable is not "no keys").
 function Game.KeysFor(command)
-    local r = { pcall(GetBindingKey, command) }
+    -- select("#") keeps the exact return count: a nil in the middle of the
+    -- tuple can't make #r stop early and hide the keys after it.
+    local function pack(...) return select("#", ...), { ... } end
+    local n, r = pack(pcall(GetBindingKey, command))
     if not r[1] then return nil end
     local keys = {}
-    for i = 2, #r do if type(r[i]) == "string" and r[i] ~= "" then keys[#keys + 1] = r[i] end end
+    for i = 2, n do if type(r[i]) == "string" and r[i] ~= "" then keys[#keys + 1] = r[i] end end
     return keys
 end
 
@@ -197,7 +212,8 @@ function Game.Cursor()
     if kind == "spell" then return { kind = "spell", id = c } end
     if kind == "item" then return { kind = "item", id = a } end
     if kind == "macro" then
-        local name, icon, body = GetMacroInfo(a)
+        local okM, name, icon, body = pcall(GetMacroInfo, a)
+        if not okM then return { kind = "unreadable" } end
         return { kind = "macro", name = name, body = body, index = a,
                  scope = (type(a) == "number" and a >= CHAR_FIRST) and "char" or "account" }
     end

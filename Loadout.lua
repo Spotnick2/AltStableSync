@@ -109,6 +109,7 @@ local function Resolve(want, modules, book)
         return nil, "not in bags"
     elseif want.kind == "macro" then
         local matches = Game.MacrosNamed(want.name)
+        if not matches then return nil, "macros unreadable" end
         if want.scope == "account" then
             local m = matches[1]
             if #matches == 1 and m.scope == "account" and Game.Normalize(m.body) == Game.Normalize(want.body) then
@@ -232,7 +233,13 @@ local function Snapshot(plan, reason)
     local Game = G()
     local snap = { reason = reason, actions = {}, keys = {}, createdMacros = {},
                    characterBindings = Game.CharacterBindings() }
-    for _, op in ipairs(plan.actions) do snap.actions[op.slot] = Game.ActionAt(op.slot) or false end
+    for _, op in ipairs(plan.actions) do
+        local a = Game.ActionAt(op.slot)
+        -- A slot read that fails (or reads back something this slice can't
+        -- put back) means no backup, so no writes.
+        if not Game.Restorable(a) then return nil end
+        snap.actions[op.slot] = a or false
+    end
     for key in pairs(plan.keys) do
         local cmd = Game.CommandOf(key)
         if cmd == nil then return nil end           -- unreadable: no backup, so no writes
@@ -273,7 +280,7 @@ local function Execute(plan, snap)
         local ok, why = call(false, CreateMacro, c.name, c.icon or "INV_Misc_QuestionMark", c.body, true)
         if not ok then return fail(why, "macro " .. c.name) end
         local matches = Game.MacrosNamed(c.name)
-        if #matches ~= 1 or matches[1].scope ~= "char"
+        if not matches or #matches ~= 1 or matches[1].scope ~= "char"
             or Game.Normalize(matches[1].body) ~= Game.Normalize(c.body) then
             return fail("macro not created", "macro " .. c.name)
         end
@@ -293,7 +300,7 @@ local function Execute(plan, snap)
             elseif t.kind == "item" then ok, why = call(false, C_Item.PickupItem, t.id)
             else
                 local m = Game.MacrosNamed(t.name)
-                if #m ~= 1 then return bail("macro not unique", at) end
+                if not m or #m ~= 1 then return bail("macro not unique", at) end
                 ok, why = call(false, PickupMacro, m[1].index)
             end
             if not ok then return bail(why, at) end
@@ -425,7 +432,7 @@ function Loadout.PlanRestore(which)
             if Game.ItemCount(want.id) > 0 then target = { kind = "item", id = want.id } else why = "item not in bags" end
         elseif want.kind == "macro" then
             local m = Game.MacrosNamed(want.name)
-            if #m == 1 and m[1].scope == want.scope and Game.Normalize(m[1].body) == Game.Normalize(want.body) then
+            if m and #m == 1 and m[1].scope == want.scope and Game.Normalize(m[1].body) == Game.Normalize(want.body) then
                 target = { kind = "macro", name = want.name, body = m[1].body, scope = want.scope }
             else
                 why = "macro gone or changed"

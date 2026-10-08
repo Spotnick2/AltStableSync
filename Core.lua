@@ -198,7 +198,7 @@ local function SlashHandler(msg)
         end
         Print(("version %s, schema %d, %d saved setup(s), %d character backup set(s)"):format(
             tostring(version), ASS.db.schema, live, CountKeys(ASS.db.backups)))
-    elseif ASS.Commands and ASS.Commands[cmd] and cmd ~= "Describe" and cmd ~= "Report" then
+    elseif ASS.Commands and type(ASS.Commands[cmd]) == "function" then
         ASS.Commands[cmd](rest)
     else
         Print("commands: /altsync status | saveas <name> | list | load <name> | backups | restore [n|op]")

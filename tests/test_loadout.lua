@@ -653,6 +653,94 @@ do
 end
 
 ------------------------------------------------------------
+-- Round-3 review cases
+------------------------------------------------------------
+
+-- A slot read that fails only while taking the backup: no backup, no writes.
+do
+    boot(); ready(); save(); alt({ actions = { [1] = { spell = 2052 } } })
+    local plan = L.Plan(entry)
+    local real = GetActionInfo
+    local n = 0
+    GetActionInfo = function(...) n = n + 1; return real(...) end
+    L.Plan(entry)                            -- count the reads one plan takes
+    local perPlan = n
+    n = 0
+    GetActionInfo = function(slot, ...)
+        n = n + 1
+        if n == perPlan + 1 then error("read failed") end   -- the first read after Load's re-plan
+        return real(slot, ...)
+    end
+    G.calls = {}
+    local r, err = L.Load(entry, plan)
+    GetActionInfo = real
+    check("snapshot read fails: refused", r == nil and tostring(err):find("backup") ~= nil, tostring(err))
+    eq("snapshot read fails: zero writes", #G.calls, 0)
+    eq("snapshot read fails: nothing pinned", A.Backups.Operation(), nil)
+end
+
+-- A macro read that throws while checking a macro pickup on the cursor:
+-- caught, cursor cleared, interruption recorded, Load does not raise.
+do
+    boot(); ready()
+    local e = custom({ actions = { [9] = { kind = "macro", name = "Zed", body = "/z", scope = "char" } },
+                       macros = { Zed = { body = "/z" } } })
+    alt()
+    local plan = L.Plan(e)
+    local realPick, realInfo = PickupMacro, GetMacroInfo
+    local armed = false
+    PickupMacro = function(i) realPick(i); armed = true end
+    GetMacroInfo = function(...) if armed then armed = false; error("read failed") end return realInfo(...) end
+    local ok, r = pcall(L.Load, e, plan)
+    PickupMacro, GetMacroInfo = realPick, realInfo
+    check("macro read throws: Load did not raise", ok, tostring(r))
+    check("macro read throws: stopped", ok and r and r.failed ~= nil, ok and r and tostring(r.failed))
+    eq("macro read throws: cursor cleared", G.cursor, nil)
+    check("macro read throws: interruption recorded", A.char.interrupted ~= nil)
+end
+
+-- An unreadable macro list is never "no macros": nothing is created.
+do
+    boot(); ready(); save(); alt()
+    local real = GetMacroInfo
+    GetMacroInfo = function() error("read failed") end
+    local plan = L.Plan(entry)
+    GetMacroInfo = real
+    eq("macros unreadable: nothing to create", #plan.creates, 0)
+    local why
+    for _, sk in ipairs(plan.skips) do if sk.slot == 4 then why = sk.reason end end
+    eq("macros unreadable: macro slot skipped", why, "macros unreadable")
+end
+
+-- GetBindingKey with a nil in the middle of its return tuple.
+do
+    boot(); ready()
+    local real = GetBindingKey
+    GetBindingKey = function() return nil, "Q", nil end
+    local keys = A.Game.KeysFor("ACTIONBUTTON1")
+    GetBindingKey = real
+    eq("sparse keys: Q read", table.concat(keys, ","), "Q")
+end
+
+-- A matching restore of the pinned operation still says which macros it keeps.
+do
+    boot(); ready()
+    local e = custom({ actions = { [9] = { kind = "macro", name = "Late", body = "/late", scope = "char" } },
+                       macros = { Late = { body = "/late" } } })
+    alt()
+    G.combatAfter = 1
+    L.Load(e, L.Plan(e))
+    G.combat = false
+    A.Commands.restore("op")
+    check("kept on match: preview names the kept macro",
+          table.concat(A._shown.lines, "\n"):find("Kept: 1 macro that load created") ~= nil, table.concat(A._shown.lines, " / "))
+    WoW.chatLines = {}
+    A._shown.onConfirm()
+    check("kept on match: result says so too", table.concat(WoW.chat(), "\n"):find("Kept 1 macro") ~= nil,
+          table.concat(WoW.chat(), " / "))
+end
+
+------------------------------------------------------------
 -- Preview text
 ------------------------------------------------------------
 do

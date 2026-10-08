@@ -48,7 +48,11 @@ function Commands.Describe(plan)
     local lines = {}
     if plan.blocked then return { plan.blocked } end
     if plan.noop and not plan.keysBlocked and #(plan.unavailable or {}) == 0 and #plan.skips == 0 then
-        return { "Already matches the selected settings." }
+        local out = { "Already matches the selected settings." }
+        if plan.kind == "restore" and #(plan.kept or {}) > 0 then
+            out[#out + 1] = ("Kept: %s that load created (not deleted)."):format(Plural(#plan.kept, "macro"))
+        end
+        return out
     end
     local nKeys = 0
     for _ in pairs(plan.keys) do nKeys = nKeys + 1 end
@@ -93,7 +97,11 @@ local function Report(kind, result, err)
         Print(("Nothing applied: %d left unchanged (see the preview's list)."):format(#result.skips))
         return
     end
-    if result.noop and not result.partial then Print("Already matches the selected settings.") return end
+    if result.noop and not result.partial then
+        Print("Already matches the selected settings."
+            .. (#(result.kept or {}) > 0 and (" Kept " .. Plural(#result.kept, "macro") .. " that load created.") or ""))
+        return
+    end
     if result.noop then
         Print("Nothing could be restored: see the preview's list. The backup is kept.")
         return
