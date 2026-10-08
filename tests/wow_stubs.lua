@@ -24,7 +24,7 @@ function WoW.reset()
     WoW.frames = {}
     WoW.chatLines = {}
     WoW.build = "70245"
-    WoW.now = 1760000000          -- what time() returns; tests move it forward
+    WoW.now = 1760000000          -- what time() returns; test_catalog moves it forward
     WoW.metadata = { AltStableSync = { Version = "dev" } }
     AltStableSync = nil
     AltStableSyncDB, AltStableSyncChar, AltStableSyncLAS = nil, nil, nil

@@ -77,6 +77,10 @@ local function Validate(db, char)
         if db.profiles ~= nil and (type(db.profiles) ~= "table" or next(db.profiles) ~= nil) then
             return "AltStableSyncDB schema 1 holds profiles this build can't upgrade"
         end
+        -- Schema 1 never had presets: any value there (even false) is foreign.
+        if db.presets ~= nil then
+            return "AltStableSyncDB schema 1 holds presets this build can't upgrade"
+        end
         if db.backups ~= nil and type(db.backups) ~= "table" then
             return "AltStableSyncDB.backups is a " .. type(db.backups) .. ", not a table"
         end
@@ -113,9 +117,15 @@ end
 
 -- A fresh random writer token for this session (docs/DESIGN.md "Data model"):
 -- never stored, so a DB copied to two accounts can't mint the same versions.
+-- The first part also folds in the clock, so two clients whose math.random
+-- happened to start alike would still have to start in the same second with
+-- the same uptime millisecond (the client's PRNG seeding is not measured).
 local function NewWriterToken()
+    local clock = (time and time() or 0) + math.floor(((GetTime and GetTime()) or 0) * 1000)
     local parts = {}
-    for i = 1, 4 do parts[i] = ("%03x"):format(math.random(0, 0xfff)) end
+    for i = 1, 4 do parts[i] = math.random(0, 0xfff) end
+    parts[1] = (parts[1] + clock) % 0x1000
+    for i = 1, 4 do parts[i] = ("%03x"):format(parts[i]) end
     return table.concat(parts)
 end
 

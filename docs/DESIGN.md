@@ -497,12 +497,13 @@ offline while A saved three times) a plain fast-forward rather than a conflict.
 | Unknown or newer envelope schema | reject; local untouched |
 
 - **Resolving a conflict settles both accounts.** The conflict copy offers **Keep this version** and
-  **Keep mine**. Either one mints a new version of `<id>` whose content is the chosen one and whose
-  `ancestors` include **both** competing versions. It also tombstones **both** deterministic copy ids
-  for those two versions, `<id>~<a>` and `<id>~<b>`, including the mirror copy this account never
-  received. Each tombstone descends from its copy's version. The other account then fast-forwards
-  the root and its own mirror copy, and a late-arriving copy is ignored because its id already
-  exists as a tombstone. **Deleting a conflict copy is "Keep mine"** (the same resolution, so the
+  **Keep mine**. Either one mints a new version of `<id>`: its content is the chosen version
+  **whole** (content, name and provenance), and its `ancestors` hold **both** competing versions
+  first, then both branches' history. Every stored live conflict copy whose version that root now
+  holds or descends from is **retired** (a tombstone descending from the copy). That covers the
+  chosen copy and any older copies from the same branch. The other account does the same when it
+  fast-forwards to the resolution, which retires its mirror copy. A late-arriving copy or older
+  message is ignored, because its version is in the root's history. **Deleting a conflict copy is "Keep mine"** (the same resolution, so the
   roots still converge); there is no way to discard a copy without resolving. The entry shows
   "conflict" until it is resolved, and that status takes precedence over "confirmed".
 - **Deletion conflicts:**
@@ -654,3 +655,12 @@ schema refusal, readiness and combat gates, macro ownership, read-back, or catal
   to the other account became a second, redundant copy there (a copy of that account's own version).
   The fix is a new receive row: a live conflict copy is ignored when our root already holds its
   version or a successor.
+- **2026-10-08, PR #32 round 1 (gpt-6-astra, high):** four code defects, all fixed:
+  - "Keep this version" now takes the chosen version whole, including its name and provenance;
+  - a copy left live because it was edited again before resolving is now retired, by retiring
+    covered copies on fast-forward and on resolve;
+  - the resolution keeps both branches' history, so a delayed older message can't reopen it;
+  - a schema-1 DB holding `presets` is refused rather than mutated.
+
+  Simplification: the explicit "tombstone the mirror id we never received" step was redundant once
+  covered copies are retired, so it was removed.

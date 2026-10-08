@@ -140,6 +140,10 @@ refused("schema 1, populated profiles", { schema = 1, profiles = { p1 = { name =
         "schema 1 holds profiles")
 refused("schema 1, profiles a number", { schema = 1, profiles = 5 }, nil, "schema 1 holds profiles")
 refused("schema 1, backups a string", { schema = 1, profiles = {}, backups = "x" }, nil, "backups is a string")
+refused("schema 1, presets false", { schema = 1, profiles = {}, presets = false }, nil, "schema 1 holds presets")
+refused("schema 1, presets a string", { schema = 1, profiles = {}, presets = "corrupt" }, nil, "schema 1 holds presets")
+refused("schema 1, presets a table", { schema = 1, profiles = {}, presets = {} }, nil, "schema 1 holds presets")
+refused("schema 2, presets false", { schema = 2, presets = false }, nil, "presets is a boolean")
 -- Malformed roots and fields are refused, never replaced with {}.
 refused("DB is a string", "corrupt", nil, "AltStableSyncDB is a string")
 refused("presets is a number", { schema = 2, presets = 5 }, nil, "presets is a number")

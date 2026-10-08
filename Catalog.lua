@@ -234,6 +234,9 @@ function Catalog.UndoLastSave(id, expectedVersion)
     return e
 end
 
+-- Forward declarations: Upsert and Resolve both tidy covered conflict copies.
+local Retire, RetireCovered
+
 ------------------------------------------------------------
 -- Receiving from the other account (#18): docs/DESIGN.md "Receive rules"
 ------------------------------------------------------------
@@ -290,6 +293,7 @@ function Catalog.Upsert(incoming, fromChar)
         local e = Sanitize(incoming)
         e.previous = local_.previous
         p[id] = e
+        RetireCovered(id)
         return "replace"
     end
     -- Two incomparable tombstones are the same decision: both accounts keep
@@ -321,27 +325,33 @@ end
 -- Resolving a conflict copy
 ------------------------------------------------------------
 
--- Retire the conflict copy `cid`: a tombstone descending from the copy's
--- version, created even if this account never received that copy (the other
--- account's mirror, whose version is `mirrorVersion`).
-local function Retire(rootId, cid, mirrorVersion)
+-- Retire the stored conflict copy `cid`: a tombstone descending from the
+-- copy's version, which travels like any other.
+function Retire(cid)
+    local c = Presets()[cid]
+    if not c or c.deleted then return end
+    Advance(c)
+    c.deleted, c.modules = true, nil
+    c.conflict.retired = true
+end
+
+-- Retire every stored live conflict copy of `rootId` whose version the root
+-- now holds or descends from: its content is part of the root's history, so
+-- it can't stay open (e.g. a copy of a version that was edited again before
+-- the conflict was resolved). The retirements travel like any tombstone.
+function RetireCovered(rootId)
     local p = Presets()
-    local c = p[cid]
-    if c and c.deleted then return end
-    if c then
-        Advance(c)
-        c.deleted, c.modules = true, nil
-        c.conflict.retired = true
-    else
-        local version = Mint()
-        local root = p[rootId]
-        p[cid] = {
-            id = cid, kind = root and root.kind, class = root and root.class,
-            category = root and root.category, name = root and root.name,
-            version = version, ancestors = { mirrorVersion }, updated = Now(),
-            deleted = true, conflict = { of = rootId, retired = true },
-        }
+    local root = p[rootId]
+    if not root then return end
+    local covered = {}
+    for cid, c in pairs(p) do
+        if type(c) == "table" and type(c.conflict) == "table" and c.conflict.of == rootId
+            and not c.deleted
+            and (c.version == root.version or Contains(root.ancestors, c.version)) then
+            covered[#covered + 1] = cid
+        end
     end
+    for _, cid in ipairs(covered) do Retire(cid) end
 end
 
 -- choice:
@@ -349,8 +359,9 @@ end
 --              entry, the root stays deleted);
 --   "mine"   - keep what this account has (deleting a conflict copy means this);
 --   "delete" - only when the other account deleted it: delete here too.
--- Either way the root gets a version descending from BOTH competing versions,
--- and both deterministic copy ids are retired, so both accounts settle.
+-- Either way the root gets a version descending from BOTH competing versions.
+-- Every copy that version covers is retired here; the other account retires
+-- its mirror the same way when it fast-forwards to it, so both settle.
 -- Returns the root entry, plus the new entry for "theirs" over a deleted root.
 function Catalog.Resolve(copyId, choice, expectedRootVersion)
     local p = Presets()
@@ -361,7 +372,10 @@ function Catalog.Resolve(copyId, choice, expectedRootVersion)
     if root.version ~= expectedRootVersion then return nil, "stale" end
 
     local rootVersion, theirsVersion = root.version, copy.version
-    local both = { rootVersion, theirsVersion }
+    -- Both competing tips first, then the other branch's own history (the
+    -- root's is added by Advance), so a delayed older message from either
+    -- branch is recognised as an ancestor and can't reopen the conflict.
+    local both = AncestorList({ rootVersion, theirsVersion }, copy.ancestors)
     local deletedThere = copy.conflict.deletion
     local created
 
@@ -390,8 +404,12 @@ function Catalog.Resolve(copyId, choice, expectedRootVersion)
         end
     else
         if choice == "theirs" then
+            -- The chosen version whole: content, name and provenance. Only the
+            -- root's identity and the new resolution version are ours.
             Advance(root, both)
             root.modules = Copy(copy.modules)
+            root.name = copy.conflict.name or root.name
+            root.provenance = Copy(copy.provenance)
         elseif choice == "mine" then
             Advance(root, both)
         else
@@ -399,8 +417,7 @@ function Catalog.Resolve(copyId, choice, expectedRootVersion)
         end
     end
 
-    Retire(root.id, copyId, theirsVersion)
-    Retire(root.id, root.id .. "~" .. rootVersion, rootVersion)
+    RetireCovered(root.id)
     return root, created
 end
 
@@ -410,4 +427,3 @@ function Catalog.DeleteConflictCopy(copyId, expectedRootVersion)
     return Catalog.Resolve(copyId, "mine", expectedRootVersion)
 end
 
-ASS._catalogTest = { AncestorList = AncestorList, Mint = Mint }

@@ -121,8 +121,13 @@ do
     A, C = boot()
     local e = loadout("PRIEST", "discipline", "Everyday", "v0")
     local v0 = e.version
+    local created = e.created
+    eq("timestamps: created = updated at birth", e.updated, created)
+    WoW.now = WoW.now + 3600
 
     local r = C.Replace(e.id, mods("v1"), v0)
+    eq("timestamps: updated moves on Save", r.updated, created + 3600)
+    eq("timestamps: created stays", r.created, created)
     check("replace: ok", r ~= nil)
     eq("replace: parent", r.parent, v0)
     eq("replace: ancestors start with parent", r.ancestors[1], v0)
@@ -187,7 +192,6 @@ end
 -- Two accounts. Each has its own DB and its own session writer; `use`
 -- switches which one the catalog works on.
 ------------------------------------------------------------
-local Acc = {}
 local current
 local function use(acc)
     if current then current.seq = A.seq end
@@ -442,6 +446,78 @@ do
     use(a2)
     eq("undo: lapses after a newer save arrived", select(2, C.UndoLastSave(id2, root(a2, id2).version)), "no-undo")
     eq("undo: newer save intact", root(a2, id2).modules.actions[1].spell, "theirs-newer")
+end
+
+-- "Keep this version" takes the chosen version whole: its rename too.
+do
+    local a, b, id = pair()
+    use(a); C.Rename(id, "A-name", root(a, id).version)
+    use(b); C.Rename(id, "B-name", root(b, id).version)
+    root(b, id).provenance = { sourceChar = "Kaleid-Sumner", build = "70245" }
+    sync(a, b)
+    use(a)
+    C.Resolve(id .. "~" .. root(b, id).version, "theirs", root(a, id).version)
+    sync(a, b)
+    eq("rename conflict: A took B's name", root(a, id).name, "B-name")
+    eq("rename conflict: B kept its name", root(b, id).name, "B-name")
+    eq("rename conflict: provenance taken too", root(a, id).provenance.sourceChar, "Kaleid-Sumner")
+    check("rename conflict: converged", same(a, b))
+end
+
+-- Edited again after the conflict was detected, then resolved: the other
+-- account's older mirror copy is retired too, and both settle.
+do
+    local a, b, id = pair()
+    use(a); C.Replace(id, mods("A1"), root(a, id).version)
+    use(b); C.Replace(id, mods("B1"), root(b, id).version)
+    sync(a, b)
+    use(a)
+    local copyOnA = id .. "~" .. root(b, id).version
+    C.Replace(id, mods("A2"), root(a, id).version)
+    C.Resolve(copyOnA, "mine", root(a, id).version)
+    sync(a, b)
+    eq("late edit: no live copies anywhere", liveConflicts(a) + liveConflicts(b), 0)
+    eq("late edit: B has A2", root(b, id).modules.actions[1].spell, "A2")
+    check("late edit: manifests agree", same(a, b))
+end
+
+-- A delayed older message from the branch that lost can't reopen a settled
+-- conflict: the resolution keeps both branches' history.
+do
+    local a, b, id = pair()
+    use(a); C.Replace(id, mods("A1"), root(a, id).version)
+    use(b); C.Replace(id, mods("B1"), root(b, id).version)
+    local b1 = C.Copy(root(b, id)); b1.previous = nil
+    C.Replace(id, mods("B2"), root(b, id).version)
+    sync(a, b)
+    use(a)
+    C.Resolve(id .. "~" .. root(b, id).version, "theirs", root(a, id).version)
+    sync(a, b)
+    use(a); eq("delayed B1 on A: ignored", C.Upsert(C.Copy(b1), "Kaleid"), "ignore")
+    use(b); eq("delayed B1 on B: ignored", C.Upsert(C.Copy(b1), "Kaleid"), "ignore")
+    sync(a, b)
+    eq("delayed B1: no live copies", liveConflicts(a) + liveConflicts(b), 0)
+    check("delayed B1: manifests agree", same(a, b))
+end
+
+-- B saved twice while diverged, so A holds two conflict copies. Resolving the
+-- newer one retires the older one too (its version is in the resolution's
+-- history), and both accounts settle.
+do
+    local a, b, id = pair()
+    use(a); C.Replace(id, mods("A1"), root(a, id).version)
+    use(b); C.Replace(id, mods("B1"), root(b, id).version)
+    sync(a, b)
+    use(b); C.Replace(id, mods("B2"), root(b, id).version)
+    send(b, a)
+    eq("two copies: A holds two live copies", liveConflicts(a), 2)
+    use(a)
+    C.Resolve(id .. "~" .. root(b, id).version, "theirs", root(a, id).version)
+    eq("two copies: both retired on A", liveConflicts(a), 0)
+    sync(a, b)
+    eq("two copies: no live copies anywhere", liveConflicts(a) + liveConflicts(b), 0)
+    eq("two copies: converged on B2", root(a, id).modules.actions[1].spell, "B2")
+    check("two copies: manifests agree", same(a, b))
 end
 
 -- A stale Delete can't destroy a newer version that arrived unreviewed.
