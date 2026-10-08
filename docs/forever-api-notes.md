@@ -114,7 +114,7 @@ Event counts: UPDATE_BINDINGS ×5, UPDATE_MACROS ×6, ACTIONBAR_SLOT_CHANGED ×2
 **Consequence for the readiness gate (#4):**
 - The first UPDATE_MACROS is a trap: character macros are not there yet.
 - In this sample everything read correctly by PLAYER_LOGIN.
-- The gate waits for the first SPELLS_CHANGED after PLAYER_ENTERING_WORLD, then checks that the macro counts have not dropped.
+- The gate waits for the first SPELLS_CHANGED after PLAYER_ENTERING_WORLD, then checks that the macro counts have not dropped. *(Superseded as an implementation rule by the readiness predicates in `docs/DESIGN.md`; the trace above stands as measured.)*
 
 ### Edit Mode (codec only)
 - `GetLayouts()` returned 2 saved layouts with `activeLayout = 4`, so two presets come first. `layouts[1]` = `"My UI"`, type 1, 59 systems.

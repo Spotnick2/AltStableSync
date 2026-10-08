@@ -1,13 +1,16 @@
 # AltStableSync
 
-Profile sync for **World of Warcraft: Forever**: carry action bars, macros and keybindings
-(then Edit Mode, CVars and addon settings) across characters of the same class and role. Every
-apply is preceded by an automatic backup.
+**Choose a saved setup, preview it, and load it. Save only when you want to.**
 
-Companion to [AltStable](https://github.com/Spotnick2/AltStable). It is a standalone addon that also
-appears as an AltStable sidebar tab when AltStable is installed.
+Saved UI setups and specialization loadouts for **World of Warcraft: Forever**: action bars,
+keybindings and character macros (plus Edit Mode and supported UI preferences), in an account-wide
+catalog shared with your other WoW account. Every load is previewed and preceded by an automatic
+backup; nothing is ever applied on its own.
 
-> Status: pre-alpha, in design. See `docs/DESIGN.md` and the issue backlog.
+Companion to [AltStable](https://github.com/Spotnick2/AltStable). It is a standalone addon that will
+also appear as an AltStable sidebar tab when AltStable is installed.
+
+> Status: pre-alpha. See `docs/DESIGN.md`, `docs/ACCEPTANCE.md` and the issue backlog.
 
 ## License
 

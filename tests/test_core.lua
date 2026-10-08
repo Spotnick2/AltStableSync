@@ -31,12 +31,13 @@ do
     eq("fresh: LAS store untouched", AltStableSyncLAS, nil)
 end
 
--- Existing data survives untouched.
+-- Existing data survives untouched. (Backups, not profiles: the design refuses a
+-- populated schema-1 `profiles` from #27 on, since this addon never wrote one.)
 do
-    local profiles = { p1 = { class = "WARRIOR", name = "Tank" } }
-    local A = load({ schema = 1, profiles = profiles, backups = {} }, { profileId = "p1" })
-    check("existing: same profiles table", AltStableSyncDB.profiles == profiles)
-    eq("existing: char assignment", AltStableSyncChar.profileId, "p1")
+    local backups = { ["Player-1-0001"] = { firstSeen = { actions = {} } } }
+    local A = load({ schema = 1, profiles = {}, backups = backups }, { lastSelected = { ui = "p1" } })
+    check("existing: same backups table", AltStableSyncDB.backups == backups)
+    eq("existing: char assignment", AltStableSyncChar.lastSelected.ui, "p1")
     check("existing: not disabled", A.disabled == nil)
 end
 
@@ -80,7 +81,7 @@ end
 -- A newer schema: refused, with the update hint, and the slash command says so.
 do
     local A = refused("newer schema", { schema = 99, somethingNew = { x = 1 } },
-                      { profileId = "p9" }, "schema 99, this build reads 1 - update")
+                      { lastSelected = { ui = "p9" } }, "schema 99, this build reads 1 - update")
     check("newer schema: said so at load", anyLine("disabled"))
     WoW.chatLines = {}
     A.SlashHandler("status")

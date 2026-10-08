@@ -2,11 +2,13 @@
 -- Core.lua - AltStableSync namespace, SavedVariables, events, slash command
 --
 -- SavedVariables (declared in AltStableSync.toc):
---   AltStableSyncDB   account-wide: schema, profiles, backups, origin
---   AltStableSyncLAS  account-wide: the LibAccountSync store ONLY (#18). Kept
---                     in its own variable so it can be wiped on a flavour
---                     change (#11) and never travels with a profile.
---   AltStableSyncChar per character: assignment, autoApply, pending
+--   AltStableSyncDB   account-wide: schema, profiles (presets from #27), backups, origin
+--   AltStableSyncLAS  unused declaration until #27 removes it. The
+--                     LibAccountSync store belongs to the separate
+--                     AltStableSyncLink addon (#18), so it is written to its
+--                     own file and never transferred.
+--   AltStableSyncChar per character: last selections, loaded baselines,
+--                     onboarding dismissal, interrupted operation
 --
 -- SavedVariables are read at ADDON_LOADED, never at file scope: the client
 -- runs the SV file AFTER the addon's files, overwriting anything assigned here.

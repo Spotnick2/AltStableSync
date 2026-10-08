@@ -1,0 +1,318 @@
+<div id="ass-simple" class="viz-dotted-background">
+  <nav class="demo-nav" aria-label="Preview scenes">
+    <button type="button" class="cursor-interaction" data-scene="window" aria-pressed="true">Main window</button>
+    <button type="button" class="cursor-interaction" data-scene="welcome" aria-pressed="false">New character</button>
+    <span>Interactive concept</span>
+  </nav>
+  <section class="ass-window" aria-label="AltStableSync proposed interface">
+    <header class="ass-title"><span class="ass-brand"><i data-lucide="panels-top-left" aria-hidden="true"></i><strong>AltStable<span>Sync</span></strong></span><span class="ass-character">Priest · Horde</span></header>
+    <nav class="tabs" role="tablist" aria-label="Saved setups">
+      <button type="button" id="simple-tab-ui" class="cursor-interaction" role="tab" data-tab="ui" aria-controls="simple-panel" aria-selected="false">UI setup</button>
+      <button type="button" id="simple-tab-loadouts" class="cursor-interaction" role="tab" data-tab="loadouts" aria-controls="simple-panel" aria-selected="true">Loadouts</button>
+    </nav>
+    <main id="simple-panel" class="body" role="tabpanel" aria-labelledby="simple-tab-loadouts"></main>
+    <footer class="ass-status" aria-live="polite"><i data-lucide="shield-check" aria-hidden="true"></i><span>Changes stay on this character until you explicitly save them.</span></footer>
+  </section>
+
+  <template data-page="loadouts">
+    <div class="pickers">
+      <label class="field">Priest specialization category<select data-field="spec"></select></label>
+      <label class="field">Saved loadout<select data-field="preset"></select></label>
+    </div>
+    <div class="sheet">
+      <div class="line"><span class="label">Action bars</span><div>Saved <span data-value="spec"></span> configuration<small>Uses the ranks this character knows.</small></div></div>
+      <div class="line"><span class="label">Keybindings</span><div>Included<small>Destination: Character. No automatic set switching.</small></div></div>
+      <div class="line"><span class="label">Character macros</span><label class="check"><input type="checkbox" data-field="macros" checked>Include with this loadout</label></div>
+      <div class="line"><span class="label">Available to</span><div><span data-value="spec"></span> priests<small>Load it on another character whenever you choose.</small></div></div>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn-s primary cursor-interaction" data-action="load">Load</button>
+      <button type="button" class="btn-s cursor-interaction" data-action="save">Save</button>
+      <button type="button" class="btn-s cursor-interaction" data-action="saveas">Save As…</button>
+    </div>
+    <p class="small help">Save updates the selected loadout. Save As creates a separate copy.</p>
+  </template>
+  <template data-page="ui">
+    <h2>Your UI, ready to use.</h2>
+    <p class="sub">Initialize this character from a setup you saved before.</p>
+    <label class="field single-picker">Saved UI setup<select data-field="ui"></select></label>
+    <div class="sheet">
+      <div class="line"><span class="label">Layout</span><span data-value="ui"></span></div>
+      <div class="line"><span class="label">Preferences</span><span>Visible bars · Damage meter</span></div>
+      <div class="line"><span class="label">Addons</span><span>GlassChat · GlassUnitFrames · Apotheca</span></div>
+    </div>
+    <details>
+      <summary class="cursor-interaction">Included settings</summary>
+      <div class="detail-list">
+        <label class="check"><input type="checkbox" data-setting="layout" checked>Edit Mode layout</label>
+        <label class="check"><input type="checkbox" data-setting="bars" checked>Action bar visibility</label>
+        <label class="check"><input type="checkbox" data-setting="meter" checked>Damage meter preferences</label>
+        <label class="check"><input type="checkbox" data-setting="chat" checked>GlassChat appearance</label>
+        <label class="check"><input type="checkbox" data-setting="units" checked>GlassUnitFrames appearance</label>
+        <label class="check"><input type="checkbox" data-setting="apotheca" checked>Apotheca placement</label>
+      </div>
+    </details>
+    <div class="actions">
+      <button type="button" class="btn-s primary cursor-interaction" data-action="load">Apply</button>
+      <button type="button" class="btn-s cursor-interaction" data-action="save">Save</button>
+      <button type="button" class="btn-s cursor-interaction" data-action="saveas">Save As…</button>
+    </div>
+  </template>
+  <template data-page="welcome">
+    <div class="welcome-icon"><i data-lucide="panels-top-left" aria-hidden="true"></i></div>
+    <p class="eyebrow">New character</p>
+    <h2>Make yourself at home.</h2>
+    <p class="sub">Start with your saved UI preferences.</p>
+    <label class="field single-picker">Saved UI setup<select data-field="ui"></select></label>
+    <ul class="list">
+      <li><i data-lucide="check" aria-hidden="true"></i>Your layout and visible action bars</li>
+      <li><i data-lucide="check" aria-hidden="true"></i>Your saved interface preferences</li>
+      <li><i data-lucide="check" aria-hidden="true"></i>Your supported addon settings</li>
+    </ul>
+    <div class="actions spread">
+      <button type="button" class="link cursor-interaction" data-action="later">Not now</button>
+      <button type="button" class="btn-s primary cursor-interaction" data-action="welcome-load">Preview and apply</button>
+    </div>
+  </template>
+  <template data-page="review">
+    <p class="eyebrow" data-content="eyebrow">Review</p>
+    <h2 data-content="title"></h2>
+    <p class="sub" data-content="description"></p>
+    <div class="sheet" data-content="rows"></div>
+    <p class="small help" data-content="note"></p>
+    <div class="actions spread">
+      <button type="button" class="btn-s cursor-interaction" data-action="cancel">Cancel</button>
+      <button type="button" class="btn-s primary cursor-interaction" data-content="confirm"></button>
+    </div>
+  </template>
+  <template data-page="saveas">
+    <p class="eyebrow" data-content="eyebrow"></p>
+    <h2>Save As</h2>
+    <p class="sub">Save a separate copy, retaining inherited entries this character cannot use yet.</p>
+    <label class="field">Name<input type="text" data-field="name" maxlength="60" autocomplete="off"></label>
+    <p class="small help">Existing saved setups remain available.</p>
+    <p class="error" role="alert" hidden></p>
+    <div class="actions spread">
+      <button type="button" class="btn-s cursor-interaction" data-action="cancel">Cancel</button>
+      <button type="button" class="btn-s primary cursor-interaction" data-action="confirm-saveas">Save</button>
+    </div>
+  </template>
+  <template data-page="history">
+    <h2>Restore a previous setup</h2>
+    <p class="sub">Backups belong to this character.</p>
+    <div class="sheet" data-content="history"></div>
+    <div class="actions"><button type="button" class="btn-s cursor-interaction" data-action="cancel">Back</button></div>
+  </template>
+  <style>
+    #ass-simple {--s-bg:light-dark(#edf1f5,#17212c);--s-panel:light-dark(#fafcfe,#202e3b);--s-inset:light-dark(#e3e9ef,#101922);--s-text:light-dark(#202e3e,#e8eef4);--s-dim:light-dark(#526374,#adbac7);--s-line:light-dark(#bcc9d4,#435665);--s-hair:light-dark(#d0dbe4,#314351);--s-gold:light-dark(#735216,#edcc81);--s-blue:light-dark(#285875,#b3d9ef);--s-highlight:light-dark(#dceaf2,#2c4355);--s-button:light-dark(#32586f,#b8d6e8);--s-on:light-dark(#ffffff,#172b3a);--s-green:light-dark(#2d634b,#b1d9bd);--s-shadow:light-dark(#22354a25,#00000060);font:14px/1.5 system-ui,-apple-system,sans-serif;color:var(--s-text);padding:14px;}
+    #ass-simple * {box-sizing:border-box;}
+    #ass-simple button,#ass-simple select,#ass-simple input {font:inherit;}
+    #ass-simple button {color:var(--s-text);}
+    #ass-simple .demo-nav {display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding-right:80px;margin-bottom:15px;}
+    #ass-simple .demo-nav button {padding:7px 12px;border-radius:6px;border:1px solid var(--s-line);background:var(--s-panel);font-size:12px;}
+    #ass-simple .demo-nav button[aria-pressed="true"] {background:var(--s-button);color:var(--s-on);border-color:var(--s-button);}
+    #ass-simple .demo-nav span {font-size:11px;color:var(--s-dim);margin-left:auto;}
+    #ass-simple .ass-window {max-width:700px;margin:auto;background:var(--s-bg);border:1px solid var(--s-line);border-radius:10px;overflow:hidden;box-shadow:0 14px 32px var(--s-shadow);}
+    #ass-simple .ass-title {display:flex;align-items:center;justify-content:space-between;gap:16px;padding:17px 22px;background:linear-gradient(180deg,var(--s-panel),var(--s-bg));border-bottom:1px solid var(--s-line);}
+    #ass-simple .ass-brand {display:flex;align-items:center;gap:10px;}
+    #ass-simple .ass-brand svg {width:22px;height:22px;color:var(--s-blue);}
+    #ass-simple .ass-brand strong {font-size:19px;font-weight:500;letter-spacing:-.5px;}
+    #ass-simple .ass-brand strong span {color:var(--s-blue);}
+    #ass-simple .ass-character {color:var(--s-dim);font-size:12px;white-space:nowrap;}
+    #ass-simple .tabs {display:flex;border-bottom:1px solid var(--s-line);background:var(--s-inset);padding:0 22px;gap:22px;}
+    #ass-simple .tabs[hidden] {display:none;}
+    #ass-simple .tabs button {position:relative;background:none;border:0;padding:13px 1px;font-weight:500;color:var(--s-dim);}
+    #ass-simple .tabs button[aria-selected="true"] {color:var(--s-gold);}
+    #ass-simple .tabs button[aria-selected="true"]:after {content:"";position:absolute;height:2px;background:var(--s-gold);bottom:-1px;left:0;right:0;}
+    #ass-simple .body {padding:24px;}
+    #ass-simple .eyebrow {color:var(--s-gold);font-size:11px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;}
+    #ass-simple h2 {font:500 22px/1.25 system-ui,sans-serif;letter-spacing:-.5px;color:var(--s-text);margin:0 0 8px;}
+    #ass-simple p {margin:0 0 18px;}
+    #ass-simple .sub {color:var(--s-dim);}
+    #ass-simple .pickers {display:grid;grid-template-columns:150px minmax(0,1fr);gap:15px;margin:0 0 20px;}
+    #ass-simple .single-picker {margin:17px 0 20px;}
+    #ass-simple label.field {display:block;color:var(--s-gold);font-weight:500;}
+    #ass-simple select,#ass-simple input[type="text"] {display:block;width:100%;min-width:0;margin-top:7px;background:var(--s-inset);color:var(--s-text);border:1px solid var(--s-line);border-radius:5px;padding:10px 12px;}
+    #ass-simple select {color:var(--s-gold);}
+    #ass-simple .sheet {background:var(--s-panel);border:1px solid var(--s-line);border-radius:7px;padding:3px 16px;}
+    #ass-simple .line {display:grid;grid-template-columns:140px minmax(0,1fr);gap:14px;padding:12px 0;border-bottom:1px solid var(--s-hair);}
+    #ass-simple .line:last-child {border-bottom:0;}
+    #ass-simple .line .label {color:var(--s-dim);}
+    #ass-simple .line small {display:block;color:var(--s-dim);font-size:12px;margin-top:2px;}
+    #ass-simple .check {display:flex;align-items:center;gap:8px;font-weight:400;color:var(--s-text);}
+    #ass-simple .check input {width:16px;height:16px;accent-color:var(--s-button);margin:0;flex:0 0 auto;}
+    #ass-simple .actions {display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:22px;}
+    #ass-simple .actions.spread {justify-content:space-between;}
+    #ass-simple .btn-s {display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 17px;background:linear-gradient(180deg,var(--s-panel),var(--s-inset));border:1px solid var(--s-line);border-radius:5px;box-shadow:inset 0 1px 0 var(--s-hair);}
+    #ass-simple .btn-s.primary {background:var(--s-button);color:var(--s-on);border-color:var(--s-button);box-shadow:none;}
+    #ass-simple .btn-s:disabled {opacity:.45;}
+    #ass-simple .link {border:0;background:none;padding:4px 0;color:var(--s-blue);font-size:12px;text-decoration:underline;text-underline-offset:3px;}
+    #ass-simple .ass-status {display:flex;align-items:flex-start;gap:7px;padding:11px 22px;background:var(--s-inset);border-top:1px solid var(--s-line);color:var(--s-dim);font-size:12px;}
+    #ass-simple .ass-status svg {width:14px;height:14px;flex:0 0 auto;margin-top:2px;}
+    #ass-simple .tools {display:flex;justify-content:flex-end;align-items:center;margin-top:17px;}
+    #ass-simple .small {font-size:12px;color:var(--s-dim);}
+    #ass-simple .help {margin:15px 0 0;}
+    #ass-simple .notice {padding:11px 13px;border-radius:5px;background:var(--s-highlight);margin-bottom:18px;color:var(--s-text);font-size:13px;}
+    #ass-simple details {margin-top:15px;color:var(--s-dim);font-size:12px;}
+    #ass-simple details summary {color:var(--s-blue);}
+    #ass-simple .detail-list {display:grid;gap:9px;margin-top:12px;}
+    #ass-simple .welcome-icon {display:flex;align-items:center;justify-content:center;width:46px;height:46px;border:1px solid var(--s-line);border-radius:10px;background:var(--s-panel);color:var(--s-gold);margin-bottom:17px;}
+    #ass-simple .welcome-icon svg {width:25px;height:25px;}
+    #ass-simple .list {margin:14px 0 0;padding:0;list-style:none;color:var(--s-dim);}
+    #ass-simple .list li {display:flex;align-items:center;gap:9px;padding:7px 0;}
+    #ass-simple .list svg {width:16px;height:16px;color:var(--s-green);flex:0 0 auto;}
+    #ass-simple .history-item {display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap;padding:14px 0;border-bottom:1px solid var(--s-hair);}
+    #ass-simple .history-item:last-child {border-bottom:0;}
+    #ass-simple .history-item small {display:block;color:var(--s-dim);font-size:12px;}
+    #ass-simple .error {margin-top:15px;color:var(--s-gold);}
+    @media(max-width:500px) {#ass-simple {padding:6px;}#ass-simple .body {padding:18px;}#ass-simple .ass-title {padding:15px 18px;}#ass-simple .pickers {grid-template-columns:1fr;}#ass-simple .line {grid-template-columns:105px minmax(0,1fr);gap:10px;}#ass-simple .demo-nav {padding-right:0;}#ass-simple .demo-nav span {width:100%;margin:2px 0 0;}#ass-simple .tabs {padding:0 18px;}}
+    @media(max-width:350px) {#ass-simple .ass-title {flex-wrap:wrap;gap:5px;}#ass-simple .line {grid-template-columns:1fr;gap:4px;}#ass-simple .btn-s {padding:9px 13px;}}
+    @media(pointer:coarse) {#ass-simple button,#ass-simple summary {min-height:44px;}#ass-simple input[type="text"],#ass-simple select {font-size:16px;}}
+  </style>
+  <script>
+  (() => {
+    const root=document.getElementById('ass-simple');
+    const main=root.querySelector('.body');
+    const status=root.querySelector('.ass-status span');
+    const state={scene:'window',tab:'loadouts',page:'home',spec:'Discipline',preset:'Everyday',ui:'My UI',macros:true,message:'',operation:null,backups:[],settings:{layout:true,bars:true,meter:true,chat:true,units:true,apotheca:true}};
+    const presets={Discipline:['Everyday','Raiding','PvP — Horde'],Holy:['Dungeons','Raiding'],Shadow:['Leveling','Open World']};
+    const uiPresets=['My UI','Compact'];
+    const settingNames={layout:'Edit Mode layout',bars:'Action bar visibility',meter:'Damage meter preferences',chat:'GlassChat appearance',units:'GlassUnitFrames appearance',apotheca:'Apotheca placement'};
+    function make(tag,text,cls){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(cls)el.className=cls;return el;}
+    function selectedName(){return state.tab==='ui'?state.ui:state.preset;}
+    function setText(key,text){const el=main.querySelector('[data-content="'+key+'"]');if(el)el.textContent=text;}
+    function fillSelect(key,values,selected){
+      const select=main.querySelector('[data-field="'+key+'"]');if(!select)return;
+      values.forEach(value=>{const option=make('option',value);option.value=value;option.selected=value===selected;select.append(option);});
+    }
+    function addRow(parent,label,value,note){
+      const row=make('div',undefined,'line');row.append(make('span',label,'label'));
+      const content=make('div',value);if(note)content.append(make('small',note));row.append(content);parent.append(row);
+    }
+    function addButton(parent,label,action){
+      const b=make('button',label,'btn-s cursor-interaction');b.type='button';b.dataset.action=action;parent.append(b);return b;
+    }
+    function icons(){if(typeof lucide!=='undefined')lucide.createIcons({attrs:{width:16,height:16}});}
+    function renderReview(){
+      const rows=main.querySelector('[data-content="rows"]');
+      const confirm=main.querySelector('[data-content="confirm"]');
+      const ui=state.tab==='ui';
+      confirm.dataset.action='confirm';
+      if(state.operation==='load'){
+        setText('eyebrow','Review before applying');setText('title',(ui?'Apply “':'Load “')+selectedName()+'”?');
+        setText('description',ui?'Review the scope of each included preference.':'This changes the current character.');
+        if(ui){
+          Object.keys(state.settings).filter(k=>state.settings[k]).forEach(k=>addRow(rows,settingNames[k],'Apply saved preference','Scope and support must be verified per provider.'));
+        }else{
+          addRow(rows,'Action bars','Apply saved actions','Use learned ranks; leave unresolved destinations untouched.');
+          addRow(rows,'Keybindings','Apply character bindings','Example: Mouse button 4 changes to the saved action button.');
+          if(state.macros)addRow(rows,'Macros','Include required character macros','Existing account macros stay untouched.');
+          addRow(rows,'Unlearned spells','Keep saved; skip for now','Load or retry explicitly after learning them.');
+        }
+        setText('note','A backup is created first. Only included settings are changed.');
+        confirm.textContent=ui?'Apply':'Load';
+      }else if(state.operation==='save'){
+        setText('eyebrow','Save current character');setText('title','Update “'+selectedName()+'”?');
+        setText('description','Replace the saved setup with your current configuration.');
+        addRow(rows,ui?'UI setup':'Loadout',ui?state.ui:state.spec+' · '+state.preset);
+        addRow(rows,'Included',ui?'Selected UI preferences':'Action bars · Keybindings'+(state.macros?' · Character macros':''));
+        addRow(rows,'Unavailable content','Preserve saved entries','Unlearned spells and unavailable addon settings are retained.');
+        setText('note','Other characters keep their current setup until they load this saved version.');
+        confirm.textContent='Save';
+      }else{
+        const backup=state.backups[state.operation.index];
+        setText('eyebrow','Review restore');setText('title','Restore this backup?');
+        setText('description','Return this character to its captured configuration.');
+        addRow(rows,'Backup',backup.name);addRow(rows,'Includes',backup.scope);addRow(rows,'Saved setups','Remain unchanged');
+        setText('note','A new backup is created before restoring exact captured values.');
+        confirm.textContent='Restore';
+      }
+    }
+    function render(){
+      const welcome=state.scene==='welcome'&&state.page==='home';
+      root.querySelector('.tabs').hidden=welcome;
+      root.querySelectorAll('[data-scene]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.scene===state.scene)));
+      root.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.tab===state.tab)));
+      if(welcome){main.removeAttribute('aria-labelledby');main.setAttribute('aria-label','Initialize this character');}
+      else{main.setAttribute('aria-labelledby','simple-tab-'+state.tab);main.removeAttribute('aria-label');}
+      const page=welcome?'welcome':state.page==='home'?state.tab:state.page;
+      const template=root.querySelector('template[data-page="'+page+'"]');
+      main.replaceChildren(template.content.cloneNode(true));
+      if(state.message){const notice=make('div',state.message,'notice');notice.setAttribute('role','status');main.prepend(notice);}
+      fillSelect('spec',Object.keys(presets),state.spec);fillSelect('preset',presets[state.spec],state.preset);fillSelect('ui',uiPresets,state.ui);
+      main.querySelectorAll('[data-value="spec"]').forEach(el=>el.textContent=state.spec);
+      main.querySelectorAll('[data-value="ui"]').forEach(el=>el.textContent=state.ui);
+      const macro=main.querySelector('[data-field="macros"]');if(macro)macro.checked=state.macros;
+      main.querySelectorAll('[data-setting]').forEach(el=>el.checked=state.settings[el.dataset.setting]);
+      if(page==='review')renderReview();
+      if(page==='saveas'){
+        setText('eyebrow',state.tab==='ui'?'New UI setup':'New '+state.spec+' loadout');
+        const input=main.querySelector('[data-field="name"]');input.placeholder=state.tab==='ui'?'My UI — Druid':'Discipline — PvP';
+      }
+      if(page==='history'){
+        const parent=main.querySelector('[data-content="history"]');
+        if(!state.backups.length)addRow(parent,'No backups yet','Apply a setup to create a backup.');
+        state.backups.forEach((backup,index)=>{
+          const entry=make('div',undefined,'history-item');const label=make('div',backup.name);label.append(make('small',backup.scope+' · This session'));entry.append(label);addButton(entry,'Review','restore:'+index);parent.append(entry);
+        });
+      }
+      if(state.page==='home'&&!welcome){const tools=make('div',undefined,'tools');const b=addButton(tools,'Backups','history');b.className='link cursor-interaction';main.append(tools);}
+      status.textContent=welcome?'You can load a specialization setup when you are ready.':state.tab==='ui'?'Apply uses saved preferences. Save updates the reusable setup.':'Changes stay on this character until you explicitly save them.';
+      icons();
+    }
+    function go(page){state.page=page;state.message='';render();}
+    root.addEventListener('change',event=>{
+      const el=event.target,key=el.dataset.field;
+      if(key==='spec'){state.spec=el.value;state.preset=presets[state.spec][0];state.message='';render();}
+      else if(key==='preset'){state.preset=el.value;state.message='';render();}
+      else if(key==='ui'){state.ui=el.value;main.querySelectorAll('[data-value="ui"]').forEach(n=>n.textContent=state.ui);}
+      else if(key==='macros')state.macros=el.checked;
+      else if(el.dataset.setting)state.settings[el.dataset.setting]=el.checked;
+    });
+    root.addEventListener('click',event=>{
+      const b=event.target.closest('button');if(!b)return;
+      if(b.dataset.scene){state.scene=b.dataset.scene;go('home');return;}
+      if(b.dataset.tab){state.tab=b.dataset.tab;state.scene='window';go('home');return;}
+      const action=b.dataset.action;if(!action)return;
+      if(action==='load'||action==='welcome-load'){
+        if(action==='welcome-load')state.tab='ui';
+        state.operation='load';go('review');
+      }else if(action==='save'){state.operation='save';go('review');}
+      else if(action==='saveas')go('saveas');
+      else if(action==='cancel'){state.scene='window';go('home');}
+      else if(action==='later'){state.scene='window';state.tab='ui';state.page='home';state.message='You can initialize this character whenever you are ready.';render();}
+      else if(action==='history')go('history');
+      else if(action.startsWith('restore:')){state.operation={index:Number(action.split(':')[1])};go('review');}
+      else if(action==='confirm'){
+        if(state.operation==='load'){
+          state.backups.unshift({name:'Before '+(state.tab==='ui'?'applying ':'loading ')+selectedName(),scope:state.tab==='ui'?'UI preferences':'Action bars, bindings'+(state.macros?' and character macros':'')});
+          state.message=selectedName()+' '+(state.tab==='ui'?'applied':'loaded')+'. Backup saved.';
+        }else if(state.operation==='save'){
+          state.message='Saved “'+selectedName()+'”. Other characters can load this version when they choose.';
+        }else{
+          const backup=state.backups[state.operation.index];
+          state.backups.unshift({name:'Before restoring a backup',scope:backup.scope});
+          state.message='Previous character configuration restored. Saved setups are unchanged.';
+        }
+        state.scene='window';state.page='home';render();
+      }else if(action==='confirm-saveas'){
+        const name=main.querySelector('[data-field="name"]').value.trim();
+        const options=state.tab==='ui'?uiPresets:presets[state.spec];
+        const error=main.querySelector('.error');
+        if(!name){error.hidden=false;error.textContent='Enter a name for your saved setup.';return;}
+        if(options.some(n=>n.toLowerCase()===name.toLowerCase())){error.hidden=false;error.textContent='That name already exists. Choose another name or use Save.';return;}
+        options.push(name);if(state.tab==='ui')state.ui=name;else state.preset=name;
+        state.page='home';state.message='Created “'+name+'” from this character. Available to load on your other characters.';render();
+      }
+    });
+    root.addEventListener('keydown',event=>{
+      if(event.target.dataset.tab&&(event.key==='ArrowLeft'||event.key==='ArrowRight')){
+        event.preventDefault();state.tab=state.tab==='ui'?'loadouts':'ui';state.scene='window';go('home');root.querySelector('[data-tab="'+state.tab+'"]').focus();return;
+      }
+      if(event.key==='Escape'&&state.page!=='home'){state.scene='window';go('home');}
+      if(event.key==='Enter'&&event.target.dataset.field==='name'){event.preventDefault();main.querySelector('[data-action="confirm-saveas"]').click();}
+    });
+    render();
+  })();
+  </script>
+</div>

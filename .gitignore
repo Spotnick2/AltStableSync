@@ -2,7 +2,7 @@
 # Tools/deploy.ps1 copies it from the checkout. Never committed. LibStub is
 # vendored and tracked.
 Libs/LibGlass-1.0/
-Libs/LibAccountSync-1.0/
+Plugins/Link/Libs/LibAccountSync-1.0/
 
 # Packaged zips - never committed.
 dist/

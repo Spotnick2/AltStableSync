@@ -1,6 +1,6 @@
 ## Interface: 16001
 ## Title: AltStableSync
-## Notes: Sync action bars, macros and keybindings across same-class characters, with backups. Companion to AltStable.
+## Notes: Manually save and load UI setups and same-class loadouts, with previews and backups. Companion to AltStable.
 ## IconTexture: 8197123
 ## Author: Spotnick
 ## Version: @project-version@
