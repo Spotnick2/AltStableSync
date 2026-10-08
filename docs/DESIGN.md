@@ -172,11 +172,14 @@ AltStableSyncChar = {               -- per character
   schema = 2,                       -- same number as the DB; an unknown or newer one is refused untouched
   lastSelected = { ui = id, loadout = { category = "discipline", id = id } },
   loaded = {                        -- ONE baseline per kind: the last Load/Apply, for #28
-    ui = { id, version, baseline = <modules as loaded>, result = { applied = {...}, skipped = {...} } },
-    loadout = { ... },
+    ui = { id, version, baseline = <modules as loaded>, result = {...} },
+    loadout = { id, version, baseline = <modules as loaded>,
+                result = { changed, created, keys, skips = { {slot, reason} }, failed, at } | { noop, skips } },
   },
+  bindingsUnsaved = true | nil,     -- keys set in memory, not yet saved: the next Load/Restore saves
+                                    -- even when every key matches (cleared by a successful SaveBindings)
   onboarding = { handled = true },  -- set by Not now, by opening the offer's preview, or by applying
-  interrupted = { id, version, done = {...}, remaining = {...} },   -- resuming = a NEW preview + click;
+  interrupted = { id, version, why, at },          -- resuming = a NEW preview + click;
                                                     -- its backup is backups[guid].operation
 }
 

@@ -43,6 +43,12 @@ local REQUIRED = {
     "Core.lua",
     "Categories.lua",
     "Catalog.lua",
+    "Game.lua",
+    "Backups.lua",
+    "Ready.lua",
+    "Loadout.lua",
+    "Preview.lua",
+    "Commands.lua",
 }
 do
     local at = 0
@@ -73,6 +79,19 @@ check("LibGlass pinned to a tag", pkg:find("Libs/LibGlass%-1%.0:%s*\r?\n%s+url: 
 check("no tag: latest", not pkg:find("tag:%s*latest"))
 for _, dir in ipairs({ "docs", "tests", "Tools", ".claude", ".github" }) do
     check(".pkgmeta ignores " .. dir, pkg:find("\n  %- " .. dir:gsub("%.", "%%.") .. "\r?\n") ~= nil)
+end
+
+-- Never a StaticPopup (it taints Blizzard's dialog pool; measured 70205): no
+-- shipped file may call or touch one.
+for _, line in ipairs(files) do
+    local path = line:gsub("\\", "/")
+    if path:match("%.lua$") then
+        local src = read(path)
+        if src then
+            local code = src:gsub("%-%-[^\n]*", "")      -- comments may say "never a StaticPopup"
+            check(path .. " never uses StaticPopup", not code:find("StaticPopup", 1, true))
+        end
+    end
 end
 
 finish("test_packaging")
