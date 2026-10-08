@@ -1,6 +1,6 @@
 # Acceptance scenarios
 
-> From the 2026-10-08 pivot handoff, verbatim except this header (which replaces its intro) A39 and A41
+> From the 2026-10-08 pivot handoff, verbatim except this header (which replaces its intro) and A39, A41 and A44
 > (tightened to the design's rules). These are **requirements, not
 > passed tests**. Automate pure planning and state logic against Forever-shaped stubs; run client
 > behaviour in game. "Persists" always means a **full client exit and relaunch**, never `/reload`.
@@ -51,7 +51,7 @@
 | A41 | Beta carryover with nonempty LAS | Transfer refuses an `AltStableSync.lua` that assigns a value to `AltStableSyncLAS` (`= nil`, which the client writes for a declared-but-unset variable, is fine); otherwise copies only that file and leaves both Link stores (`AltStableSyncLink.lua`) untouched. A separate, nonempty Link store does not block transfer. LAS never crosses flavors |
 | A42 | Beta build/project ID changes normally | No false flavor migration or destructive catalog reset |
 | A43 | Full exit after bars/macros/bindings apply and restore | Compare exact captured values; `/reload` alone is not accepted as persistence proof |
-| A44 | Saved entry replacement was a mistake | Previous saved version recoverable separately from runtime backup |
+| A44 | Saved entry replacement was a mistake | Previous saved version recoverable separately from runtime backup while the current version is still the one produced by that Save |
 | A45 | Restore after account macro was externally changed | No account write; accurate unavailable dependency/partial outcome |
 
 ## Minimal launch rehearsal
