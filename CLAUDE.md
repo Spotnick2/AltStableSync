@@ -31,14 +31,19 @@ PowerShell) we replaced with something simpler and testable.
 
 ### This codebase's specifics (feed these to any external reviewer)
 
-- **The safety rules in AGENTS.md** and the snapshot-vs-profile split in `docs/DESIGN.md`.
+- **The safety rules in AGENTS.md** and the adaptive-load vs exact-restore split in `docs/DESIGN.md`.
+- **Manual Load/Save/Save As only.** No event, login or sync receipt ever writes game state (the
+  trigger/write matrix in `docs/DESIGN.md`). A reviewer proposing "auto-apply when…" is proposing
+  the design the owner rejected on 2026-10-08.
 - **Forever, not Classic/TBC.** Vanilla content on the Mainline client; many Classic globals are
   gone (`PickupSpell`, `GetSpellInfo`, `MAX_ACCOUNT_MACROS`, `EasyMenu`…). Use what the API dump in
   `C:\Projects\References` declares and `docs/forever-api-notes.md` measures.
 - **No StaticPopups**, measured to taint.
 - **SavedVariables shape** — there is real data on disk once M1 ships; a shape change needs a schema
   bump and a test, and the addon refuses newer schemas.
-- **LibAccountSync cannot cross flavours** (by design); beta → live is a file copy.
+- **LibAccountSync cannot cross flavours** (by design); beta → live is a file copy of
+  `AltStableSync.lua` only. The LAS store lives in the separate `AltStableSyncLink` addon's file so
+  it never travels. Catalog sync uses version ancestry (`writer:seq` + `parent`), not numbers.
 
 ## Fable usage
 

@@ -34,9 +34,9 @@ end
 -- Existing data survives untouched.
 do
     local profiles = { p1 = { class = "WARRIOR", name = "Tank" } }
-    local A = load({ schema = 1, profiles = profiles, backups = {} }, { profileId = "p1" })
+    local A = load({ schema = 1, profiles = profiles, backups = {} }, { lastLoadout = "p1" })
     check("existing: same profiles table", AltStableSyncDB.profiles == profiles)
-    eq("existing: char assignment", AltStableSyncChar.profileId, "p1")
+    eq("existing: char assignment", AltStableSyncChar.lastLoadout, "p1")
     check("existing: not disabled", A.disabled == nil)
 end
 
@@ -80,7 +80,7 @@ end
 -- A newer schema: refused, with the update hint, and the slash command says so.
 do
     local A = refused("newer schema", { schema = 99, somethingNew = { x = 1 } },
-                      { profileId = "p9" }, "schema 99, this build reads 1 - update")
+                      { lastLoadout = "p9" }, "schema 99, this build reads 1 - update")
     check("newer schema: said so at load", anyLine("disabled"))
     WoW.chatLines = {}
     A.SlashHandler("status")

@@ -6,7 +6,8 @@
 --   AltStableSyncLAS  account-wide: the LibAccountSync store ONLY (#18). Kept
 --                     in its own variable so it can be wiped on a flavour
 --                     change (#11) and never travels with a profile.
---   AltStableSyncChar per character: assignment, autoApply, pending
+--   AltStableSyncChar per character: last selections, loaded baselines,
+--                     onboarding dismissal, interrupted operation
 --
 -- SavedVariables are read at ADDON_LOADED, never at file scope: the client
 -- runs the SV file AFTER the addon's files, overwriting anything assigned here.
