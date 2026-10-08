@@ -412,7 +412,7 @@ tiny addon folder:
 - `Plugins/Link/`, deployed and packaged as top-level `AltStableSyncLink` (AltStable's
   `move-folders` pattern);
 - `## Dependencies: AltStableSync` and `## SavedVariables: AltStableSyncLAS`;
-- it embeds `Libs/LibAccountSync-1.0` (`.pkgmeta` external, tag `r3`);
+- it embeds `Libs/LibAccountSync-1.0` (`.pkgmeta` external, tag `r5`);
 - it holds only the sync glue.
 
 The key lands in `AltStableSyncLink.lua`, which the transfer never touches. `AltStableSyncLAS` is
@@ -420,8 +420,21 @@ declared in exactly one TOC.
 
 - At its own `ADDON_LOADED` (never at file scope), the Link addon does `AltStableSyncLAS =
   AltStableSyncLAS or {}`, then `LibStub("LibAccountSync-1.0"):New{ addon = "AltStableSync", store =
-  function() return AltStableSyncLAS end, maxPayload = 16384 }`. The store is the account-wide table,
-  so the key persists.
+  function() return AltStableSyncLAS end, maxPayload = 16384, messages = true }`, and registers
+  `OnMessage` right after. The store is the account-wide table, so the key persists.
+- **Messages mode is required** (r5). In the default snapshot mode, a stream that completes after a
+  newer one from the same sender is dropped, which would silently lose one of two entries sent back
+  to back. If `Sync.messages ~= true` after `New` (an older library copy won the LibStub load), sync
+  stays **disabled**, and the status says so. Messages may arrive out of order; the receive rules are
+  per entry and order-independent, so no `sid` ordering is needed.
+- Entries requested by one peer go back with `Sync.SendTo(guid, payload, onResult)` (r4), where
+  `guid` is that peer's GUID from `Sync.Peers()`; `SendTo` is detected at call time, as the README
+  asks. Manifests use `Sync.Send`.
+- **r4 and r5 are Codex-reviewed but not yet run in game** (LibAccountSync status, 2026-10-07); r3 is
+  the last release validated with two accounts. The two-account rehearsal (#18, #13) therefore also
+  validates the library, and any library defect it finds goes to a LibAccountSync issue, never an
+  edit here. It includes a catalog with **100 differing entries**, to check that the manifests
+  eventually agree after retries.
 - It starts only after core reports a usable DB. A refused schema disables sync too.
 - It is an ordinary enabled addon (not LoadOnDemand), with a visible linked/disabled status.
 
@@ -437,6 +450,11 @@ declared in exactly one TOC.
   - after every local catalog write;
   - on a bounded timer while a peer is linked (there is no delivery ack, so "sent" is not "synced");
   - on a manual **Refresh**.
+
+  Each exchange requests every entry that still differs, including entries whose messages the
+  library refused under its messages-mode limits (4 open streams per sender, a 256-message overtake
+  window). Messages mode is not guaranteed delivery; repeated exchange is the recovery, and an entry
+  stays "pending" until the manifests match.
 
 ### Receive rules (per entry, idempotent)
 
@@ -581,3 +599,9 @@ schema refusal, readiness and combat gates, macro ownership, read-back, or catal
   - Round 3 accepted two more: incomparable tombstones converge on the lexically greater version
     token, and a successor tombstone fast-forwards; and "Keep this version" on the deleted side also
     mints a successor tombstone for the root.
+  - Round 4: **consensus**, plus one nit (A44 states the Undo condition).
+- **2026-10-08, pinned LibAccountSync `r5`** (released 2026-10-07). It requires `messages = true`, because
+  snapshot mode could drop one of two back-to-back entries. Replies use `SendTo`. r4 and r5 are not
+  yet validated in game. A focused gpt-6-astra (high) round reached **consensus**. Its nits are
+  applied: the GUID comes from `Sync.Peers()`, retries cover refused messages, and the rehearsal
+  includes 100 entries.
