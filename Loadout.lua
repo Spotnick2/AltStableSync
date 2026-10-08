@@ -6,13 +6,16 @@
 --   - target set: action slots 1-12, the bindings of ACTIONBUTTON1-12, and the
 --     character macros those slots need;
 --   - Plan only reads; Load and Restore write, and only after the player
---     confirmed a preview of exactly the plan that is applied (stale = refuse);
---   - one guard before every write (no combat, the cursor as expected,
---     Character bindings for binding writes);
+--     confirmed a preview of exactly the plan that is applied: the whole plan
+--     is compared at confirmation, and any difference refuses;
+--   - a guard runs before EVERY protected call (no combat; Character bindings
+--     for binding writes), and every client call is pcall'd;
 --   - the pre-write snapshot is pinned (Backups.Pin) before the first write;
 --     any incomplete outcome leaves it pinned; there is no resume;
+--   - a slot is replaced only if its current content can be put back exactly;
 --   - every write is read back; no clear-before-import; account macros are
---     never created or edited; no macro is ever deleted.
+--     never created or edited; no macro is ever deleted; the cursor is never
+--     left holding something.
 ------------------------------------------------------------
 
 AltStableSync = AltStableSync or {}
@@ -28,11 +31,24 @@ local function PlayerClass()
     return class
 end
 
+-- A deterministic text form of a plain table (sorted keys), for comparing a
+-- confirmed plan with a fresh one.
+local function Serialize(v)
+    local t = type(v)
+    if t ~= "table" then return t:sub(1, 1) .. tostring(v) end
+    local keys = {}
+    for k in pairs(v) do keys[#keys + 1] = k end
+    table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+    local parts = {}
+    for _, k in ipairs(keys) do parts[#parts + 1] = tostring(k) .. "=" .. Serialize(v[k]) end
+    return "{" .. table.concat(parts, ",") .. "}"
+end
+
 ------------------------------------------------------------
 -- Capture (for Save As): the slots, bindings and character macros
 ------------------------------------------------------------
 
--- modules = { actions = {[slot] = ...}, bindings = {[cmd] = {k1, k2}}, macros = {[name] = {body, icon}} }
+-- modules = { actions = {[slot] = ...}, bindings = {[cmd] = {key, ...}}, macros = {[name] = {body, icon}} }
 function Loadout.Capture()
     local Game = G()
     local book = Game.Spellbook()
@@ -55,10 +71,7 @@ function Loadout.Capture()
         end
     end
     local bindings = {}
-    for _, cmd in ipairs(Game.COMMANDS) do
-        local k1, k2 = Game.KeysFor(cmd)
-        bindings[cmd] = { k1, k2 }
-    end
+    for _, cmd in ipairs(Game.COMMANDS) do bindings[cmd] = Game.KeysFor(cmd) end
     return { actions = actions, bindings = bindings, macros = macros }
 end
 
@@ -115,39 +128,27 @@ end
 
 -- plan = { kind = "load"|"restore", blocked, actions = {{slot, target, current}},
 --          creates = {{name, body, icon}}, keys = {[key] = {to = cmd|false, from}},
---          keysBlocked, skips = {{slot, reason}}, noop, signature }
-local function Signature(plan)
-    local parts = {}
-    for _, op in ipairs(plan.actions) do
-        local t = op.target
-        parts[#parts + 1] = ("%d>%s:%s:%s"):format(op.slot, t and t.kind or "clear",
-            tostring(t and (t.id or t.name) or ""), tostring(op.current and (op.current.id or op.current.name) or ""))
-    end
-    for _, c in ipairs(plan.creates) do parts[#parts + 1] = "+" .. c.name end
-    local keys = {}
-    for k, v in pairs(plan.keys) do keys[#keys + 1] = k .. "=" .. tostring(v.to) .. "<" .. tostring(v.from) end
-    table.sort(keys)
-    for _, k in ipairs(keys) do parts[#parts + 1] = k end
-    return table.concat(parts, "|")
-end
-
+--          keysBlocked, skips = {{slot, reason}}, unavailable, noop, fingerprint }
 local function Finish(plan)
     plan.noop = #plan.actions == 0 and #plan.creates == 0 and next(plan.keys) == nil
-    plan.signature = Signature(plan)
+    plan.fingerprint = Serialize({ v = plan.version, w = plan.which, a = plan.actions, c = plan.creates,
+                                   k = plan.keys, kb = plan.keysBlocked or false, s = plan.skips,
+                                   u = plan.unavailable or {}, b = plan.blocked or false })
     return plan
 end
+
+local KEYS_BLOCKED = "Enable character-specific keybindings in WoW settings, then try again."
 
 -- The binding part of a plan: one final key -> command|unbound map.
 local function PlanKeys(plan, wantKeys)
     local Game = G()
-    if not Game.CharacterBindings() then
-        plan.keysBlocked = "Enable character-specific keybindings in WoW settings, then try again."
-        return
-    end
+    if not Game.CharacterBindings() then plan.keysBlocked = KEYS_BLOCKED return end
     local want = {}
     for cmd, keys in pairs(wantKeys) do
-        for _, key in ipairs({ keys[1], keys[2] }) do
-            if key then
+        -- By position up to maxn: a missing first key never hides the second.
+        for i = 1, table.maxn(keys) do
+            local key = keys[i]
+            if type(key) == "string" and key ~= "" then
                 if want[key] and want[key] ~= cmd then
                     plan.keysBlocked = "This loadout binds " .. key .. " twice."
                     return
@@ -156,11 +157,10 @@ local function PlanKeys(plan, wantKeys)
             end
         end
     end
-    -- Keys that hold one of these commands now but aren't wanted for it.
+    -- Every key that holds one of these commands now but isn't wanted for it.
     for cmd in pairs(wantKeys) do
-        local k1, k2 = Game.KeysFor(cmd)
-        for _, key in ipairs({ k1, k2 }) do
-            if key and want[key] == nil then want[key] = false end
+        for _, key in ipairs(Game.KeysFor(cmd)) do
+            if want[key] == nil then want[key] = false end
         end
     end
     for key, cmd in pairs(want) do
@@ -187,16 +187,16 @@ function Loadout.Plan(entry)
         if want then
             local target, why, create = Resolve(want, modules, book)
             local current = Game.ActionAt(slot)
-            if target and create and not creating[target.name] then
+            if target and not Game.Restorable(current) then
+                target, why = nil, "slot holds something this slice can't put back"
+            end
+            if target and not Game.SameAction(current, target) and create and not creating[target.name] then
                 if charCount + #plan.creates >= Game.MAX_CHAR_MACROS then
                     target, why = nil, "macro slots full"
                 else
                     creating[target.name] = true
                     plan.creates[#plan.creates + 1] = { name = target.name, body = target.body, icon = target.icon }
                 end
-            end
-            if target and current and current.kind == "unsupported" then
-                target, why = nil, "slot holds something this slice can't restore"
             end
             if not target then
                 plan.skips[#plan.skips + 1] = { slot = slot, reason = why }
@@ -224,16 +224,13 @@ local function Snapshot(plan, reason)
     local Game = G()
     local snap = { reason = reason, actions = {}, keys = {}, createdMacros = {},
                    characterBindings = Game.CharacterBindings() }
-    for _, op in ipairs(plan.actions) do
-        local a = Game.ActionAt(op.slot)
-        snap.actions[op.slot] = a or false
-    end
+    for _, op in ipairs(plan.actions) do snap.actions[op.slot] = Game.ActionAt(op.slot) or false end
     for key in pairs(plan.keys) do snap.keys[key] = Game.CommandOf(key) end
     return snap
 end
 
 -- Run `plan`; `snap` is its pinned (load) or ring (restore) snapshot.
--- Returns result = { done = {...}, failed = reason|nil, at = what }.
+-- Returns result = { changed, created, keys, failed = reason|nil, at }.
 local function Execute(plan, snap)
     local Game = G()
     local result = { changed = 0, created = 0, keys = 0 }
@@ -244,16 +241,27 @@ local function Execute(plan, snap)
     -- content, which the snapshot already holds. Drop it rather than leave a
     -- stray action on the player's cursor; restoring `op` puts it back.
     local function bail(why, at)
-        if not Game.CursorEmpty() then pcall(ClearCursor) end
+        if not Game.CursorEmpty() then
+            pcall(ClearCursor)
+            if not Game.CursorEmpty() then why = why .. "; the cursor still holds something" end
+        end
         return fail(why, at)
+    end
+    -- A protected client call, guarded first and pcall'd.
+    local function call(forBindings, fn, ...)
+        local why = Guard(forBindings)
+        if why then return false, why end
+        local ok, err = pcall(fn, ...)
+        if not ok then return false, "client error: " .. tostring(err) end
+        return true
     end
 
     -- 1. Character macros, then verify each by name + normalised body.
     for _, c in ipairs(plan.creates) do
-        local why = Guard(); if why then return fail(why, "macro " .. c.name) end
-        local ok = pcall(CreateMacro, c.name, c.icon or "INV_Misc_QuestionMark", c.body, true)
+        local ok, why = call(false, CreateMacro, c.name, c.icon or "INV_Misc_QuestionMark", c.body, true)
+        if not ok then return fail(why, "macro " .. c.name) end
         local matches = Game.MacrosNamed(c.name)
-        if not ok or #matches ~= 1 or matches[1].scope ~= "char"
+        if #matches ~= 1 or matches[1].scope ~= "char"
             or Game.Normalize(matches[1].body) ~= Game.Normalize(c.body) then
             return fail("macro not created", "macro " .. c.name)
         end
@@ -264,55 +272,70 @@ local function Execute(plan, snap)
     -- 2. Actions: pick up, check the cursor, place, handle the displaced
     -- action, read back. Macro indices are looked up NOW (creation shifts them).
     for _, op in ipairs(plan.actions) do
-        local why = Guard(); if why then return fail(why, "slot " .. op.slot) end
-        if not Game.CursorEmpty() then return bail("cursor not empty", "slot " .. op.slot) end
+        local at = "slot " .. op.slot
+        if not Game.CursorEmpty() then return bail("cursor not empty", at) end
         local t = op.target
+        local ok, why
         if t then
-            if t.kind == "spell" then C_Spell.PickupSpell(t.id)
-            elseif t.kind == "item" then C_Item.PickupItem(t.id)
-            elseif t.kind == "macro" then
+            if t.kind == "spell" then ok, why = call(false, C_Spell.PickupSpell, t.id)
+            elseif t.kind == "item" then ok, why = call(false, C_Item.PickupItem, t.id)
+            else
                 local m = Game.MacrosNamed(t.name)
-                if #m ~= 1 then return bail("macro not unique", "slot " .. op.slot) end
-                PickupMacro(m[1].index)
+                if #m ~= 1 then return bail("macro not unique", at) end
+                ok, why = call(false, PickupMacro, m[1].index)
             end
-            if not Game.SameAction(Game.Cursor(), t) then return bail("pickup failed", "slot " .. op.slot) end
-            PlaceAction(op.slot)
+            if not ok then return bail(why, at) end
+            if not Game.SameAction(Game.Cursor(), t) then return bail("pickup failed", at) end
+            ok, why = call(false, PlaceAction, op.slot)
         else
             -- Restoring an empty slot: lift what is there, then drop it.
-            PickupAction(op.slot)
+            ok, why = call(false, PickupAction, op.slot)
         end
+        if not ok then return bail(why, at) end
         -- What the cursor holds now must be exactly the slot's previous
-        -- content (already in the snapshot), or nothing. ClearCursor is not
-        -- a protected write; clearing our own displaced payload is allowed
-        -- even if combat began this frame.
+        -- content (already in the snapshot), or nothing. ClearCursor is not a
+        -- protected call, so clearing our own displaced payload is allowed even
+        -- if combat began this frame.
         local held = Game.Cursor()
         if held then
             if t and Game.SameAction(held, t) and not Game.SameAction(Game.ActionAt(op.slot), t) then
-                return bail("place failed", "slot " .. op.slot)      -- our pickup never landed
+                return bail("place failed", at)      -- our pickup never landed
             end
             if not Game.SameAction(held, snap.actions[op.slot] or nil) then
-                return bail("unexpected item on cursor", "slot " .. op.slot)
+                return bail("unexpected item on cursor", at)
             end
             pcall(ClearCursor)
+            if not Game.CursorEmpty() then return bail("cursor stuck", at) end
         end
-        if not Game.SameAction(Game.ActionAt(op.slot), t) then return bail("verify failed", "slot " .. op.slot) end
+        if not Game.SameAction(Game.ActionAt(op.slot), t) then return bail("verify failed", at) end
         result.changed = result.changed + 1
     end
 
-    -- 3. Bindings: the final map, each key once, read back whole before saving.
+    -- 3. Bindings: the final map, each key once, guarded each time; read back
+    -- whole before saving; rolled back in memory on any failure.
     if next(plan.keys) then
-        local why = Guard(true); if why then return fail(why, "bindings") end
-        for key, v in pairs(plan.keys) do pcall(SetBinding, key, v.to or nil) end
-        local ok = true
+        local failed
         for key, v in pairs(plan.keys) do
-            if Game.CommandOf(key) ~= v.to then ok = false end
+            local ok, why = call(true, SetBinding, key, v.to or nil)
+            if not ok then failed = why break end
         end
-        why = Guard(true)
-        if not ok or why then
-            for key in pairs(plan.keys) do pcall(SetBinding, key, snap.keys[key] or nil) end
-            return fail(why or "bindings failed", "bindings")
+        if not failed then
+            for key, v in pairs(plan.keys) do
+                if Game.CommandOf(key) ~= v.to then failed = "bindings failed" end
+            end
         end
-        local saved = pcall(SaveBindings, Enum.BindingSet.Character)
+        if failed then
+            for key in pairs(plan.keys) do
+                if Game.CommandOf(key) ~= snap.keys[key] then
+                    local ok = call(true, SetBinding, key, snap.keys[key] or nil)
+                    if not ok then
+                        return fail(failed .. "; some keys couldn't be put back (unsaved): restore op", "bindings")
+                    end
+                end
+            end
+            return fail(failed, "bindings")
+        end
+        local saved = call(true, SaveBindings, Enum.BindingSet.Character)
         for key, v in pairs(plan.keys) do
             if Game.CommandOf(key) ~= v.to then saved = false end
         end
@@ -331,7 +354,7 @@ end
 function Loadout.Load(entry, shown, abandon)
     local plan = Loadout.Plan(entry)
     if plan.blocked then return nil, plan.blocked end
-    if plan.signature ~= shown.signature then return nil, "Something changed since the preview: review it again." end
+    if plan.fingerprint ~= shown.fingerprint then return nil, "Something changed since the preview: review it again." end
     local pinned = ASS.Backups.Operation()
     if pinned then
         if not abandon then return nil, "incomplete" end
@@ -372,7 +395,11 @@ function Loadout.PlanRestore(which)
     if not snap then plan.blocked = "No such backup." return Finish(plan) end
     plan.blocked = Loadout.Blocked()
     if plan.blocked then return Finish(plan) end
-    for slot, want in pairs(snap.actions or {}) do
+    local slots = {}
+    for slot in pairs(snap.actions or {}) do slots[#slots + 1] = slot end
+    table.sort(slots)
+    for _, slot in ipairs(slots) do
+        local want = snap.actions[slot]
         local current = Game.ActionAt(slot)
         local target, why
         if want == false then
@@ -391,18 +418,18 @@ function Loadout.PlanRestore(which)
         else
             why = "not restorable"
         end
+        if not why and not Game.SameAction(current, target) and not Game.Restorable(current) then
+            why = "slot now holds something that couldn't be put back"
+        end
         if why then
             plan.unavailable[#plan.unavailable + 1] = { slot = slot, reason = why }
-        elseif current and current.kind == "unsupported" then
-            plan.unavailable[#plan.unavailable + 1] = { slot = slot, reason = "slot now holds something this slice can't restore" }
         elseif not Game.SameAction(current, target) then
             plan.actions[#plan.actions + 1] = { slot = slot, target = target, current = current }
         end
     end
-    table.sort(plan.actions, function(a, b) return a.slot < b.slot end)
     if snap.keys and next(snap.keys) then
         if not Game.CharacterBindings() then
-            plan.keysBlocked = "Enable character-specific keybindings in WoW settings, then try again."
+            plan.keysBlocked = KEYS_BLOCKED
         else
             for key, cmd in pairs(snap.keys) do
                 local from = Game.CommandOf(key)
@@ -414,20 +441,28 @@ function Loadout.PlanRestore(which)
     return Finish(plan)
 end
 
+-- Is everything the snapshot asks for back (nothing unavailable or blocked)?
+local function Complete(plan, result)
+    return not (result and result.failed) and #plan.unavailable == 0 and not plan.keysBlocked
+end
+
 function Loadout.Restore(which, shown)
     local plan = Loadout.PlanRestore(which)
     if plan.blocked then return nil, plan.blocked end
-    if plan.signature ~= shown.signature then return nil, "Something changed since the preview: review it again." end
+    if plan.fingerprint ~= shown.fingerprint then return nil, "Something changed since the preview: review it again." end
+    local result
     if plan.noop then
-        if which == "op" then ASS.Backups.Release() end
-        return { noop = true, unavailable = plan.unavailable, kept = plan.kept }
+        result = { noop = true, changed = 0, created = 0, keys = 0 }
+    else
+        local snap = Snapshot(plan, "restore")
+        ASS.Backups.PushRing(snap)
+        result = Execute(plan, snap)
     end
-    local snap = Snapshot(plan, "restore")
-    ASS.Backups.PushRing(snap)
-    local result = Execute(plan, snap)
     result.unavailable, result.kept = plan.unavailable, plan.kept
-    result.partial = (#plan.unavailable > 0) or nil
-    if not result.failed and which == "op" then
+    result.keysBlocked = plan.keysBlocked
+    result.partial = not Complete(plan, result) or nil
+    -- The pinned operation is released only when it is fully restored.
+    if which == "op" and Complete(plan, result) then
         ASS.Backups.Release()
         ASS.char.interrupted = nil
     end

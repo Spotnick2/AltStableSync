@@ -89,7 +89,11 @@ local function Report(kind, result, err)
         Print((kind == "load" and "Not loaded: " or "Not restored: ") .. tostring(err))
         return
     end
-    if result.noop then Print("Already matches the selected settings.") return end
+    if result.noop and not result.partial then Print("Already matches the selected settings.") return end
+    if result.noop then
+        Print("Nothing could be restored: see the preview's list. The backup is kept.")
+        return
+    end
     local skipped = #(result.skips or {}) + #(result.unavailable or {})
     if result.failed then
         Print(("Stopped (%s at %s): %d slots, %d keys done. Use /altsync restore op to undo, or load again to abandon it.")
@@ -99,7 +103,7 @@ local function Report(kind, result, err)
     local msg = ("%s: %d slots, %d keys%s."):format(kind == "load" and "Loaded" or "Restored",
         result.changed, result.keys, result.created > 0 and (", " .. result.created .. " macros created") or "")
     if skipped > 0 then msg = msg .. " " .. skipped .. " left unchanged (see the preview's list)." end
-    if result.partial then msg = msg .. " Partial: some entries couldn't be restored exactly." end
+    if result.partial then msg = msg .. " Partial: some entries couldn't be restored exactly; the backup is kept." end
     Print(msg)
 end
 
@@ -142,7 +146,10 @@ function Commands.load(arg)
         lines = lines,
         -- A no-op still gets "Done": it records what was loaded (docs/DESIGN.md:
         -- a no-op Load records the baseline) without writing game state.
-        confirm = plan.blocked and false or (plan.noop and "Done" or "Load"),
+        confirm = (function()
+            if plan.blocked then return false end     -- (not "and false or": that always picks the fallback)
+            return plan.noop and "Done" or "Load"
+        end)(),
         onConfirm = function() Report("load", ASS.Loadout.Load(entry, plan, pinned ~= nil)) end,
     })
 end
@@ -161,7 +168,10 @@ function Commands.restore(arg)
     ASS.Preview.Show({
         title = "Restore backup " .. tostring(which) .. "?",
         lines = Commands.Describe(plan),
-        confirm = (plan.blocked or plan.noop) and false or "Restore",
+        confirm = (function()
+            if plan.blocked or (plan.noop and #plan.unavailable == 0 and not plan.keysBlocked) then return false end
+            return plan.noop and "Done" or "Restore"
+        end)(),
         onConfirm = function() Report("restore", ASS.Loadout.Restore(which, plan)) end,
     })
 end

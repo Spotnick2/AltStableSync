@@ -17,8 +17,7 @@ ASS.Preview = Preview
 local frame
 
 local function Build()
-    local ok, f = pcall(CreateFrame, "Frame", "AltStableSyncPreview", UIParent, "BackdropTemplate")
-    if not ok or not f then f = CreateFrame("Frame", "AltStableSyncPreview", UIParent) end
+    local f = CreateFrame("Frame", "AltStableSyncPreview", UIParent, "BackdropTemplate")
     f:SetSize(460, 320)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
@@ -40,11 +39,26 @@ local function Build()
     tinsert(UISpecialFrames, "AltStableSyncPreview")
     f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     f.title:SetPoint("TOPLEFT", 20, -18)
-    f.body = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    f.body:SetPoint("TOPLEFT", 20, -50)
-    f.body:SetPoint("BOTTOMRIGHT", -20, 52)
+    -- The body scrolls: a full slice plan (12 slots, keys, skips) is longer
+    -- than the frame, and every line must be reachable before confirming.
+    local scroll = CreateFrame("ScrollFrame", nil, f)
+    scroll:SetPoint("TOPLEFT", 20, -50)
+    scroll:SetPoint("BOTTOMRIGHT", -20, 52)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(410, 10)
+    scroll:SetScrollChild(content)
+    f.body = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    f.body:SetPoint("TOPLEFT")
+    f.body:SetWidth(410)
     f.body:SetJustifyH("LEFT")
     f.body:SetJustifyV("TOP")
+    f.content, f.scroll = content, scroll
+    scroll:EnableMouseWheel(true)
+    scroll:SetScript("OnMouseWheel", function(self, delta)
+        local max = self:GetVerticalScrollRange()
+        local v = math.max(0, math.min(max, self:GetVerticalScroll() - delta * 40))
+        self:SetVerticalScroll(v)
+    end)
     local function button(text, x)
         local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         b:SetSize(110, 24)
@@ -73,6 +87,8 @@ function Preview.Show(opts)
     frame = frame or Build()
     frame.title:SetText(opts.title or "AltStableSync")
     frame.body:SetText(table.concat(opts.lines or {}, "\n"))
+    frame.content:SetHeight(math.max(10, frame.body:GetStringHeight() + 8))
+    frame.scroll:SetVerticalScroll(0)
     frame.confirm:SetText(opts.confirm or "Load")
     if opts.confirm == false then frame.confirm:Hide() else frame.confirm:Show() end
     frame.onConfirm, frame.onCancel = opts.onConfirm, opts.onCancel

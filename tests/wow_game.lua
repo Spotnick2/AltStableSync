@@ -19,6 +19,8 @@
 --   WoW.game.setup{ spells = {...}, actions = {...}, macros = {...}, keys = {...}, items = {...} }
 --   WoW.game.combatAfter = n   -- InCombatLockdown() turns true after n more mutating calls
 --   WoW.game.calls             -- every mutating call, in order (for "wrote nothing" checks)
+--   WoW.game.blocked           -- protected calls attempted IN COMBAT (each also raises, like
+--                                 the client's ADDON_ACTION_BLOCKED); must stay empty
 --   WoW.relaunch()             -- a full exit: macro bodies gain the server newline
 ------------------------------------------------------------
 
@@ -42,6 +44,7 @@ function G.setup(opts)
     G.combat = false
     G.combatAfter = nil
     G.calls = {}
+    G.blocked = {}
     G.cursor = nil
     G.bindingSet = opts.bindingSet or 2      -- Enum.BindingSet.Character
     G.keys = copy(opts.keys or {})           -- [key] = command
@@ -87,7 +90,13 @@ local function macroAt(index)
     return G.account[index]
 end
 
-local function mutate(name)
+-- A mutating call. `protected`: refused in combat (the client blocks action
+-- bar, macro and binding writes in combat lockdown). ClearCursor is not.
+local function mutate(name, protected)
+    if protected and G.combat then
+        G.blocked[#G.blocked + 1] = name
+        error("ADDON_ACTION_BLOCKED: " .. name, 3)
+    end
     G.calls[#G.calls + 1] = name
     if G.combatAfter then
         G.combatAfter = G.combatAfter - 1
@@ -135,7 +144,7 @@ local function isKnown(s) return s and s.known ~= false end
 C_Spell = {
     GetSpellName = function(id) local s = spellById(id); return s and s.name end,
     PickupSpell = function(id)
-        mutate("C_Spell.PickupSpell")
+        mutate("C_Spell.PickupSpell", true)
         local s, i = spellById(id)
         if isKnown(s) then G.cursor = { kind = "spell", id = id, book = i } end
     end,
@@ -161,7 +170,7 @@ C_SpellBook = {
 C_Item = {
     GetItemCount = function(id) return G.items[id] or 0 end,
     PickupItem = function(id)
-        mutate("C_Item.PickupItem")
+        mutate("C_Item.PickupItem", true)
         if (G.items[id] or 0) > 0 then G.cursor = { kind = "item", id = id } end
     end,
 }
@@ -214,7 +223,7 @@ local function actionAsCursor(a)
 end
 
 function PlaceAction(slot)
-    mutate("PlaceAction")
+    mutate("PlaceAction", true)
     if not G.cursor then return end
     local old = G.actions[slot]
     G.actions[slot] = cursorAsAction()
@@ -222,7 +231,7 @@ function PlaceAction(slot)
 end
 
 function PickupAction(slot)
-    mutate("PickupAction")
+    mutate("PickupAction", true)
     local a = G.actions[slot]
     if G.cursor then
         local new = cursorAsAction()
@@ -247,7 +256,7 @@ function GetMacroInfo(index)
 end
 
 function CreateMacro(name, icon, body, perCharacter)
-    mutate("CreateMacro")
+    mutate("CreateMacro", true)
     local list = perCharacter and G.char or G.account
     local cap = perCharacter and 30 or 120
     if #list >= cap then error("too many macros", 2) end
@@ -261,7 +270,7 @@ function EditMacro() mutate("EditMacro"); error("EditMacro must never be called 
 function DeleteMacro() mutate("DeleteMacro"); error("DeleteMacro must never be called by AltStableSync in these tests", 2) end
 
 function PickupMacro(index)
-    mutate("PickupMacro")
+    mutate("PickupMacro", true)
     local m = type(index) == "number" and macroAt(index)
     if m then G.cursor = { kind = "macro", ref = m } end
 end
@@ -282,13 +291,13 @@ end
 function GetBindingAction(key) return G.keys[key] or "" end
 
 function SetBinding(key, command)
-    mutate("SetBinding")
+    mutate("SetBinding", true)
     G.keys[key] = command
     return true
 end
 
 function SaveBindings(set)
-    mutate("SaveBindings")
+    mutate("SaveBindings", true)
     if G.saveFails then error("SaveBindings failed", 2) end
     if set == G.bindingSet then G.savedKeys = copy(G.keys) end
 end

@@ -81,4 +81,17 @@ for _, dir in ipairs({ "docs", "tests", "Tools", ".claude", ".github" }) do
     check(".pkgmeta ignores " .. dir, pkg:find("\n  %- " .. dir:gsub("%.", "%%.") .. "\r?\n") ~= nil)
 end
 
+-- Never a StaticPopup (it taints Blizzard's dialog pool; measured 70205): no
+-- shipped file may call or touch one.
+for _, line in ipairs(files) do
+    local path = line:gsub("\\", "/")
+    if path:match("%.lua$") then
+        local src = read(path)
+        if src then
+            local code = src:gsub("%-%-[^\n]*", "")      -- comments may say "never a StaticPopup"
+            check(path .. " never uses StaticPopup", not code:find("StaticPopup", 1, true))
+        end
+    end
+end
+
 finish("test_packaging")

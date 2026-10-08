@@ -136,6 +136,16 @@ function Game.ActionAt(slot)
 end
 
 -- Do two normalised actions hold the same thing?
+-- Can the slot content `a` be captured and put back exactly by this slice?
+-- Empty, a known spell, an item still in the bags, an unambiguous macro.
+function Game.Restorable(a)
+    if a == nil then return true end
+    if a.kind == "spell" then return Game.SpellKnown(a.id) end
+    if a.kind == "item" then return Game.ItemCount(a.id) > 0 end
+    if a.kind == "macro" then return #Game.MacrosNamed(a.name) == 1 end
+    return false
+end
+
 function Game.SameAction(a, b)
     if a == nil or b == nil then return a == b end
     if a.kind ~= b.kind then return false end
@@ -149,10 +159,13 @@ end
 -- Bindings, cursor
 ------------------------------------------------------------
 
+-- Every key bound to `command` (GetBindingKey returns them all), as a list.
 function Game.KeysFor(command)
-    local ok, k1, k2 = pcall(GetBindingKey, command)
-    if not ok then return nil, nil end
-    return k1, k2
+    local r = { pcall(GetBindingKey, command) }
+    if not r[1] then return {} end
+    local keys = {}
+    for i = 2, #r do if type(r[i]) == "string" and r[i] ~= "" then keys[#keys + 1] = r[i] end end
+    return keys
 end
 
 -- The command a key runs, or false when unbound.

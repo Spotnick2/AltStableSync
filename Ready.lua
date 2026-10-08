@@ -42,4 +42,3 @@ function Ready.IsReady()
     return true
 end
 
-ASS._readyTest = state

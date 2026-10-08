@@ -271,7 +271,7 @@ do
     plan = L.Plan(entry)
     why = {}
     for _, s in ipairs(plan.skips) do why[s.slot] = s.reason end
-    eq("unrestorable destination: skipped", why[1], "slot holds something this slice can't restore")
+    eq("unrestorable destination: skipped", why[1], "slot holds something this slice can't put back")
     L.Load(entry, plan)
     eq("unrestorable destination: untouched", G.actions[1].kind, "flyout")
 
@@ -354,25 +354,61 @@ end, "verify failed", function() PlaceAction = realPlace end)
 interrupted("SaveBindings fails", function() G.saveFails = true end, "bindings not saved",
             function() G.saveFails = false end)
 
--- Combat right at the binding writes: in-memory changes rolled back, not saved.
+-- Combat begins in the middle of the binding writes. Rollback is a protected
+-- call too, so it can't run in combat: nothing is attempted in combat, nothing
+-- is saved, the backup stays pinned, and `restore op` after combat puts every
+-- key back exactly.
+do
+    boot(); ready(); save(); alt()
+    local before = state()
+    local plan = L.Plan(entry)
+    local realSet = SetBinding
+    local nSet = 0
+    SetBinding = function(k, c)
+        local r = realSet(k, c)
+        nSet = nSet + 1
+        if nSet == 2 then WoW.game.combat = true end
+        return r
+    end
+    local r = L.Load(entry, plan)
+    SetBinding = realSet
+    check("combat at bindings: stopped", r and tostring(r.failed):find("combat") ~= nil, r and tostring(r.failed))
+    eq("combat at bindings: no protected call attempted in combat", #G.blocked, 0)
+    eq("combat at bindings: not saved", G.savedKeys["SHIFT-2"], "MOVEFORWARD")
+    check("combat at bindings: backup pinned", A.Backups.Operation() ~= nil)
+    G.combat = false
+    local rr = L.Restore("op", L.PlanRestore("op"))
+    check("combat at bindings: restored after combat", rr and not rr.failed, rr and tostring(rr.failed))
+    eq("combat at bindings: back exactly", state(), before)
+end
+
+-- Combat between the pickup and the place: no PlaceAction in combat, and the
+-- cursor is not left holding our pickup.
 do
     boot(); ready(); save(); alt()
     local plan = L.Plan(entry)
-    local nAction = 0
-    for _ in ipairs(plan.actions) do nAction = nAction + 1 end
-    -- Mutations before bindings: 1 CreateMacro + per action (pickup, place, maybe clear).
-    local r
-    local savedKeys = { ["1"] = "ACTIONBUTTON2", ["2"] = "ACTIONBUTTON1", ["SHIFT-2"] = "MOVEFORWARD" }
-    local realSet = SetBinding
-    local nSet = 0
-    SetBinding = function(k, c) nSet = nSet + 1; realSet(k, c); if nSet == 2 then WoW.game.combat = true end; return true end
-    r = L.Load(entry, plan)
-    SetBinding = realSet
-    eq("combat at bindings: stopped", r and r.failed, "combat")
-    eq("combat at bindings: keys rolled back in memory", G.keys["1"] .. "," .. G.keys["2"] .. "," .. G.keys["SHIFT-2"],
-       savedKeys["1"] .. "," .. savedKeys["2"] .. "," .. savedKeys["SHIFT-2"])
-    eq("combat at bindings: not saved", G.savedKeys["SHIFT-2"], "MOVEFORWARD")
-    check("combat at bindings: backup pinned", A.Backups.Operation() ~= nil)
+    local realPick = C_Spell.PickupSpell
+    C_Spell.PickupSpell = function(id) realPick(id); WoW.game.combat = true end
+    local r = L.Load(entry, plan)
+    C_Spell.PickupSpell = realPick
+    eq("combat after pickup: stopped", r and r.failed, "combat")
+    eq("combat after pickup: nothing protected attempted in combat", #G.blocked, 0)
+    eq("combat after pickup: cursor empty", G.cursor, nil)
+    G.combat = false
+end
+
+-- A client call that throws: caught, cursor cleaned, interruption recorded.
+do
+    boot(); ready(); save(); alt()
+    local plan = L.Plan(entry)
+    local realPlace = PlaceAction
+    PlaceAction = function() error("boom") end
+    local ok, r = pcall(L.Load, entry, plan)
+    PlaceAction = realPlace
+    check("throwing client call: Load did not raise", ok, tostring(r))
+    check("throwing client call: reported", ok and r and tostring(r.failed):find("client error") ~= nil, ok and r and tostring(r.failed))
+    eq("throwing client call: cursor empty", G.cursor, nil)
+    check("throwing client call: interruption recorded", A.char.interrupted ~= nil)
 end
 
 -- The binding set switches to Account mid-apply: no binding write.
@@ -445,6 +481,79 @@ do
 end
 
 ------------------------------------------------------------
+-- Hand-made entries for the edge cases the review named
+------------------------------------------------------------
+local function custom(modules)
+    return assert(A.Catalog.Create("loadout", { class = "PRIEST", category = "general",
+        name = "Custom " .. tostring(math.random(1, 1e9)) }, modules))
+end
+
+-- Restore over a slot that now holds something it couldn't put back (a used-up
+-- item): reported, slot untouched.
+do
+    boot(); ready(); save(); alt()
+    L.Load(entry, L.Plan(entry))
+    G.actions[1] = { kind = "item", id = 9999 }          -- on the bar, 0 in the bags
+    local rp = L.PlanRestore(1)
+    local reason
+    for _, u in ipairs(rp.unavailable) do if u.slot == 1 then reason = u.reason end end
+    eq("restore destination: reported", reason, "slot now holds something that couldn't be put back")
+    L.Restore(1, rp)
+    eq("restore destination: untouched", G.actions[1].id, 9999)
+end
+
+-- A macro is never created for a slot that is skipped.
+do
+    boot(); ready()
+    local e = custom({ actions = { [1] = { kind = "macro", name = "Fresh", body = "/fresh", scope = "char" } },
+                       macros = { Fresh = { body = "/fresh" } } })
+    alt({ actions = { [1] = { flyout = 3 } } })
+    local plan = L.Plan(e)
+    eq("skipped slot: no macro to create", #plan.creates, 0)
+    L.Load(e, plan)
+    eq("skipped slot: macro not created", #A.Game.MacrosNamed("Fresh"), 0)
+end
+
+-- Bindings: a missing first key never hides the second; a third key on the
+-- command is unbound when the entry doesn't want it.
+do
+    boot(); ready()
+    local e = custom({ bindings = { ACTIONBUTTON1 = { [2] = "Q" } } })
+    alt({ keys = { ["1"] = "ACTIONBUTTON1" } })
+    L.Load(e, L.Plan(e))
+    eq("key hole: Q bound", G.keys.Q, "ACTIONBUTTON1")
+    eq("key hole: 1 unbound (not wanted)", G.keys["1"], nil)
+
+    boot(); ready()
+    local e2 = custom({ bindings = { ACTIONBUTTON1 = { "1" } } })
+    alt({ keys = { ["1"] = "ACTIONBUTTON1", ["Q"] = "ACTIONBUTTON1", ["Z"] = "ACTIONBUTTON1" } })
+    L.Load(e2, L.Plan(e2))
+    eq("three keys: Q unbound", G.keys.Q, nil)
+    eq("three keys: Z unbound", G.keys.Z, nil)
+    eq("three keys: 1 kept", G.keys["1"], "ACTIONBUTTON1")
+    -- And capture keeps all of them.
+    alt({ keys = { ["1"] = "ACTIONBUTTON1", ["Q"] = "ACTIONBUTTON1", ["Z"] = "ACTIONBUTTON1" } })
+    eq("three keys: captured", table.concat(L.Capture().bindings.ACTIONBUTTON1, ","), "1,Q,Z")
+end
+
+-- Reindex: creating "Ant" shifts the existing "Zed"; placing Zed afterwards
+-- must use its NEW index (indices are looked up at placement time).
+do
+    boot(); ready()
+    local e = custom({
+        actions = { [9] = { kind = "macro", name = "Ant", body = "/ant", scope = "char" },
+                    [10] = { kind = "macro", name = "Zed", body = "/z", scope = "char" } },
+        macros = { Ant = { body = "/ant" }, Zed = { body = "/z" } } })
+    alt()                                                -- has char macro Zed at 121
+    eq("reindex setup: Zed at 121", A.Game.MacrosNamed("Zed")[1].index, 121)
+    local r = L.Load(e, L.Plan(e))
+    check("reindex: loaded", r and not r.failed, r and tostring(r.failed))
+    eq("reindex: Zed moved to 122", A.Game.MacrosNamed("Zed")[1].index, 122)
+    eq("reindex: slot 9 is Ant", G.actions[9].ref.name, "Ant")
+    eq("reindex: slot 10 is Zed", G.actions[10].ref.name, "Zed")
+end
+
+------------------------------------------------------------
 -- Preview text
 ------------------------------------------------------------
 do
@@ -453,7 +562,14 @@ do
     check("preview: counts", lines:find("Actions:") ~= nil and lines:find("Bindings") ~= nil)
     check("preview: skip reasons", lines:find("not learned") ~= nil)
     check("preview: displaced key shown", lines:find("SHIFT%-2: MOVEFORWARD %-> ACTIONBUTTON2") ~= nil, lines)
-    check("preview: no StaticPopup anywhere", StaticPopup_Show == nil)
+    -- (StaticPopup is checked by test_packaging's source scan of every shipped file.)
+    -- A blocked load offers no confirm button (the old "and false or" bug showed "Done").
+    G.combat = true
+    A.Commands.load("Everyday")
+    eq("preview: blocked -> no confirm", A._shown and A._shown.confirm, false)
+    G.combat = false
+    A.Commands.load("Everyday")
+    eq("preview: changes -> Load", A._shown and A._shown.confirm, "Load")
 end
 
 finish("test_loadout")
