@@ -190,8 +190,9 @@ AltStableSyncLAS = <LibAccountSync store only>   -- declared ONLY by AltStableSy
   `next(profiles) == nil` is stamped 2 and `profiles` is dropped, keeping `backups`. A populated or
   malformed schema 1 is refused untouched; the addon never wrote a profile, so none should exist.
   There is no migration framework. A missing or empty `AltStableSyncChar` is initialised at
-  schema 2; a populated one with no schema (written by the scaffold build, which only ever wrote an
-  empty table) is stamped 2; a newer or unknown one is refused untouched, and so is its DB.
+  schema 2; a populated table without a schema, or one with an unknown or newer schema, is refused
+  untouched, together with its DB. (Measured on disk: the scaffold build only ever wrote
+  `AltStableSyncChar = {}`.)
 - **Categories** (`Categories.lua`): per class, a short list of stable keys with display text, plus
   `general` ("General / Leveling").
 
@@ -645,4 +646,6 @@ schema refusal, readiness and combat gates, macro ownership, read-back, or catal
     a `test_core` fixture.
   - Confirming round (gpt-6-astra, high): `createdMacros` moves onto the backup snapshot itself, so
     Restore can still remove what a completed or abandoned load created. The exchange-trigger
-    wording is fixed, and `AltStableSyncChar` initialisation at schema 2 is specified.
+    wording is fixed, and `AltStableSyncChar` initialisation at schema 2 is specified. The next
+    round removed a "stamp a populated unschemed char table" exception: only a missing or empty one
+    is initialised; anything else unschemed is refused untouched.
