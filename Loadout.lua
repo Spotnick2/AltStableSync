@@ -384,6 +384,11 @@ local function Execute(plan, snap)
         end
         local saved, why = call(true, SaveBindings, Enum.BindingSet.Character)
         if not saved then return rollback("bindings not saved (" .. tostring(why) .. ")") end
+        -- Read back again after saving: something may have changed a key on
+        -- the way. The pending flag stays set and the backup stays pinned.
+        for key, v in pairs(plan.keys) do
+            if Game.CommandOf(key) ~= v.to then return fail("bindings changed while saving", "bindings") end
+        end
         SetUnsaved(nil)
         for _ in pairs(plan.keys) do result.keys = result.keys + 1 end
     end

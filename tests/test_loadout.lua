@@ -356,6 +356,18 @@ interrupted("read-back differs (A25)", function()
 end, "verify failed", function() PlaceAction = realPlace end)
 interrupted("SaveBindings fails", function() G.saveFails = true end, "bindings not saved",
             function() G.saveFails = false end)
+-- Codex follow-up: a hook changes a planned key while saving. The post-save
+-- read-back catches it; the work stays pending and the backup pinned.
+local realSaveB = SaveBindings
+interrupted("key changed while saving", function()
+    SaveBindings = function(set)
+        WoW.game.keys["SHIFT-2"] = "ACTIONBUTTON12"
+        return realSaveB(set)
+    end
+end, "bindings changed while saving", function()
+    SaveBindings = realSaveB
+    check("key changed while saving: still unsaved", A.char.bindingsUnsaved == true)
+end)
 
 -- Combat begins in the middle of the binding writes. Rollback is a protected
 -- call too, so it can't run in combat: nothing is attempted in combat, nothing
