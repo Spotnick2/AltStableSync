@@ -743,7 +743,7 @@ local function PredicateTick()
     local now = NowMs()
     local since = now - (predicate.lastQuiet or 0)
     if predicate.pew and #SpellBook() > 0 and since >= 2000 then
-        predicate.at, predicate.state = now, readiness()
+        predicate.at, predicate.state, predicate.quietAt = now, readiness(), predicate.lastQuiet
         -- And the state 10 s later: did anything still change after "ready"?
         C_Timer.After(10, function() predicate.final = readiness() end)
         return
@@ -764,7 +764,8 @@ function P.ready()
     Section("ready  (readiness predicate; run once ~15 s after a fresh login OR a /reload)")
     Record(("%-44s isInitialLogin=%s isReloadingUi=%s"):format("PLAYER_ENTERING_WORLD", ValStr(predicate.initial), ValStr(predicate.reload)))
     Record(("%-44s %s ms"):format("PLAYER_ENTERING_WORLD at", ValStr(predicate.pew)))
-    Record(("%-44s %s ms"):format("last UPDATE_MACROS/UPDATE_BINDINGS", ValStr(predicate.lastQuiet)))
+    Record(("%-44s %s ms"):format("last UPDATE_MACROS/BINDINGS before ready", ValStr(predicate.quietAt)))
+    Record(("%-44s %s ms"):format("last UPDATE_MACROS/BINDINGS so far", ValStr(predicate.lastQuiet)))
     Record(("%-44s %s"):format("predicate first held at (ms)", ValStr(predicate.at)))
     Record(("%-44s %s"):format("  readable then", tostring(predicate.state)))
     Record(("%-44s %s"):format("  readable 10 s later", tostring(predicate.final or "(not yet - rerun)")))
@@ -792,12 +793,14 @@ function P.forms()
     Call("ActionButton1.action", function() return ActionButton1 and ActionButton1.action end)
     -- Every non-empty slot on the main page (1-12) and the bonus pages (73-120).
     local function dump(from, to)
-        local parts = {}
+        local parts, errors = {}, 0
         for s = from, to do
             local ok, t, id = pcall(GetActionInfo, s)
-            if ok and t then parts[#parts + 1] = ("%d=%s:%s"):format(s, tostring(t), tostring(id)) end
+            if not ok then errors = errors + 1
+            elseif t then parts[#parts + 1] = ("%d=%s:%s"):format(s, tostring(t), tostring(id)) end
         end
-        Record(("%-44s %s"):format(("slots %d-%d"):format(from, to), #parts > 0 and table.concat(parts, " ") or "(all empty)"))
+        Record(("%-44s %s%s"):format(("slots %d-%d"):format(from, to), #parts > 0 and table.concat(parts, " ") or "(all empty)",
+            errors > 0 and ("  (" .. errors .. " reads THREW)") or ""))
     end
     dump(1, 12)
     dump(73, 84); dump(85, 96); dump(97, 108); dump(109, 120)
