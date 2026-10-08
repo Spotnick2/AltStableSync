@@ -320,6 +320,11 @@ do
     local ff = C.Copy(root(a, id))
     ff.version, ff.ancestors, ff.conflict = "peer:9", { rootBefore }, true
     bad("fast-forward with conflict = true", ff)
+    -- A conflict that points at itself would retire itself on arrival.
+    local selfref = C.Copy(root(a, id))
+    selfref.version, selfref.ancestors, selfref.conflict = "peer:11", { rootBefore }, { of = id }
+    bad("self-referencing conflict", selfref)
+    bad("conflict id not <of>~<v>", with("conflict", { of = id }))
     local ff2 = C.Copy(root(a, id))
     ff2.version, ff2.ancestors, ff2.deleted = "peer:10", { rootBefore }, "true"
     bad("fast-forward with deleted a string", ff2)

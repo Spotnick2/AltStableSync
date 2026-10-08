@@ -280,6 +280,9 @@ local function ValidIncoming(x)
     if x.conflict ~= nil then
         local c = x.conflict
         if type(c) ~= "table" or type(c.of) ~= "string" or c.of == "" then return false end
+        -- A conflict copy's id is always "<root id>~<version>" (Upsert makes it
+        -- so), which also rules out a copy pointing at itself.
+        if x.id:sub(1, #c.of + 1) ~= c.of .. "~" or #x.id <= #c.of + 1 then return false end
         if not (OptionalType(c.deletion, "boolean") and OptionalType(c.retired, "boolean")
                 and OptionalType(c.name, "string") and OptionalType(c.from, "string")) then
             return false
