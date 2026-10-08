@@ -520,6 +520,37 @@ do
     check("two copies: manifests agree", same(a, b))
 end
 
+-- Edited here, deleted there, then deleted here too before resolving: the
+-- deletion copy is still resolvable ("keep it deleted"), in both writer-token
+-- orderings, and both accounts settle.
+for _, editorIsA in ipairs({ true, false }) do
+    local a, b, id = pair()
+    local ed, del = a, b
+    if not editorIsA then ed, del = b, a end
+    local tag = editorIsA and "A edits" or "B edits"
+    use(ed); C.Replace(id, mods("edit"), root(ed, id).version)
+    use(del); C.Delete(id, root(del, id).version)
+    send(del, ed)
+    use(ed)
+    local cid = id .. "~" .. root(del, id).version
+    check("del twice (" .. tag .. "): deletion copy", ed.db.presets[cid] and ed.db.presets[cid].conflict.deletion)
+    C.Delete(id, root(ed, id).version)
+    sync(a, b)
+    for _, acc in ipairs({ a, b }) do
+        use(acc)
+        for copyId, e in pairs(acc.db.presets) do
+            if e.conflict and not e.deleted then
+                check("del twice (" .. tag .. "): resolvable on " .. acc.name,
+                      C.Resolve(copyId, "mine", root(acc, id).version) ~= nil)
+            end
+        end
+    end
+    sync(a, b)
+    check("del twice (" .. tag .. "): both deleted", root(a, id).deleted and root(b, id).deleted)
+    eq("del twice (" .. tag .. "): no live copies", liveConflicts(a) + liveConflicts(b), 0)
+    check("del twice (" .. tag .. "): manifests agree", same(a, b))
+end
+
 -- A stale Delete can't destroy a newer version that arrived unreviewed.
 do
     local a, b, id = pair()

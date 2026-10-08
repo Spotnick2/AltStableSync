@@ -343,15 +343,15 @@ function RetireCovered(rootId)
     local p = Presets()
     local root = p[rootId]
     if not root then return end
-    local covered = {}
+    -- Retire only changes fields of existing entries (no keys added or
+    -- removed), so calling it during pairs() is safe in Lua 5.1.
     for cid, c in pairs(p) do
         if type(c) == "table" and type(c.conflict) == "table" and c.conflict.of == rootId
             and not c.deleted
             and (c.version == root.version or Contains(root.ancestors, c.version)) then
-            covered[#covered + 1] = cid
+            Retire(cid)
         end
     end
-    for _, cid in ipairs(covered) do Retire(cid) end
 end
 
 -- choice:
@@ -380,7 +380,10 @@ function Catalog.Resolve(copyId, choice, expectedRootVersion)
     local created
 
     if root.deleted then
-        if deletedThere then return nil, "bad-choice" end      -- converges by tie-break instead
+        -- Deleted on both sides (deleted here after the deletion copy
+        -- arrived): the only sensible answer is "keep it deleted".
+        if deletedThere and choice ~= "mine" and choice ~= "delete" then return nil, "bad-choice" end
+        if deletedThere then choice = "mine" end
         if choice == "theirs" then
             local name = Catalog.ValidateName(root.kind, root.class, root.category, copy.conflict.name)
                 or (tostring(copy.conflict.name) .. " (kept)")

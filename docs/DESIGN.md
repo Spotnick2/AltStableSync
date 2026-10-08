@@ -664,3 +664,5 @@ schema refusal, readiness and combat gates, macro ownership, read-back, or catal
 
   Simplification: the explicit "tombstone the mirror id we never received" step was redundant once
   covered copies are retired, so it was removed.
+- **PR #32 round 2:** a "deleted there" conflict copy stays resolvable after the entry is deleted
+  here too ("keep it deleted", in either writer-token order).
