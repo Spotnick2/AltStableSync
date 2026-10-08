@@ -220,11 +220,12 @@ Only an explicit confirmation click writes game state.
 
 ## Safety model (non-negotiable)
 
-1. **Backup before every apply and every restore.** If capturing the backup fails, nothing is
-   written. A no-op plan needs no backup. **One backup per user-started operation:** resuming an
-   interrupted operation reuses that operation's original backup instead of taking a new ring slot,
-   so retries can never push out the real before-state. The ring holds 10 per character, plus the
-   pinned first-seen snapshot.
+1. **Backup before every apply, every resume and every restore.** If capturing the backup fails,
+   nothing is written. A no-op plan needs no backup. While an operation is `interrupted`, its
+   **original backup is pinned** (never evicted) until the operation completes or the player
+   abandons it, so resumes can't push out the real before-state; each resume still takes its own
+   backup, which keeps any edits the player made in between. The ring holds 10 per character, plus
+   the pinned first-seen snapshot.
 2. **Preview before write**, in our own frame. The preview captures an **immutable copy of the entry
    and its version**. Confirming applies exactly that copy, or refuses as stale if the entry, or the
    target state the plan relied on, changed since (A38).
@@ -309,7 +310,10 @@ kind (`AltStableSyncChar.loaded`) with the applied/skipped result.
 
 **Which entry Save may replace:** only the entry this character currently has loaded
 (`AltStableSyncChar.loaded[kind]`), and only while that entry's current version is still the
-loaded version. Selecting an entry without loading it, or loading a different one since, leaves
+loaded version. A successful Save **advances that baseline** to the version it produced (with the
+saved content as the new baseline), so the same character can edit and Save again. Sync receipt
+never advances a character's baseline. This restriction applies to capture Saves only; Undo and
+conflict resolution use their own catalog expected-version guards. Selecting an entry without loading it, or loading a different one since, leaves
 only Save As. A no-op Load ("Already matches") still records the baseline, so the main character
 can Load-then-Save without a write. A Save whose baseline is stale is refused, with Save As or a
 refreshed Load offered instead (A39).
@@ -359,8 +363,9 @@ One small LibGlass window with **UI setup** and **Loadouts** tabs and a quiet **
 - **First-login offer** (#10), after readiness and out of combat, only when at least one UI setup
   exists: "Make yourself at home. Start with your saved UI preferences." When exactly one exists it
   is named; when several exist the offer says "Choose a saved UI setup" and opens the UI setup tab.
-  Buttons: Not now, and Preview and apply (or Choose). Not now, opening the preview, and applying
-  all set `onboarding.handled`, so the offer never repeats on that character.
+  Buttons: Not now, and Preview and apply (or Choose). Not now, opening the preview, opening the
+  tab through Choose, and applying all set `onboarding.handled`, so the offer never repeats on that
+  character.
 - **Edge states:**
 
   | State | Copy |
@@ -447,22 +452,32 @@ offline while A saved three times) a plain fast-forward rather than a conflict.
 | Unknown or newer envelope schema | reject; local untouched |
 
 - **Resolving a conflict settles both accounts.** The conflict copy offers **Keep this version** and
-  **Keep mine**. Either one is a Save on `<id>`: it mints a new version whose content is the chosen
-  one and whose `ancestors` include **both** competing versions, then tombstones the conflict copy.
-  Both accounts then see that version as a fast-forward, and the exchange settles. Deleting a
-  conflict copy alone only removes the copy, and the next divergence can raise it again. The status
-  shows "conflict" for the entry until it is resolved.
+  **Keep mine**. Either one mints a new version of `<id>` whose content is the chosen one and whose
+  `ancestors` include **both** competing versions. It also tombstones **both** deterministic copy ids
+  for those two versions, `<id>~<a>` and `<id>~<b>`, including the mirror copy this account never
+  received. Each tombstone descends from its copy's version. The other account then fast-forwards
+  the root and its own mirror copy, and a late-arriving copy is ignored because its id already
+  exists as a tombstone. Deleting a conflict copy alone only removes the copy. The entry shows
+  "conflict" until it is resolved, and that status takes precedence over "confirmed".
+- **Deletion conflicts:**
+  - Two tombstones for the same id are equivalent: an incoming tombstone over a local tombstone is
+    ignored, so offline deletes on both sides settle.
+  - Deleted here, edited there: the edit arrives as a live conflict copy. **Keep this version**
+    turns the copy into an ordinary entry under a new id (a Save As); the root stays deleted.
+  - Edited here, deleted there: the tombstone arrives as a tombstoned conflict copy with the notice
+    "deleted on <char>". **Delete here too** tombstones the root, descending from both versions;
+    **Keep mine** mints a live version descending from both (the only way a live version may
+    descend from a tombstone).
 - There is no field merging, ever.
 - **Delete is a versioned tombstone** with ancestors, kept indefinitely so a stale peer can't
-  resurrect the entry. Tombstones can't be edited or recovered. An incoming edit that descends from
-  the tombstone can't exist. An edit made without seeing the deletion (its ancestors don't include
-  the tombstone) follows the table: it is divergent and becomes a conflict copy, so nothing
-  resurrects or vanishes silently.
+  resurrect the entry. Tombstones can't be edited or recovered from the UI. An edit made without
+  seeing the deletion (its ancestors don't include the tombstone) is divergent and follows the
+  deletion-conflict rules above, so nothing resurrects or vanishes silently.
 - `Replace`, `Rename`, `Delete`, Undo and the conflict actions all take an **expected version** and
   refuse when it's stale. A newer version that arrived from the other account is therefore never
   overwritten or tombstoned unreviewed.
-- **Confirmed** means the peer's manifest lists our current version, or a version that has it among
-  its ancestors, or our version's conflict copy. Until then the status says "pending".
+- **Confirmed** means the peer's manifest lists exactly our current `{id, version}`. Until then
+  the status says "pending"; an unresolved conflict shows "conflict" instead.
 - Sync is same-flavour only, by the library's design. Beta → live is the file transfer.
 
 ## Beta → live (Nov 4)
@@ -552,3 +567,10 @@ schema refusal, readiness and combat gates, macro ownership, read-back, or catal
   - tombstone wording consistent with the table;
   - a pre-#28 Save As warning;
   - the first-login offer marked handled on every outcome, choosing a setup when there are several.
+- **2026-10-08, PR rounds (gpt-6-astra, high):**
+  - Round 1 reached consensus on the first draft.
+  - Round 2, on the xhigh fixes, accepted four more: the operation backup is pinned while
+    interrupted, with resumes still backing up; a Save advances its own baseline, and the
+    loaded-entry rule covers capture Saves only; resolution tombstones both mirror copies; and
+    deletion conflicts are defined (two tombstones are equivalent, plus the delete/edit cases).
+  - Simplification accepted: "confirmed" means an exact root match.

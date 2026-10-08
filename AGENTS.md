@@ -52,7 +52,8 @@ The canonical, addon-agnostic Forever porting guide is
 This addon writes the player's bars, macros and bindings. A bug here destroys a setup someone built
 over months. The full model is in `docs/DESIGN.md`; the short form:
 
-1. **Backup before every apply** — every Load/Apply, retry and restore.
+1. **Backup before every apply** — every Load/Apply, resume and restore. An interrupted
+   operation's original backup stays pinned until it completes or is abandoned.
 2. **Preview before write**, in our own prompt frame. **Never a StaticPopup** (it taints
    Blizzard's dialog pool; Quit then fails with `ADDON_ACTION_FORBIDDEN`, measured 70205).
 3. **Load/Apply is adaptive; snapshot restore is exact.** Never conflate them.

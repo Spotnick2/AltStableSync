@@ -1,7 +1,7 @@
 # Acceptance scenarios
 
-> From the 2026-10-08 pivot handoff, verbatim except this header (which replaces its intro) and A41
-> (tightened to the design's file-copy rule). These are **requirements, not
+> From the 2026-10-08 pivot handoff, verbatim except this header (which replaces its intro) A39 and A41
+> (tightened to the design's rules). These are **requirements, not
 > passed tests**. Automate pure planning and state logic against Forever-shaped stubs; run client
 > behaviour in game. "Persists" always means a **full client exit and relaunch**, never `/reload`.
 > The design of record is `docs/DESIGN.md`; where they differ, DESIGN.md wins.
@@ -46,7 +46,7 @@
 | A36 | Apply account-scoped CVar / shared native layout | Preview accurately states physical scope; protected shared layout handled by reviewed policy |
 | A37 | Edit Mode initialize then restore, full exit and relaunch | Correct active layout/content persists; no reliance on reordered numeric list indices |
 | A38 | Saved entry changes between preview and confirm | Reject stale plan, recompute and re-preview |
-| A39 | Save from older loaded revision over newer catalog version | No silent loss; Save As or refreshed replacement review |
+| A39 | Save from older loaded revision over newer catalog version | No silent loss; Save As, or a refreshed Load then Save |
 | A40 | Import/receive catalog later | No current character mutation; only deliberate Load applies it |
 | A41 | Beta carryover with nonempty LAS | Transfer refuses an `AltStableSync.lua` that assigns a value to `AltStableSyncLAS` (`= nil`, which the client writes for a declared-but-unset variable, is fine); otherwise copies only that file and leaves both Link stores (`AltStableSyncLink.lua`) untouched. A separate, nonempty Link store does not block transfer. LAS never crosses flavors |
 | A42 | Beta build/project ID changes normally | No false flavor migration or destructive catalog reset |
