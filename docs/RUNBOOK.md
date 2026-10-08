@@ -81,9 +81,10 @@ Changing form never saves or loads anything.
 4. `pwsh Tools/deploy.ps1 -AddOnsPath "<live>\Interface\AddOns"`.
 5. Log in one character. **Nothing is written.** If a UI setup exists, the addon *offers* it
    ("Make yourself at home"); beta backups stay inert (they are keyed by beta GUIDs).
-6. **Launch gate:** on that character, preview and Apply the UI setup and Load one loadout; **full
-   exit and relaunch**; compare bars, macros and bindings against the preview. Then load what you
-   want on the other characters, one deliberate click at a time.
+6. **Launch gate:** on that character, preview and Apply the UI setup and Load one loadout. Do the
+   same on a **second** character (ideally a lower-level one). **Full exit and relaunch**, then
+   compare bars, macros and bindings on both against their previews. Only then load what you want
+   on the other characters, one deliberate click at a time.
 7. Log both WoW accounts in **at the same time** (sync needs both online): the Link addon pairs
    afresh (a new store) and later Saves flow between them. Nothing received applies until you load
    it.

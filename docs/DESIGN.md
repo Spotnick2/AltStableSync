@@ -460,10 +460,13 @@ offline while A saved three times) a plain fast-forward rather than a conflict.
   exists as a tombstone. Deleting a conflict copy alone only removes the copy. The entry shows
   "conflict" until it is resolved, and that status takes precedence over "confirmed".
 - **Deletion conflicts:**
-  - Two tombstones for the same id are equivalent: an incoming tombstone over a local tombstone is
-    ignored, so offline deletes on both sides settle.
+  - Tombstone over tombstone: a successor fast-forwards as usual. Two incomparable tombstones
+    (offline deletes on both sides) are equivalent; both accounts keep the **lexically greater
+    version token**, a tie-break used only here, so the roots converge and confirm.
   - Deleted here, edited there: the edit arrives as a live conflict copy. **Keep this version**
-    turns the copy into an ordinary entry under a new id (a Save As); the root stays deleted.
+    saves the copy's content as an ordinary entry under a new id (a Save As) **and** mints a
+    successor tombstone for the root descending from both versions, retiring both mirror copies as
+    above. The root stays deleted, the edit survives, and the other account fast-forwards.
   - Edited here, deleted there: the tombstone arrives as a tombstoned conflict copy with the notice
     "deleted on <char>". **Delete here too** tombstones the root, descending from both versions;
     **Keep mine** mints a live version descending from both (the only way a live version may
@@ -504,7 +507,8 @@ offline while A saved three times) a plain fast-forward rather than a conflict.
 - Beta entries may reference spells, macros, CVars or layouts that are unavailable on live. The
   explicit preview at Load/Apply handles that; provenance never grants permission.
 - **First login on live:** the normal first-login offer, if a UI setup exists. No writes.
-- **Launch gate** (`docs/RUNBOOK.md`): save on one character, load on a second, full exit, compare.
+- **Launch gate** (`docs/RUNBOOK.md`): load on one character, load on a second character, full
+  exit, compare both.
 
 ## Scope, order and cuts
 
@@ -574,3 +578,6 @@ schema refusal, readiness and combat gates, macro ownership, read-back, or catal
     loaded-entry rule covers capture Saves only; resolution tombstones both mirror copies; and
     deletion conflicts are defined (two tombstones are equivalent, plus the delete/edit cases).
   - Simplification accepted: "confirmed" means an exact root match.
+  - Round 3 accepted two more: incomparable tombstones converge on the lexically greater version
+    token, and a successor tombstone fast-forwards; and "Keep this version" on the deleted side also
+    mints a successor tombstone for the root.
