@@ -72,11 +72,12 @@ local function enqueue(from, to, msg)
     end
     if inFlight(from, to) >= 4 then net.refused = net.refused + 1 return end
     if rand() < net.drop then return end
-    net.queue[#net.queue + 1] = { from = from, to = to, msg = msg }
+    from.sid = from.sid + 1
+    net.queue[#net.queue + 1] = { from = from, to = to, msg = msg, sid = from.sid }
 end
 
 local function account(name, writer, realm)
-    local acc = { name = name, writer = writer, seq = 0, online = true, guid = "Player-1-" .. name,
+    local acc = { name = name, writer = writer, seq = 0, online = true, guid = "Player-1-" .. name, sid = 0,
                   realm = realm == nil and "Elegia" or realm or nil, reports = {},
                   db = { schema = 2, presets = {}, backups = {} } }
     local transport = {
@@ -120,7 +121,7 @@ local function step()
     for _, m in ipairs(batch) do
         if m.to.online then
             use(m.to)
-            m.to.sync.Receive(m.msg, { guid = m.from.guid, name = m.from.name, realm = m.from.realm })
+            m.to.sync.Receive(m.msg, { guid = m.from.guid, name = m.from.name, realm = m.from.realm }, m.sid)
         end
     end
 end
@@ -297,11 +298,12 @@ do
     run(10)
     use(a)
     local stale = Env.Encode(a.db.presets[e.id])
+    local staleV = a.db.presets[e.id].version
     C.Delete(e.id, a.db.presets[e.id].version)
     run(10)
     check("tombstone: deleted on B", b.db.presets[e.id] and b.db.presets[e.id].deleted == true)
     use(b)
-    b.sync.Receive("ENT\n" .. e.id .. "\n" .. stale, { guid = a.guid, name = "Alpha", realm = "Elegia" })
+    b.sync.Receive("ENT\n" .. e.id .. "\n" .. staleV .. "\n" .. stale, { guid = a.guid, name = "Alpha", realm = "Elegia" })
     check("tombstone: stale copy doesn't resurrect", b.db.presets[e.id].deleted == true)
     eq("tombstone: no conflict copy", liveConflicts(b), 0)
 end
@@ -319,7 +321,8 @@ do
     local leaked = false
     for _, s in ipairs(net.sent) do
         if s.kind == "ENT" then
-            local x = Env.Decode(s.msg:sub(5))
+            local x = Env.Decode(s.msg:match("^ENT\n[^\n]+\n[^\n]+\n(.*)$"))
+            check("previous: entry message decodes", x ~= nil)
             if x and x.previous ~= nil then leaked = true end
             if s.msg:find("previous", 1, true) then leaked = true end
         end
@@ -346,8 +349,8 @@ do
     local before = C.Copy(b.db.presets)
     local cbor = C_EncodingUtil.SerializeCBOR({ s = 2, e = { id = "loadout-zzz-1", version = "zzz:1" } })
     local newer = "ASE1:" .. Env.Adler32(cbor) .. ":" .. C_EncodingUtil.EncodeBase64(C_EncodingUtil.CompressString(cbor))
-    b.sync.Receive("ENT\nloadout-zzz-1\n" .. newer, { guid = a.guid, name = "Alpha", realm = "Elegia" })
-    b.sync.Receive("ENT\nloadout-zzz-1\nASE1:00000000:00", { guid = a.guid, name = "Alpha" })
+    b.sync.Receive("ENT\nloadout-zzz-1\nzzz:1\n" .. newer, { guid = a.guid, name = "Alpha", realm = "Elegia" })
+    b.sync.Receive("ENT\nloadout-zzz-1\nzzz:1\nASE1:00000000:00", { guid = a.guid, name = "Alpha" })
     b.sync.Receive("MAN\ngarbage", { guid = a.guid, name = "Alpha" })
     b.sync.Receive("XYZ\n" .. newer, { guid = a.guid, name = "Alpha" })
     b.sync.Receive("ENT\n" .. newer, { name = "no guid" })
@@ -358,7 +361,7 @@ do
     check("refused: said so once", #b.reports >= 1 and b.reports[1]:find("can't read", 1, true) ~= nil)
     -- A bad entry (fails the catalog's receive boundary).
     local bad = Env.Pack({ s = 1, e = { id = "x", version = "v", kind = "weird" } })
-    b.sync.Receive("ENT\nx\n" .. bad, { guid = a.guid, name = "Alpha" })
+    b.sync.Receive("ENT\nx\nv\n" .. bad, { guid = a.guid, name = "Alpha" })
     eq("refused: bad entry not stored", b.db.presets.x, nil)
 
     -- A valid entry from a sender with no realm.
@@ -367,7 +370,7 @@ do
     use(c)
     local text = Env.Encode(c.db.presets[e.id])
     use(b)
-    b.sync.Receive("ENT\n" .. e.id .. "\n" .. text, { guid = c.guid, name = "Gamma", realm = nil })
+    b.sync.Receive("ENT\n" .. e.id .. "\n" .. c.db.presets[e.id].version .. "\n" .. text, { guid = c.guid, name = "Gamma", realm = nil })
     check("no realm: upserted", b.db.presets[e.id] ~= nil)
     eq("label: name only without a realm", S.Label({ name = "Gamma" }), "Gamma")
     eq("label: name-realm", S.Label({ name = "Gamma", realm = "Elegia" }), "Gamma-Elegia")
@@ -615,7 +618,7 @@ do
     man(2, v2)                                     -- v2 queued while v1 is out
     T = T + S.REQ_TIMEOUT + 1
     use(b); b.sync.Tick()                          -- v1 expires; v2 is asked
-    b.sync.Receive("ENT\n" .. e.id .. "\n" .. v1Text, { guid = a.guid, name = "Alpha", realm = "Elegia" })
+    b.sync.Receive("ENT\n" .. e.id .. "\n" .. v1 .. "\n" .. v1Text, { guid = a.guid, name = "Alpha", realm = "Elegia" })
     eq("late v1: stored", b.db.presets[e.id].version, v1)
     local out, queued = b.sync.Outstanding(a.guid)
     check("late v1: v2 is still wanted", out + queued >= 1)
@@ -676,6 +679,88 @@ do
     run(12)
     out, queued = b.sync.Outstanding(a.guid)
     eq("leaving: its requests are dropped", out + queued, 0)
+end
+
+------------------------------------------------------------
+-- Codex: a late manifest from the peer's OLD session, arriving after its new
+-- session's, doesn't push the new session aside
+------------------------------------------------------------
+do
+    reset()
+    local a, b = account("Alpha", "aaaaaaaaaaaa"), account("Beta", "bbbbbbbbbbbb")
+    b.online = false                               -- B is driven by hand
+    use(a); a.sync.Tick()
+    local sender = { guid = b.guid, name = "Beta", realm = "Elegia" }
+    local function man(session, c, l, sid)
+        use(a)
+        a.sync.Receive("MAN\n" .. Env.Pack({ s = 1, b = session, c = c, p = 1, n = 1, l = l }), sender, sid)
+    end
+    -- B's own entries, so A has something to fetch from each manifest.
+    use(b)
+    local x = C.Create("loadout", { class = "PRIEST", category = "holy", name = "X" }, mods(1))
+    local y = C.Create("loadout", { class = "PRIEST", category = "holy", name = "Y" }, mods(2))
+    man("new", 1, { [x.id] = x.version }, 20)      -- the new session first
+    man("old", 7, {}, 11)                          -- then a delayed one from before the reload
+    local out, queued = a.sync.Outstanding(b.guid)
+    check("old session: X still wanted", out + queued >= 1)
+    man("new", 2, { [x.id] = x.version, [y.id] = y.version }, 21)
+    out, queued = a.sync.Outstanding(b.guid)
+    check("old session late: the new session's later manifests still count", out + queued >= 2)
+end
+
+------------------------------------------------------------
+-- Codex: a refused LATE answer for v1 never suppresses v2
+------------------------------------------------------------
+do
+    reset()
+    local a, b = account("Alpha", "aaaaaaaaaaaa"), account("Beta", "bbbbbbbbbbbb")
+    local e = save(a, "Raid", 1)
+    use(a)
+    local v1 = a.db.presets[e.id].version
+    C.Rename(e.id, "Raid 2", v1)
+    local v2 = a.db.presets[e.id].version
+    a.online = false
+    local peersOf = b.transport.Peers
+    b.transport.Peers = function() return { { guid = a.guid, name = "Alpha", realm = "Elegia" } } end
+    use(b); b.sync.Tick()
+    local sender = { guid = a.guid, name = "Alpha", realm = "Elegia" }
+    local function man(c, v) use(b); b.sync.Receive("MAN\n" .. Env.Pack({ s = 1, b = "aaa", c = c, p = 1, n = 1, l = { [e.id] = v } }), sender) end
+    man(1, v1)                                     -- asks for v1
+    man(2, v2)                                     -- v2 queued while v1 is out
+    T = T + S.REQ_TIMEOUT + 1
+    use(b); b.sync.Tick()                          -- v1 expires; v2 is asked
+    -- The late v1 answer arrives, unreadable.
+    b.sync.Receive("ENT\n" .. e.id .. "\n" .. v1 .. "\nASE1:00000000:00", sender)
+    local out = b.sync.Outstanding(a.guid)
+    eq("refused late v1: v2's request is still out", out, 1)
+    -- v2's answer is lost; after the timeout v2 is asked again and arrives.
+    T = T + S.REQ_TIMEOUT + 1
+    use(b); b.sync.Tick()
+    use(a)
+    local v2Text = Env.Encode(a.db.presets[e.id])
+    use(b)
+    b.sync.Receive("ENT\n" .. e.id .. "\n" .. v2 .. "\n" .. v2Text, sender)
+    eq("refused late v1: v2 still arrives", b.db.presets[e.id] and b.db.presets[e.id].version, v2)
+    -- The peer answers with a NEWER version than it listed (it saved in
+    -- between): what we asked for is covered, so the request is done.
+    use(a)
+    local g = save(a, "Fresh", 4)
+    local g1 = a.db.presets[g.id].version
+    C.Rename(g.id, "Fresh 2", g1)
+    local gText, g2 = Env.Encode(a.db.presets[g.id]), a.db.presets[g.id].version
+    use(b)
+    b.sync.Receive("MAN\n" .. Env.Pack({ s = 1, b = "aaa", c = 4, p = 1, n = 1, l = { [g.id] = g1, [e.id] = v2 } }), sender)
+    b.sync.Receive("ENT\n" .. g.id .. "\n" .. g2 .. "\n" .. gText, sender)
+    eq("newer answer: stored", b.db.presets[g.id] and b.db.presets[g.id].version, g2)
+    eq("newer answer: the request is done", (b.sync.Outstanding(a.guid)), 0)
+    -- An answer whose outer version doesn't match its content is refused.
+    use(a)
+    local f = save(a, "Other", 3)
+    use(a); local fText = Env.Encode(a.db.presets[f.id])
+    use(b)
+    b.sync.Receive("ENT\n" .. f.id .. "\nwrong:1\n" .. fText, sender)
+    eq("mismatched outer version: refused", b.db.presets[f.id], nil)
+    b.transport.Peers = peersOf
 end
 
 eq("never touched game state", #touched, 0)

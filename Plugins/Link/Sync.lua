@@ -5,7 +5,8 @@
 -- dependencies, so two instances can talk to each other in one test:
 --
 --   local s = ASS.Sync.New{ catalog, envelope, transport, now, report, maxPayload, gen }
---   s.Receive(payload, sender)    from LibAccountSync's OnMessage
+--   s.Receive(payload, sender, sid) from LibAccountSync's OnMessage (sid grows per
+--                                 sender, across its reloads too)
 --   s.Tick()                      once a second
 --   s.LocalWrite()                after a LOCAL catalog write (never a receipt)
 --   s.Refresh()                   the manual Refresh
@@ -14,8 +15,9 @@
 --   MAN\n<envelope>       a manifest batch { b = session, c = counter, p = part, n = parts,
 --                         l = { [id] = version } }                     -> Send (broadcast)
 --   REQ\n<envelope>       one id we want { i = id }                    -> SendTo that peer
---   ENT\n<id>\n<envelope> one entry (Envelope.Encode); the id travels outside the
---                         envelope so a refused envelope still frees its request
+--   ENT\n<id>\n<version>\n<envelope>
+--                         one entry (Envelope.Encode); id and version travel outside the
+--                         envelope so even a refused one is matched to ITS request only
 -- Each side PULLS what it lacks from the other's manifest; nothing is pushed.
 --
 -- A peer counts (for "confirmed", status and requests) once it has spoken:
@@ -200,16 +202,24 @@ function Sync.New(o)
     -- Receiving
     ------------------------------------------------------------
 
-    -- Manifests are ordered per peer session `b` by counter `c`; a session
-    -- replaced by a newer one (the peer reloaded) is ignored from then on.
-    local function OnManifest(p, m)
+    -- Manifests are ordered per peer session `b` by counter `c`. Sessions are
+    -- ordered by the transport's sid, which grows per sender across reloads:
+    -- a session whose message carries a lower sid than the current one's is
+    -- an older one arriving late, ignored for good; a higher one replaces the
+    -- current session (the peer reloaded), and the replaced one is ignored.
+    local function OnManifest(p, m, sid)
         if type(m.b) ~= "string" or type(m.c) ~= "number" or type(m.p) ~= "number"
             or type(m.n) ~= "number" or type(m.l) ~= "table" then return end
         if p.sessions[m.b] then return end                         -- a replaced session
         if p.session ~= m.b then
+            if p.session and sid and p.sessionSid and sid < p.sessionSid then
+                p.sessions[m.b] = true                             -- an older session, late
+                return
+            end
             if p.session then p.sessions[p.session] = true end
-            p.session, p.counter, p.acc = m.b, nil, nil
+            p.session, p.counter, p.acc, p.sessionSid = m.b, nil, nil, nil
         end
+        if sid and (not p.sessionSid or sid > p.sessionSid) then p.sessionSid = sid end
         if p.counter and m.c < p.counter then return end           -- older than what we hold
         if not p.acc or p.acc.c ~= m.c then
             if p.acc and m.c < p.acc.c then return end             -- a stray part of an older one
@@ -238,7 +248,7 @@ function Sync.New(o)
                 :format(tostring(e.name), tostring(why)))
             return
         end
-        local msg = Frame("ENT", e.id .. "\n" .. text)
+        local msg = Frame("ENT", e.id .. "\n" .. e.version .. "\n" .. text)
         if not msg then
             tooLarge[e.id] = e.version
             Once("big:" .. e.id .. "@" .. e.version, ("%q is too large to sync; it stays on this account.")
@@ -249,14 +259,17 @@ function Sync.New(o)
     end
 
     local function OnEntry(p, body)
-        local rid, text = body:match("^([^\n]+)\n(.*)$")
+        local rid, rver, text = body:match("^([^\n]+)\n([^\n]+)\n(.*)$")
         if not rid then return end
         local asked = p.out[rid]
-        p.out[rid] = nil
+        -- Only the answer to THIS request frees it: an answer for another
+        -- version (late, after a timeout) leaves the newer request alone.
+        if asked and asked.version == rver then p.out[rid] = nil end
         local entry, why = Env.Decode(text)
+        if entry and (entry.id ~= rid or entry.version ~= rver) then entry, why = nil, "mismatch" end
         if not entry then
-            -- Refused: don't ask for this version again this session.
-            if asked then handled[rid .. "@" .. tostring(asked.version)] = true end
+            -- Refused: don't ask for THAT version again this session.
+            handled[rid .. "@" .. rver] = true
             Once("bad:" .. tostring(why), "Ignored a saved setup from " .. p.label .. " that this version can't read ("
                 .. tostring(why) .. ").")
             Pump(p)
@@ -272,12 +285,13 @@ function Sync.New(o)
         elseif not result then
             Once("bad-entry:" .. tostring(entry.id), "Ignored a saved setup from " .. p.label .. " that this version can't read.")
         end
-        -- An older answer to a request since made for a newer version: ask again.
-        if asked and Lacks(rid, asked.version) then Want(p, rid, asked.version, true) end
+        -- The peer may answer with a newer version than it listed: once what
+        -- we asked for is covered, the request is done.
+        if p.out[rid] and not Lacks(rid, p.out[rid].version) then p.out[rid] = nil end
         Pump(p)
     end
 
-    function self.Receive(payload, sender)
+    function self.Receive(payload, sender, sid)
         if type(payload) ~= "string" or type(sender) ~= "table" or type(sender.guid) ~= "string" then return end
         local kind, body = payload:match("^(%u%u%u)\n(.*)$")
         if not kind then return end
@@ -290,7 +304,7 @@ function Sync.New(o)
         if kind == "ENT" then return OnEntry(p, body) end
         local m = Env.Unpack(body)
         if not m then return end
-        if kind == "MAN" then return OnManifest(p, m) end
+        if kind == "MAN" then return OnManifest(p, m, tonumber(sid)) end
         if kind == "REQ" then return OnRequest(p, m) end
     end
 

@@ -59,7 +59,7 @@ function Link.Start()
         maxPayload = 16384,
         gen = ASS.writer,
     })
-    inst.OnMessage(function(payload, sender) sync.Receive(payload, sender) end)
+    inst.OnMessage(function(payload, sender, sid) sync.Receive(payload, sender, sid) end)
     Link.lib, Link.sync, Link.state, Link.why = inst, sync, "on", nil
     ASS.Catalog.OnLocalWrite(function() if Link.sync and inst.IsEnabled() then Link.sync.LocalWrite() end end)
     return true

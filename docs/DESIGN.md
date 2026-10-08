@@ -488,13 +488,16 @@ declared in exactly one TOC.
   peer never answers costs at most 3 requests per 30 seconds.
 - **Wire format** (`Plugins/Link/Sync.lua`): `MAN\n<envelope>` (manifest batch
   `{ b = session, c = counter, p = part, n = parts, l = { [id] = version } }`), `REQ\n<envelope>`
-  (`{ i = id }`, sent to one peer) and `ENT\n<id>\n<envelope>` (one entry, sent to the peer that
-  asked; the id outside the envelope lets a refused envelope free its request, and that version is
-  not asked for again this session). The envelope is
+  (`{ i = id }`, sent to one peer) and `ENT\n<id>\n<version>\n<envelope>` (one entry, sent to the
+  peer that asked; id and version outside the envelope match even a refused answer to ITS request
+  only, and that exact version is not asked for again this session; content that doesn't match them
+  is refused). The envelope is
   `"ASE1:<Adler-32 of the CBOR, as two 16-bit hex halves>:<Base64(Deflate(CBOR))>"`. The size check
   is on the whole string handed to the library; batches shrink 100 → 50 → 25 ids until each fits.
   Manifests are ordered per peer session by counter: an older one arriving late, or a stray part of
-  one, changes nothing, and a session replaced by a newer one (the peer reloaded) is ignored.
+  one, changes nothing. Sessions are ordered by the library's `sid`, which grows per sender across
+  reloads: a session first seen with a lower `sid` than the current one's is an old one arriving
+  late and is ignored; a higher one replaces the current session (the peer reloaded).
 - **Which peers count.** LibAccountSync lists every online account of the owner, with the Link
   addon or not. A peer counts for "confirmed" and status only once it has sent a message; until
   then `/altsync link` names it as "no reply yet". A manifest no peer took (one still
