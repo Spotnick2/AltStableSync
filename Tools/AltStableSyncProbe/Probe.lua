@@ -22,6 +22,12 @@
         /syncprobe cvar            write a marker CVar (restart test)
         /syncprobe restart         after a FULL EXIT: what survived (macro, bind, cvar, SVs)
         /syncprobe clean           undo macro, bind and cvar
+        /syncprobe ready           readiness predicate (#29), after a fresh login AND after /reload
+        /syncprobe forms           form pages; run once in each form (druid, warrior, rogue)
+        /syncprobe cvars           CVar scope of the #16 allowlist candidates
+        /syncprobe editwrite       create + activate an addon-owned Character layout (#15)
+        /syncprobe editcheck       after a FULL EXIT: did it persist, still active?
+        /syncprobe editrestore     back to the earlier layout by identity; delete ours
         /syncprobe copy            reopen the copy window (Ctrl+A, Ctrl+C)
 
     Results also land in AltStableSyncProbeDB / AltStableSyncProbeCharDB:
@@ -721,6 +727,249 @@ function P.clean()
 end
 
 ----------------------------------------------------------------------------
+-- #29: readiness predicate, form pages, Edit Mode write path, CVar scope
+----------------------------------------------------------------------------
+
+-- The readiness predicate docs/DESIGN.md proposes for #4: PLAYER_ENTERING_WORLD
+-- has fired, the spellbook has entries, and no UPDATE_MACROS / UPDATE_BINDINGS
+-- for 2 s. Measured live: when it first holds, and what was readable then.
+local predicate = { pew = nil, lastQuiet = nil, at = nil, state = nil, final = nil }
+local quietFrame = CreateFrame("Frame")
+for _, e in ipairs({ "UPDATE_MACROS", "UPDATE_BINDINGS" }) do pcall(quietFrame.RegisterEvent, quietFrame, e) end
+quietFrame:SetScript("OnEvent", function() predicate.lastQuiet = NowMs() end)
+
+local function PredicateTick()
+    if predicate.at then return end
+    local now = NowMs()
+    local since = now - math.max(predicate.pew or now, predicate.lastQuiet or 0)
+    if predicate.pew and #SpellBook() > 0 and since >= 2000 then
+        predicate.at, predicate.state = now, readiness()
+        -- And the state 10 s later: did anything still change after "ready"?
+        C_Timer.After(10, function() predicate.final = readiness() end)
+        return
+    end
+    C_Timer.After(0.25, PredicateTick)
+end
+
+local pewFrame = CreateFrame("Frame")
+pcall(pewFrame.RegisterEvent, pewFrame, "PLAYER_ENTERING_WORLD")
+pewFrame:SetScript("OnEvent", function(_, _, isInitialLogin, isReloadingUi)
+    if predicate.pew then return end
+    predicate.pew = NowMs()
+    predicate.initial, predicate.reload = isInitialLogin, isReloadingUi
+    PredicateTick()
+end)
+
+function P.ready()
+    Section("ready  (readiness predicate; run once ~15 s after a fresh login OR a /reload)")
+    Record(("%-44s isInitialLogin=%s isReloadingUi=%s"):format("PLAYER_ENTERING_WORLD", ValStr(predicate.initial), ValStr(predicate.reload)))
+    Record(("%-44s %s ms"):format("PLAYER_ENTERING_WORLD at", ValStr(predicate.pew)))
+    Record(("%-44s %s ms"):format("last UPDATE_MACROS/UPDATE_BINDINGS", ValStr(predicate.lastQuiet)))
+    Record(("%-44s %s"):format("predicate first held at (ms)", ValStr(predicate.at)))
+    Record(("%-44s %s"):format("  readable then", tostring(predicate.state)))
+    Record(("%-44s %s"):format("  readable 10 s later", tostring(predicate.final or "(not yet - rerun)")))
+    Record(("%-44s %s"):format("  same?", predicate.final and tostring(predicate.final == predicate.state) or "?"))
+    Record("Then: /syncprobe login for the full event order (SPELLS_CHANGED before or after PEW).")
+end
+
+-- Form pages: which underlying action slots the visible bar maps to, in the
+-- current form. Read-only; run once in each form (caster, bear, cat, ...).
+function P.forms()
+    Section("forms  (run once per form: caster, bear, cat, travel, moonkin...)")
+    Call("GetShapeshiftForm()", GetShapeshiftForm)
+    Call("GetNumShapeshiftForms()", GetNumShapeshiftForms)
+    local okN, n = pcall(GetNumShapeshiftForms)
+    for i = 1, (okN and type(n) == "number" and n or 0) do
+        Call(("  GetShapeshiftFormInfo(%d)"):format(i), GetShapeshiftFormInfo, i)
+    end
+    Call("GetBonusBarOffset()", GetBonusBarOffset)
+    Call("GetActionBarPage()", GetActionBarPage)
+    Call("C_ActionBar.GetBonusBarIndex()", C_ActionBar and C_ActionBar.GetBonusBarIndex)
+    Call("C_ActionBar.GetActionBarPage()", C_ActionBar and C_ActionBar.GetActionBarPage)
+    Call("ActionButton1:GetAttribute(action)", function()
+        return ActionButton1 and ActionButton1.GetAttribute and ActionButton1:GetAttribute("action")
+    end)
+    Call("ActionButton1.action", function() return ActionButton1 and ActionButton1.action end)
+    -- Every non-empty slot on the main page (1-12) and the bonus pages (73-120).
+    local function dump(from, to)
+        local parts = {}
+        for s = from, to do
+            local ok, t, id = pcall(GetActionInfo, s)
+            if ok and t then parts[#parts + 1] = ("%d=%s:%s"):format(s, tostring(t), tostring(id)) end
+        end
+        Record(("%-44s %s"):format(("slots %d-%d"):format(from, to), #parts > 0 and table.concat(parts, " ") or "(all empty)"))
+    end
+    dump(1, 12)
+    dump(73, 84); dump(85, 96); dump(97, 108); dump(109, 120)
+end
+
+-- CVar scope for the #16 allowlist candidates (read-only).
+local CVAR_CANDIDATES = {
+    "autoLootDefault", "cameraDistanceMaxZoomFactor", "nameplateShowEnemies", "nameplateShowFriends",
+    "showTargetOfTarget", "chatBubbles", "chatBubblesParty", "autoSelfCast", "useUiScale", "uiScale",
+    "Sound_MasterVolume", "Sound_EnableMusic", "lockActionBars", "alwaysShowActionBars",
+    "countdownForCooldowns", "showTutorials", "enableMouseoverCast", "SpellQueueWindow",
+}
+function P.cvars()
+    Section("cvars  (GetCVarInfo: value, default, accountStored, charStored, locked, secure, readOnly)")
+    for _, name in ipairs(CVAR_CANDIDATES) do
+        Call(name, C_CVar and C_CVar.GetCVarInfo, name)
+    end
+end
+
+-- Edit Mode write path (#15), reversible, following GlassPanel's measured
+-- order (..\GlassPanel\Setup.lua): a new CHARACTER layout inserted where
+-- MakeNewLayout puts one, SaveLayouts of the whole merged list with the active
+-- index as it was, then OnLayoutAdded(index, true, false). Delete mirrors
+-- Blizzard's DeleteLayout: remove, SaveLayouts, OnLayoutDeleted(index).
+local EM_NAME = "SyncProbe"
+
+local function EMTypes()
+    local T = Enum and Enum.EditModeLayoutType
+    return type(T) == "table" and T or nil
+end
+
+local function EMBlocked()
+    if InCombatLockdown() then return "out of combat only" end
+    local em = EditModeManagerFrame
+    if type(em) ~= "table" then return "Edit Mode isn't available" end
+    if em:IsShown() then return "close Edit Mode first" end
+    if em.accountSettings == nil then return "Edit Mode hasn't loaded its layouts yet" end
+    if not (C_EditMode and C_EditMode.GetLayouts and C_EditMode.SaveLayouts and C_EditMode.OnLayoutAdded
+            and C_EditMode.SetActiveLayout and C_EditMode.OnLayoutDeleted) then return "C_EditMode incomplete" end
+    if not (EditModePresetLayoutManager and EditModePresetLayoutManager.GetCopyOfPresetLayouts) then
+        return "no preset manager"
+    end
+    if not EMTypes() then return "no Enum.EditModeLayoutType" end
+    return nil
+end
+
+local function EMRead()
+    local saved = C_EditMode.GetLayouts()
+    local presets = EditModePresetLayoutManager:GetCopyOfPresetLayouts()
+    if type(saved) ~= "table" or type(saved.layouts) ~= "table" or type(presets) ~= "table" then return nil end
+    local merged = {}
+    for _, l in ipairs(presets) do merged[#merged + 1] = CopyTable(l) end
+    for _, l in ipairs(saved.layouts) do merged[#merged + 1] = CopyTable(l) end
+    if not merged[saved.activeLayout] then return nil end
+    return { merged = merged, presets = #presets, active = saved.activeLayout }
+end
+
+local function EMFindOurs(L)
+    for i = L.presets + 1, #L.merged do
+        if L.merged[i].layoutName == EM_NAME then return i end
+    end
+end
+
+local function EMDescribe(L)
+    local a = L.merged[L.active]
+    return ("active #%d %q (type %s), %d presets + %d saved"):format(L.active, tostring(a.layoutName),
+        tostring(a.layoutType), L.presets, #L.merged - L.presets)
+end
+
+function P.editwrite()
+    Section("editwrite  (create + activate an addon-owned Character layout)")
+    local why = EMBlocked(); if why then Record("not now: " .. why); return end
+    local T = EMTypes()
+    local L = EMRead(); if not L then Record("couldn't read the layouts"); return end
+    Record(("%-44s %s"):format("before", EMDescribe(L)))
+    if EMFindOurs(L) then Record("a layout named " .. EM_NAME .. " already exists - /syncprobe editrestore first"); return end
+    local source = L.merged[L.active]
+    local target = CopyTable(source)
+    target.layoutIndex = nil
+    target.layoutName, target.layoutType = EM_NAME, T.Character
+    local lastChar, lastAcct
+    for i, l in ipairs(L.merged) do
+        if l.layoutType == T.Character then lastChar = i end
+        if l.layoutType == T.Account then lastAcct = i end
+    end
+    local index = (lastChar or lastAcct or L.presets) + 1
+    table.insert(L.merged, index, target)
+    local mark = #blocked
+    local cdb = CharDB()
+    -- The way back, recorded BEFORE writing (a preset by its index, a saved
+    -- layout by name and type), so editrestore always has it.
+    cdb.emReturn = (source.layoutType == T.Preset) and { preset = source.layoutIndex }
+        or { name = source.layoutName, layoutType = source.layoutType }
+    local okS = Call("C_EditMode.SaveLayouts(merged, active as was)", C_EditMode.SaveLayouts,
+        { layouts = L.merged, activeLayout = L.active })
+    if not okS then Record("save failed - nothing activated"); return end
+    local okA = Call(("C_EditMode.OnLayoutAdded(%d, true, false)"):format(index), C_EditMode.OnLayoutAdded, index, true, false)
+    local after = EMRead()
+    if after then
+        Record(("%-44s %s"):format("after", EMDescribe(after)))
+        local i = EMFindOurs(after)
+        local ours = i and after.merged[i]
+        local okC, s = pcall(C_EditMode.ConvertLayoutInfoToString, ours)
+        cdb.emWritten = { at = Stamp(), systems = ours and #(ours.systems or {}), code = okC and s or nil,
+                          active = after.merged[after.active].layoutName == EM_NAME }
+        Record(("%-44s %s"):format("ours active", tostring(cdb.emWritten.active)))
+    end
+    Record(("%-44s %s"):format("taint", TaintSince(mark)))
+    Record("Now: does the UI look the same as before? Then EXIT FULLY, relaunch, /syncprobe editcheck")
+end
+
+function P.editcheck()
+    Section("editcheck  (after a FULL EXIT: did the layout and its activation persist?)")
+    local cdb = CharDB()
+    if not cdb.emWritten then Record("nothing written by editwrite on this character"); return end
+    local L = EMRead(); if not L then Record("couldn't read the layouts"); return end
+    Record(("%-44s %s"):format("now", EMDescribe(L)))
+    local i = EMFindOurs(L)
+    Record(("%-44s %s"):format("SyncProbe layout exists", tostring(i ~= nil)))
+    if i then
+        local ours = L.merged[i]
+        local okC, s = pcall(C_EditMode.ConvertLayoutInfoToString, ours)
+        Record(("%-44s type=%s systems=%d (written %s)"):format("SyncProbe", tostring(ours.layoutType),
+            #(ours.systems or {}), tostring(cdb.emWritten.systems)))
+        Record(("%-44s %s"):format("content identical to what was written", okC and tostring(s == cdb.emWritten.code) or "THREW"))
+        Record(("%-44s %s (was %s)"):format("still the active layout", tostring(L.active == i), tostring(cdb.emWritten.active)))
+    end
+    Record("Say 'full exit' when you paste this. Then /syncprobe editrestore.")
+end
+
+function P.editrestore()
+    Section("editrestore  (back to the earlier layout by identity, then delete SyncProbe)")
+    local why = EMBlocked(); if why then Record("not now: " .. why); return end
+    local cdb = CharDB()
+    local rec = cdb.emReturn
+    local L = EMRead(); if not L then Record("couldn't read the layouts"); return end
+    Record(("%-44s %s"):format("before", EMDescribe(L)))
+    local mark = #blocked
+    if rec then
+        local found, n = nil, 0
+        for i, l in ipairs(L.merged) do
+            if rec.preset ~= nil and i <= L.presets and l.layoutIndex == rec.preset then found, n = i, n + 1
+            elseif rec.name ~= nil and i > L.presets and l.layoutName == rec.name and l.layoutType == rec.layoutType then
+                found, n = i, n + 1
+            end
+        end
+        if n ~= 1 then Record(("earlier layout matches %d layouts - pick it in Edit Mode, then rerun"):format(n)); return end
+        if found ~= L.active then
+            Call(("C_EditMode.SetActiveLayout(%d)"):format(found), C_EditMode.SetActiveLayout, found)
+        end
+    end
+    L = EMRead()
+    local i = L and EMFindOurs(L)
+    if i then
+        if L.active == i then Record("SyncProbe is still active - switch away in Edit Mode, then rerun"); return end
+        table.remove(L.merged, i)
+        local active = L.active > i and L.active - 1 or L.active
+        local okS = Call("C_EditMode.SaveLayouts(without SyncProbe)", C_EditMode.SaveLayouts,
+            { layouts = L.merged, activeLayout = active })
+        if okS then Call(("C_EditMode.OnLayoutDeleted(%d)"):format(i), C_EditMode.OnLayoutDeleted, i) end
+    end
+    local after = EMRead()
+    if after then
+        Record(("%-44s %s"):format("after", EMDescribe(after)))
+        Record(("%-44s %s"):format("SyncProbe gone", tostring(EMFindOurs(after) == nil)))
+        if not EMFindOurs(after) then cdb.emReturn, cdb.emWritten = nil, nil end
+    end
+    Record(("%-44s %s"):format("taint", TaintSince(mark)))
+    Record("A /reload is recommended (reference addons reload after Edit Mode writes).")
+end
+
+----------------------------------------------------------------------------
 -- Copy window (from AltStableProbe): chat is not selectable.
 ----------------------------------------------------------------------------
 
@@ -772,7 +1021,7 @@ end
 -- Slash command
 ----------------------------------------------------------------------------
 
-local READ_ONLY = { "client", "actions", "ranks", "login", "editmode", "encoding" }
+local READ_ONLY = { "client", "actions", "ranks", "login", "ready", "forms", "cvars", "editmode", "encoding" }
 
 local function Persist(label)
     local db = DB()
@@ -796,7 +1045,7 @@ SlashCmdList.ALTSTABLESYNCPROBE = function(msg)
     elseif P[cmd] then
         Run(cmd)
     else
-        Out("/syncprobe [client|actions|ranks|login|editmode|encoding] | place | macro | bind | cvar | restart | clean | copy")
+        Out("/syncprobe [client|actions|ranks|login|ready|forms|cvars|editmode|encoding] | place | macro | bind | cvar | restart | clean | editwrite | editcheck | editrestore | copy")
         return
     end
     Persist(cmd)
