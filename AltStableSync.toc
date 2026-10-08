@@ -5,9 +5,11 @@
 ## Author: Spotnick
 ## Version: @project-version@
 ## OptionalDeps: AltStable
-## SavedVariables: AltStableSyncDB AltStableSyncLAS
+## SavedVariables: AltStableSyncDB
 ## SavedVariablesPerCharacter: AltStableSyncChar
 
 Libs\LibGlass-1.0\LibGlass-1.0.xml
 Libs\LibStub\LibStub.lua
 Core.lua
+Categories.lua
+Catalog.lua
