@@ -158,7 +158,9 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
       conflict = { of = "<id>", from = "Other-Char" },   -- a divergent copy kept whole
     },
   },
-  backups = { [guid] = {                       -- exact runtime snapshots
+  backups = { [guid] = {                       -- exact runtime snapshots; each snapshot carries
+                                               -- createdMacros = { {index, name, body}, ... }: the
+                                               -- character macros the operation it preceded created
       ring = { <up to 10, oldest evicted> },
       firstSeen = <snapshot>,                  -- pinned forever
       operation = <snapshot> | nil,            -- the interrupted operation's original backup;
@@ -174,8 +176,8 @@ AltStableSyncChar = {               -- per character
     loadout = { ... },
   },
   onboarding = { handled = true },  -- set by Not now, by opening the offer's preview, or by applying
-  interrupted = { id, version, done = {...}, remaining = {...},     -- resuming = a NEW preview + click;
-                  createdMacros = {...} },  -- {index, name, body} the operation created (for Restore)
+  interrupted = { id, version, done = {...}, remaining = {...} },   -- resuming = a NEW preview + click;
+                                                    -- its backup is backups[guid].operation
 }
 
 AltStableSyncLAS = <LibAccountSync store only>   -- declared ONLY by AltStableSyncLink.toc (below)
@@ -187,7 +189,9 @@ AltStableSyncLAS = <LibAccountSync store only>   -- declared ONLY by AltStableSy
 - **Schema 1 → 2** (#27): validate everything first. A schema-1 DB whose `profiles` is a table with
   `next(profiles) == nil` is stamped 2 and `profiles` is dropped, keeping `backups`. A populated or
   malformed schema 1 is refused untouched; the addon never wrote a profile, so none should exist.
-  There is no migration framework.
+  There is no migration framework. A missing or empty `AltStableSyncChar` is initialised at
+  schema 2; a populated one with no schema (written by the scaffold build, which only ever wrote an
+  empty table) is stamped 2; a newer or unknown one is refused untouched, and so is its DB.
 - **Categories** (`Categories.lua`): per class, a short list of stable keys with display text, plus
   `general` ("General / Leveling").
 
@@ -276,8 +280,10 @@ Only an explicit confirmation click writes game state.
    - **No macro is ever deleted** (character or account) unless the player explicitly asks.
      Capacity is never freed by deleting; a shortfall is shown before any write. The one offered
      deletion: a Restore preview lists the character macros that the operation being undone
-     **created** (by index, name and body, recorded at the time), with "Also remove N macros that
-     load created", checked by default and visible. Confirming is the player's explicit ask. A macro
+     **created**. They are recorded by index, name and body in the restored backup's
+     `createdMacros` (accumulated across resumes), which stays with that snapshot through
+     completion, abandonment and ring moves. The preview shows "Also remove N macros that load
+     created", checked by default and visible. Declining keeps them, and the result says so. Confirming is the player's explicit ask. A macro
      whose body has changed since is never removed.
    - Macro mutations run first, then the name/body→index map is rebuilt, then actions are placed.
    - A button never points at a missing or mismatched macro.
@@ -469,8 +475,9 @@ declared in exactly one TOC.
   window). Messages mode is not guaranteed delivery; repeated exchange is the recovery, and an entry
   stays "pending" until the manifests match.
 
-  To keep the recovery from flooding those limits: only **local** Saves, Save Ases and deletes
-  trigger an exchange (receipts never do), coalesced within 2 seconds. An entry already requested is
+  To keep the recovery from flooding those limits: catalog mutations trigger an exchange only when
+  they are **local**, coalesced within 2 seconds, and receipts never do. The other triggers above
+  (peer sighting, the timer, Refresh) remain. An entry already requested is
   not requested again for 30 seconds. Requests go out at most 3 at a time per peer, and the next
   goes when one arrives or times out.
 
@@ -636,3 +643,6 @@ schema refusal, readiness and combat gates, macro ownership, read-back, or catal
   - the mockup's differences from this design are listed in its README;
   - stale wording fixed in the `.pkgmeta` comment, the codex-consult skill, the AGENTS docs list and
     a `test_core` fixture.
+  - Confirming round (gpt-6-astra, high): `createdMacros` moves onto the backup snapshot itself, so
+    Restore can still remove what a completed or abandoned load created. The exchange-trigger
+    wording is fixed, and `AltStableSyncChar` initialisation at schema 2 is specified.

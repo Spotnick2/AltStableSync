@@ -1,6 +1,6 @@
 # Acceptance scenarios
 
-> From the 2026-10-08 pivot handoff, verbatim except this header (which replaces its intro) and A39, A41 and A44
+> From the 2026-10-08 pivot handoff, verbatim except this header (which replaces its intro) and A26, A39, A41 and A44
 > (tightened to the design's rules). These are **requirements, not
 > passed tests**. Automate pure planning and state logic against Forever-shaped stubs; run client
 > behaviour in game. "Persists" always means a **full client exit and relaunch**, never `/reload`.
@@ -33,7 +33,7 @@
 | A23 | Cursor occupied before capture/apply | Refuse cursor-mutating work without touching payload |
 | A24 | Backup capture fails | Zero game-state writes |
 | A25 | Write read-back differs | Failure/partial report, no false success; original backup remains usable |
-| A26 | Restore after adaptive load | New backup first; original exact rank/keys/macros restored within supported scope |
+| A26 | Restore after adaptive load | New backup first; original exact rank/keys/macros restored within supported scope; macros that load created are offered for removal, including after the load completed or was abandoned and the client was fully exited |
 | A27 | Exact snapshot value no longer exists | Report partial/unavailable; never adaptive substitution |
 | A28 | First UPDATE_MACROS contains account macros only | Capture/apply remains gated until measured readiness checks succeed |
 | A29 | Unknown/newer saved schema | Refuse with no rewrite, reset or best-effort parse |
