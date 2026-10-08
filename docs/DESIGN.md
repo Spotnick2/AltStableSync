@@ -490,6 +490,7 @@ offline while A saved three times) a plain fast-forward rather than a conflict.
 | Incoming | Action |
 |---|---|
 | Same version as local | ignore |
+| A live conflict copy (`<id>~<v>`) whose `v` our root `<id>` already holds or has moved past | ignore. It is the other account's copy of **our** content. Retired copies (tombstones) still propagate, which is how a resolution settles both accounts |
 | Incoming version is in local `ancestors` (older than what we hold) | ignore |
 | Local version is in incoming `ancestors`, or the id is unknown | **replace** (fast-forward). Local `previous` is untouched; it is local Save recovery only |
 | Anything else (both accounts saved from a common version, or the lag exceeded 20 saves) | **divergent**: keep the local entry; store the incoming one whole as conflict copy `<id>~<incoming version>`, named "<name> (from <char>)", with a one-line notice. If that conflict id already exists, live **or tombstoned**, ignore it |
@@ -649,3 +650,7 @@ schema refusal, readiness and combat gates, macro ownership, read-back, or catal
     wording is fixed, and `AltStableSyncChar` initialisation at schema 2 is specified. The next
     round removed a "stamp a populated unschemed char table" exception: only a missing or empty one
     is initialised; anything else unschemed is refused untouched.
+- **2026-10-08, #27 implementation:** the two-account tests found that a live conflict copy synced
+  to the other account became a second, redundant copy there (a copy of that account's own version).
+  The fix is a new receive row: a live conflict copy is ignored when our root already holds its
+  version or a successor.
