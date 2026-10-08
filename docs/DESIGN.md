@@ -490,18 +490,20 @@ offline while A saved three times) a plain fast-forward rather than a conflict.
 | Incoming | Action |
 |---|---|
 | Same version as local | ignore |
+| A live conflict copy (`<id>~<v>`) whose `v` our root `<id>` already holds or has moved past | ignore. It is the other account's copy of **our** content. Retired copies (tombstones) still propagate, which is how a resolution settles both accounts |
 | Incoming version is in local `ancestors` (older than what we hold) | ignore |
 | Local version is in incoming `ancestors`, or the id is unknown | **replace** (fast-forward). Local `previous` is untouched; it is local Save recovery only |
 | Anything else (both accounts saved from a common version, or the lag exceeded 20 saves) | **divergent**: keep the local entry; store the incoming one whole as conflict copy `<id>~<incoming version>`, named "<name> (from <char>)", with a one-line notice. If that conflict id already exists, live **or tombstoned**, ignore it |
 | Unknown or newer envelope schema | reject; local untouched |
 
 - **Resolving a conflict settles both accounts.** The conflict copy offers **Keep this version** and
-  **Keep mine**. Either one mints a new version of `<id>` whose content is the chosen one and whose
-  `ancestors` include **both** competing versions. It also tombstones **both** deterministic copy ids
-  for those two versions, `<id>~<a>` and `<id>~<b>`, including the mirror copy this account never
-  received. Each tombstone descends from its copy's version. The other account then fast-forwards
-  the root and its own mirror copy, and a late-arriving copy is ignored because its id already
-  exists as a tombstone. **Deleting a conflict copy is "Keep mine"** (the same resolution, so the
+  **Keep mine**. Either one mints a new version of `<id>`: its content is the chosen version
+  **whole** (content, name and provenance), and its `ancestors` hold **both** competing versions
+  first, then both branches' history. Every stored live conflict copy whose version that root now
+  holds or descends from is **retired** (a tombstone descending from the copy). That covers the
+  chosen copy and any older copies from the same branch. The other account does the same when it
+  fast-forwards to the resolution, which retires its mirror copy. A late-arriving copy or older
+  message is ignored, because its version is in the root's history. **Deleting a conflict copy is "Keep mine"** (the same resolution, so the
   roots still converge); there is no way to discard a copy without resolving. The entry shows
   "conflict" until it is resolved, and that status takes precedence over "confirmed".
 - **Deletion conflicts:**
@@ -517,6 +519,11 @@ offline while A saved three times) a plain fast-forward rather than a conflict.
     **Keep mine** mints a live version descending from both (the only way a live version may
     descend from a tombstone).
 - There is no field merging, ever.
+- **Accepted edge case:** when two incomparable tombstones meet, the losing one's history is dropped
+  (the tie-break keeps one whole version). A delayed older message from that losing branch can then
+  arrive as one extra conflict copy, even though that account had already deleted the entry. The
+  root stays deleted, and resolving the copy ("keep it deleted") settles it. This is preferred over
+  adding history-merging machinery for a rare, visible, harmless case.
 - **Delete is a versioned tombstone** with ancestors, kept indefinitely so a stale peer can't
   resurrect the entry. Tombstones can't be edited or recovered from the UI. An edit made without
   seeing the deletion (its ancestors don't include the tombstone) is divergent and follows the
@@ -649,3 +656,28 @@ schema refusal, readiness and combat gates, macro ownership, read-back, or catal
     wording is fixed, and `AltStableSyncChar` initialisation at schema 2 is specified. The next
     round removed a "stamp a populated unschemed char table" exception: only a missing or empty one
     is initialised; anything else unschemed is refused untouched.
+- **2026-10-08, #27 implementation:** the two-account tests found that a live conflict copy synced
+  to the other account became a second, redundant copy there (a copy of that account's own version).
+  The fix is a new receive row: a live conflict copy is ignored when our root already holds its
+  version or a successor.
+- **2026-10-08, PR #32 round 1 (gpt-6-astra, high):** four code defects, all fixed:
+  - "Keep this version" now takes the chosen version whole, including its name and provenance;
+  - a copy left live because it was edited again before resolving is now retired, by retiring
+    covered copies on fast-forward and on resolve;
+  - the resolution keeps both branches' history, so a delayed older message can't reopen it;
+  - a schema-1 DB holding `presets` is refused rather than mutated.
+
+  Simplification: the explicit "tombstone the mirror id we never received" step was redundant once
+  covered copies are retired, so it was removed.
+- **PR #32 round 2:** a "deleted there" conflict copy stays resolvable after the entry is deleted
+  here too ("keep it deleted", in either writer-token order).
+- **PR #32 round 3: consensus.** Nits applied: a stale-resolution test, and the tombstone
+  tie-break edge case is documented.
+- **PR #32, posted Codex review + three confirming rounds (gpt-6-astra, high):**
+  - **Receive boundary:** it now rejects entries whose read fields have the wrong type (`conflict`,
+    `deleted`, `name`, `modules`, ...). Loadouts must carry non-empty class and category strings (any
+    key: forward compatible). A conflict copy's id must be `<of>~<version>`, which rules out
+    self-reference.
+  - **Keeping an edit of a deleted entry:** it takes the caller's name, or the first free
+    "(kept)"/"(kept N)" name, and preserves the received class/category keys.
+  - **Consensus reached.

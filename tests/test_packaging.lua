@@ -20,7 +20,11 @@ toc = toc or ""
 
 check("interface 16001", toc:find("## Interface: 16001", 1, true) ~= nil)
 check("version is the packager keyword", toc:find("## Version: @project-version@", 1, true) ~= nil)
-check("account SVs", toc:find("## SavedVariables: AltStableSyncDB AltStableSyncLAS", 1, true) ~= nil)
+check("account SVs", toc:find("## SavedVariables: AltStableSyncDB%s*[\r\n]") ~= nil)
+-- LibAccountSync's store must never be declared here: the client would write the
+-- household key into AltStableSync.lua, the file the beta->live transfer copies.
+-- It belongs to the separate AltStableSyncLink addon (#18, docs/DESIGN.md).
+check("LAS store not declared by the main addon", not toc:find("AltStableSyncLAS", 1, true))
 check("character SV", toc:find("## SavedVariablesPerCharacter: AltStableSyncChar", 1, true) ~= nil)
 check("AltStable is optional, not required", toc:find("## OptionalDeps: AltStable", 1, true) ~= nil
     and not toc:find("## Dependencies:", 1, true))
@@ -37,6 +41,8 @@ local REQUIRED = {
     "Libs\\LibGlass-1.0\\LibGlass-1.0.xml",
     "Libs\\LibStub\\LibStub.lua",
     "Core.lua",
+    "Categories.lua",
+    "Catalog.lua",
 }
 do
     local at = 0
