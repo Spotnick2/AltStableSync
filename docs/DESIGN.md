@@ -519,6 +519,11 @@ offline while A saved three times) a plain fast-forward rather than a conflict.
     **Keep mine** mints a live version descending from both (the only way a live version may
     descend from a tombstone).
 - There is no field merging, ever.
+- **Accepted edge case:** when two incomparable tombstones meet, the losing one's history is dropped
+  (the tie-break keeps one whole version). A delayed older message from that losing branch can then
+  arrive as one extra conflict copy, even though that account had already deleted the entry. The
+  root stays deleted, and resolving the copy ("keep it deleted") settles it. This is preferred over
+  adding history-merging machinery for a rare, visible, harmless case.
 - **Delete is a versioned tombstone** with ancestors, kept indefinitely so a stale peer can't
   resurrect the entry. Tombstones can't be edited or recovered from the UI. An edit made without
   seeing the deletion (its ancestors don't include the tombstone) is divergent and follows the
@@ -666,3 +671,5 @@ schema refusal, readiness and combat gates, macro ownership, read-back, or catal
   covered copies are retired, so it was removed.
 - **PR #32 round 2:** a "deleted there" conflict copy stays resolvable after the entry is deleted
   here too ("keep it deleted", in either writer-token order).
+- **PR #32 round 3: consensus.** Nits applied: a stale-resolution test, and the tombstone
+  tie-break edge case is documented.

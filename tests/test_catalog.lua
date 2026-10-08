@@ -551,6 +551,25 @@ for _, editorIsA in ipairs({ true, false }) do
     check("del twice (" .. tag .. "): manifests agree", same(a, b))
 end
 
+-- Resolving against a root version that has moved on is refused, and
+-- nothing changes.
+do
+    local a, b, id = pair()
+    use(a); C.Replace(id, mods("A"), root(a, id).version)
+    use(b); C.Replace(id, mods("B"), root(b, id).version)
+    sync(a, b)
+    use(a)
+    local cid = id .. "~" .. root(b, id).version
+    local seen = root(a, id).version
+    C.Replace(id, mods("A2"), seen)
+    local rootBefore, copyBefore = root(a, id).version, a.db.presets[cid].version
+    eq("stale resolve: refused", select(2, C.Resolve(cid, "theirs", seen)), "stale")
+    eq("stale resolve: root unchanged", root(a, id).version, rootBefore)
+    eq("stale resolve: root content unchanged", root(a, id).modules.actions[1].spell, "A2")
+    eq("stale resolve: copy unchanged", a.db.presets[cid].version, copyBefore)
+    check("stale resolve: copy still live", not a.db.presets[cid].deleted)
+end
+
 -- A stale Delete can't destroy a newer version that arrived unreviewed.
 do
     local a, b, id = pair()
