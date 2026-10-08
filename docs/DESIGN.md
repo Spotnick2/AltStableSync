@@ -147,16 +147,18 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
       name = "Everyday",                       -- a label, never identity
       version = "a1b2c3d4e5f6:17",             -- writer:seq of the Save that produced it
       parent = "f00dbabe0000:9",               -- the version it replaced (nil for a new entry)
+      ancestors = { "f00dbabe0000:9", ... },   -- the last 20 versions this one descends from (incl. parent)
       created = <time>, updated = <time>,      -- display metadata only, never ordering
       provenance = { sourceChar = "Name-Realm", build = "70245" },
       modules = { actions = {...}, bindings = {...}, macros = {...} }   -- loadout
              or { editmode = {...}, cvars = {...} },                    -- UI setup
-      previous = { version, updated, modules },  -- LOCAL "undo a bad Save"; never sent, untouched by sync
+      previous = { of = version, modules, updated },  -- LOCAL "undo my last Save": the content before the Save
+                                               -- that produced version `of`; never sent, untouched by sync
       deleted = true,                          -- a versioned tombstone: no modules, kept indefinitely
       conflict = { of = "<id>", from = "Other-Char" },   -- a divergent copy kept whole
     },
   },
-  backups = { [guid] = { <ring of 5>, pinned = <first-seen snapshot> } },   -- exact runtime snapshots
+  backups = { [guid] = { <ring of 10>, pinned = <first-seen snapshot> } },  -- exact runtime snapshots
   origin = { build, region, project },         -- provenance only; never a migration trigger
 }
 
@@ -166,7 +168,7 @@ AltStableSyncChar = {               -- per character
     ui = { id, version, baseline = <modules as loaded>, result = { applied = {...}, skipped = {...} } },
     loadout = { ... },
   },
-  onboarding = { dismissed = true },
+  onboarding = { handled = true },  -- set by Not now, by opening the offer's preview, or by applying
   interrupted = { id, version, done = {...}, remaining = {...} },   -- resuming = a NEW preview + click
 }
 
@@ -212,14 +214,17 @@ Only an explicit confirmation click writes game state.
 | First-login offer (#10) | no | **no**. It only opens a preview |
 | Confirmation click on a Load/Apply/Restore preview | no | **yes**, after a verified backup |
 | Interruption (combat starts mid-apply) | no | stops writing. Resuming = a new preview + a new click |
-| Save / Save As / Delete / Recover (confirmed) | **yes** | no |
+| Save / Save As / Delete / Recover / Keep-this-version (confirmed) | **yes** | no |
 | Catalog sync receipt (#18) | **yes**, by the receive rules | **no**, ever |
 | Beta → live transfer script (#12) | copies the file, client closed | **no** |
 
 ## Safety model (non-negotiable)
 
-1. **Backup before every apply**, including retries and restores. If capturing the backup fails,
-   nothing is written. A no-op plan needs no backup.
+1. **Backup before every apply and every restore.** If capturing the backup fails, nothing is
+   written. A no-op plan needs no backup. **One backup per user-started operation:** resuming an
+   interrupted operation reuses that operation's original backup instead of taking a new ring slot,
+   so retries can never push out the real before-state. The ring holds 10 per character, plus the
+   pinned first-seen snapshot.
 2. **Preview before write**, in our own frame. The preview captures an **immutable copy of the entry
    and its version**. Confirming applies exactly that copy, or refuses as stale if the entry, or the
    target state the plan relied on, changed since (A38).
@@ -229,30 +234,38 @@ Only an explicit confirmation click writes game state.
    - The player loads or retries **explicitly**; nothing retries on an event.
    - An empty slot in the saved entry is not an instruction to erase the destination. Clearing is a
      deliberate choice shown in the preview.
-   - **Cursor hygiene:** start with an empty cursor, validate before every `PlaceAction`, and never
-     discard a payload the player was holding.
+   - **Cursor hygiene:** refuse to start unless the cursor is empty (so the player's own payload is
+     never touched). Before each `PlaceAction`, the cursor must hold exactly what we picked up.
+     After it, the cursor may hold the slot's **displaced previous action**; that action is already
+     in the backup, so it is verified to be exactly the displaced one and then cleared. Anything
+     else on the cursor stops the operation.
 4. **Out of combat only.** Combat stops the operation and keeps an `interrupted` record. Readiness
    and combat-end events **never start or resume** anything; resuming is a new preview and a new
    click.
-5. **Readiness gate:** capture and plan wait for the first `SPELLS_CHANGED` after
-   `PLAYER_ENTERING_WORLD`, and for macro counts that have stopped growing (the first `UPDATE_MACROS`
-   is a trap).
+5. **Readiness gate (predicates, not one event):** capture and plan wait until
+   `PLAYER_ENTERING_WORLD` has fired, the spellbook reports entries, and no `UPDATE_MACROS` or
+   `UPDATE_BINDINGS` has fired for 2 seconds. The first `UPDATE_MACROS` (account macros only) and
+   the first `UPDATE_BINDINGS` (keys still nil) are traps (measured on a fresh login, 70245). The
+   order after `/reload` is re-measured in #29 before #4 relies on it.
 6. **Validation:** check the schema, module versions, class, readiness and combat state before
    planning. Unknown or newer schemas are refused, at startup and in received envelopes.
 7. **Ranks:** keep the original ID plus name. Adaptive load uses the highest known rank in the
    same-name family where the entry says "highest known". A deliberate low rank stays exact. Exact
    restore never upgrades. Ambiguous or cross-locale mappings are deferred, never guessed.
-8. **Bindings:**
-   - The destination set is explicit and shown; the default recommendation is Character.
-   - If the character uses Account bindings and the API can't safely write the inactive set, the
-     binding part is blocked, with "Enable character-specific keybindings in WoW settings, then try
-     again." **Never switch sets.**
+8. **Bindings are written to the Character set only, and only when it is the active set.** The
+   preview shows "Destination: Character".
+   - If the character uses Account bindings, the binding part is blocked with "Enable
+     character-specific keybindings in WoW settings, then try again." The Account set is never
+     written (it is shared by every Account-binding character on the WoW account). **Never switch
+     sets.**
    - Displaced keys are shown, and both keys per command are kept in capture and restore.
 9. **Macros:**
    - **Account macros are never edited, created or deleted.** Sharing them is a separate, future,
      owner-approved policy (#30).
    - Character macros travel with a loadout (included by default). Reuse a macro only on a matching
      name + normalised body + scope; otherwise create a character macro after checking capacity.
+   - **No macro is ever deleted** (character or account) unless the player explicitly asks.
+     Capacity is never freed by deleting; a shortfall is shown before any write.
    - Macro mutations run first, then the name/body→index map is rebuilt, then actions are placed.
    - A button never points at a missing or mismatched macro.
    - Macro bodies are never rewritten (for faction, race, locale, rank or talents).
@@ -294,14 +307,23 @@ kind (`AltStableSyncChar.loaded`) with the applied/skipped result.
 | Empty or ambiguous slot after a skipped load | Keep, unless an explicit clear was chosen in review |
 | Explicit clear chosen | Store the clear; later previews show the deletion |
 
-Save As from a loaded entry copies its inherited unavailable content. A fresh capture with no
-baseline can't invent spells it never saw. **Until #28 lands, Save over a loaded entry is disabled
-outright.** Fresh captures and Save As remain available, and the preview states their interim
-semantics.
+**Which entry Save may replace:** only the entry this character currently has loaded
+(`AltStableSyncChar.loaded[kind]`), and only while that entry's current version is still the
+loaded version. Selecting an entry without loading it, or loading a different one since, leaves
+only Save As. A no-op Load ("Already matches") still records the baseline, so the main character
+can Load-then-Save without a write. A Save whose baseline is stale is refused, with Save As or a
+refreshed Load offered instead (A39).
 
-A Save whose baseline version is no longer the entry's current version is refused: offer Save As or
-a refreshed review (A39). The single `previous` version allows recovering from a bad Save (A44); it
-is not a history product.
+Save As from a loaded entry copies its inherited unavailable content (after #28). A fresh capture
+with no baseline can't invent spells it never saw. **Until #28 lands, Save is disabled entirely and
+Save As is a fresh capture.** Its preview warns: "N entries from the loaded setup aren't available
+on this character and won't be kept."
+
+**Undo my last Save** (A44): `previous` holds the content from before this account's last Save of
+the entry, with `of` = the version that Save produced. It is offered only while the entry's
+current version is still `of`, so it can never overwrite a newer Save that arrived from the other
+account. Undoing is itself a Save: it mints a new version (a successor, so sync carries it) with
+the previous content. It is not a history product.
 
 ## Differences between characters
 
@@ -334,9 +356,11 @@ One small LibGlass window with **UI setup** and **Loadouts** tabs and a quiet **
   setup until they load this version"). Save As shows the destination category and checks the name
   inline.
 - **Every prompt is our own frame**, never a StaticPopup.
-- **First-login offer** (#10), after readiness and out of combat, only when a usable UI setup exists:
-  "Make yourself at home. Start with your saved UI preferences." with the buttons Not now and Preview
-  and apply. The dismissal is remembered on that character.
+- **First-login offer** (#10), after readiness and out of combat, only when at least one UI setup
+  exists: "Make yourself at home. Start with your saved UI preferences." When exactly one exists it
+  is named; when several exist the offer says "Choose a saved UI setup" and opens the UI setup tab.
+  Buttons: Not now, and Preview and apply (or Choose). Not now, opening the preview, and applying
+  all set `onboarding.handled`, so the offer never repeats on that character.
 - **Edge states:**
 
   | State | Copy |
@@ -389,14 +413,17 @@ tiny addon folder:
 The key lands in `AltStableSyncLink.lua`, which the transfer never touches. `AltStableSyncLAS` is
 declared in exactly one TOC.
 
-- `LibStub("LibAccountSync-1.0"):New{ addon = "AltStableSync", store = AltStableSyncLAS, maxPayload = 16384 }`.
+- At its own `ADDON_LOADED` (never at file scope), the Link addon does `AltStableSyncLAS =
+  AltStableSyncLAS or {}`, then `LibStub("LibAccountSync-1.0"):New{ addon = "AltStableSync", store =
+  function() return AltStableSyncLAS end, maxPayload = 16384 }`. The store is the account-wide table,
+  so the key persists.
 - It starts only after core reports a usable DB. A refused schema disables sync too.
 - It is an ordinary enabled addon (not LoadOnDemand), with a visible linked/disabled status.
 
 ### Messages
 
 - **One preset** as an envelope: CBOR→Deflate→Base64, plus schema and checksum (`Envelope.lua`, the M1
-  part of #17), **minus `previous`**.
+  part of #17), including `ancestors`, **minus `previous`**.
 - Or **a manifest batch** `{ [id] = version }` of at most 100 ids. It lists every entry: live,
   tombstones and conflict copies.
 - Every encoded message is size-checked. An oversized entry is reported and stays local.
@@ -405,29 +432,37 @@ declared in exactly one TOC.
   - after every local catalog write;
   - on a bounded timer while a peer is linked (there is no delivery ack, so "sent" is not "synced");
   - on a manual **Refresh**.
-- A local version is **confirmed** when the peer's manifest lists that version, or lists its conflict
-  copy `<id>~<version>` (live or tombstoned). Until then the status says "pending".
 
 ### Receive rules (per entry, idempotent)
+
+Each version carries `ancestors`, the last 20 versions it descends from. That makes ordinary lag (B
+offline while A saved three times) a plain fast-forward rather than a conflict.
 
 | Incoming | Action |
 |---|---|
 | Same version as local | ignore |
-| Version equals local `parent` (an already-superseded predecessor) | ignore |
-| `parent` equals local version (direct successor), or unknown id | **replace**. Local `previous` is untouched (it is local Save recovery only) |
-| Anything else (both accounts saved offline from the same version) | **divergent**: keep the local entry; store the incoming one whole as conflict entry `<id>~<incoming version>`, named "<name> (from <char>)", with a one-line notice. If that conflict id already exists (live **or tombstoned**), ignore it |
+| Incoming version is in local `ancestors` (older than what we hold) | ignore |
+| Local version is in incoming `ancestors`, or the id is unknown | **replace** (fast-forward). Local `previous` is untouched; it is local Save recovery only |
+| Anything else (both accounts saved from a common version, or the lag exceeded 20 saves) | **divergent**: keep the local entry; store the incoming one whole as conflict copy `<id>~<incoming version>`, named "<name> (from <char>)", with a one-line notice. If that conflict id already exists, live **or tombstoned**, ignore it |
 | Unknown or newer envelope schema | reject; local untouched |
 
-- The player resolves a conflict by keeping one entry and deleting the other. There is no field
-  merging.
-- Missing intermediate versions may occasionally produce an unnecessary conflict copy. That is
-  accepted: content is kept, rather than adding ancestry traversal.
-- **Delete is a versioned tombstone**, kept indefinitely so a stale peer can't resurrect the entry. An
-  incoming edit whose parent is a deleted version is a conflict, never an automatic resurrection or
-  destruction.
-- `Replace`, `Rename`, `Delete` and `RecoverPrevious` all take an **expected version** and refuse when
-  it's stale. A newer version that arrived from the other account is therefore never overwritten or
-  tombstoned unreviewed.
+- **Resolving a conflict settles both accounts.** The conflict copy offers **Keep this version** and
+  **Keep mine**. Either one is a Save on `<id>`: it mints a new version whose content is the chosen
+  one and whose `ancestors` include **both** competing versions, then tombstones the conflict copy.
+  Both accounts then see that version as a fast-forward, and the exchange settles. Deleting a
+  conflict copy alone only removes the copy, and the next divergence can raise it again. The status
+  shows "conflict" for the entry until it is resolved.
+- There is no field merging, ever.
+- **Delete is a versioned tombstone** with ancestors, kept indefinitely so a stale peer can't
+  resurrect the entry. Tombstones can't be edited or recovered. An incoming edit that descends from
+  the tombstone can't exist. An edit made without seeing the deletion (its ancestors don't include
+  the tombstone) follows the table: it is divergent and becomes a conflict copy, so nothing
+  resurrects or vanishes silently.
+- `Replace`, `Rename`, `Delete`, Undo and the conflict actions all take an **expected version** and
+  refuse when it's stale. A newer version that arrived from the other account is therefore never
+  overwritten or tombstoned unreviewed.
+- **Confirmed** means the peer's manifest lists our current version, or a version that has it among
+  its ancestors, or our version's conflict copy. Until then the status says "pending".
 - Sync is same-flavour only, by the library's design. Beta → live is the file transfer.
 
 ## Beta → live (Nov 4)
@@ -435,8 +470,13 @@ declared in exactly one TOC.
 - **`Tools/Transfer-Profiles.ps1 -From <beta Account dir> -To <live Account dir>`** (#12):
   - copies **only** `SavedVariables\AltStableSync.lua`, never `AltStableSyncLink.lua`, and never copies
     or replaces a destination Link store;
-  - refuses a source that contains the text `AltStableSyncLAS` (a plain substring check, not Lua
-    parsing);
+  - refuses a source that **assigns a value** to `AltStableSyncLAS`: any line starting
+    `AltStableSyncLAS = ` other than `AltStableSyncLAS = nil`. The client writes `= nil` for a
+    declared but unset variable, and today's beta files contain exactly that line (a line-level
+    text check, not Lua parsing);
+  - requires the destination `WTF\Account\<id>\SavedVariables` folder to exist already. On a fresh
+    live install, log each live account in once and exit before transferring;
+  - is run once per live WoW account that should start with the catalog;
   - refuses while any `Wow*.exe` runs, checked again just before writing;
   - refuses if the destination file exists (`-Force` backs it up first);
   - copies to a temp file, then moves it into place;
@@ -495,3 +535,20 @@ schema refusal, readiness and combat gates, macro ownership, read-back, or catal
   - verification by trigger/write matrix rather than keyword absence.
 
   Rejected: nothing material.
+- **2026-10-08, `/code-review xhigh 31`** (Claude) found 15 issues the rounds above missed. All were
+  accepted:
+  - Save restricted to the entry this character loaded, at its loaded version (disabled until #28);
+  - a bounded `ancestors` list (20) so lag fast-forwards;
+  - conflict resolution that mints a version descending from both sides, so it settles;
+  - Undo as a guarded new Save;
+  - one backup per operation, with retries reusing it and a ring of 10;
+  - displaced cursor payloads verified and cleared;
+  - bindings written to the Character set only;
+  - a predicate readiness gate, with the `/reload` order to be measured (#29);
+  - the transfer refusing only a non-nil `AltStableSyncLAS`, requiring an existing destination, and
+    running per account;
+  - no macro deletion;
+  - `AltStableSyncLAS` initialised at the Link addon's `ADDON_LOADED`;
+  - tombstone wording consistent with the table;
+  - a pre-#28 Save As warning;
+  - the first-login offer marked handled on every outcome, choosing a setup when there are several.

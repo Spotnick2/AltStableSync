@@ -48,7 +48,7 @@
 | A38 | Saved entry changes between preview and confirm | Reject stale plan, recompute and re-preview |
 | A39 | Save from older loaded revision over newer catalog version | No silent loss; Save As or refreshed replacement review |
 | A40 | Import/receive catalog later | No current character mutation; only deliberate Load applies it |
-| A41 | Beta carryover with nonempty LAS | Transfer refuses an `AltStableSync.lua` that contains `AltStableSyncLAS`; otherwise copies only that file and leaves both Link stores (`AltStableSyncLink.lua`) untouched. A separate, nonempty Link store does not block transfer. LAS never crosses flavors |
+| A41 | Beta carryover with nonempty LAS | Transfer refuses an `AltStableSync.lua` that assigns a value to `AltStableSyncLAS` (`= nil`, which the client writes for a declared-but-unset variable, is fine); otherwise copies only that file and leaves both Link stores (`AltStableSyncLink.lua`) untouched. A separate, nonempty Link store does not block transfer. LAS never crosses flavors |
 | A42 | Beta build/project ID changes normally | No false flavor migration or destructive catalog reset |
 | A43 | Full exit after bars/macros/bindings apply and restore | Compare exact captured values; `/reload` alone is not accepted as persistence proof |
 | A44 | Saved entry replacement was a mistake | Previous saved version recoverable separately from runtime backup |

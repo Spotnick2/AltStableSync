@@ -6,7 +6,7 @@ enable-nolib-creation: no
 
 # LibStub is vendored in Libs/. LibGlass-1.0 is the external, pinned to a TAG
 # (never "latest"), bumped only in a release made anyway. LibAccountSync-1.0
-# joins here with the cross-account issue (#18), not before.
+# belongs to the separate Link addon (Plugins/Link, #18), not here.
 # Comments on their own lines only - the packager's YAML reader keeps an inline
 # "# ..." as part of the value (measured in GlassUnitFrames' migration).
 externals:

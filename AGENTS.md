@@ -59,10 +59,13 @@ over months. The full model is in `docs/DESIGN.md`; the short form:
 4. **No clear-before-import.** Per-slot writes, verified by reading back; unresolvable entries stay
    in the saved entry and their destinations are left untouched. The player retries explicitly.
 5. **Account macros are never edited, created or deleted.** Reuse only on name + normalised body +
-   scope match; otherwise create a character macro. Macro mutations first, reindex, then place.
+   scope match; otherwise create a character macro. **No macro is ever deleted** unless the player
+   explicitly asks. Macro mutations first, reindex, then place.
    Sharing account macros between accounts is a separate, owner-approved policy change (#30), never
    an exception implied by other work.
-6. **Bindings go to an explicitly selected set**, never "whatever is current".
+6. **Bindings are written to the Character set only, and only when it is active.** The Account set
+   is never written, and sets are never switched; Account-binding characters get a blocked binding
+   part with an explanation.
 7. **Out of combat only**; combat stops the operation and leaves an interrupted record. Resuming is
    a new preview and a new click.
 8. **Refuse unknown or newer schemas** — never best-effort parse saved data.
@@ -84,9 +87,9 @@ land).
 - `Libs/LibGlass-1.0/` — the glass material, a `.pkgmeta` external pinned to a tag, **gitignored**,
   deployed from `..\LibGlass` by `Tools/deploy.ps1`. Material changes are LibGlass PRs, never edits
   here; never edit `..\LibGlass` from this repo's session.
-- `Libs/LibStub/` — vendored on purpose although LibGlass's XML brings its own: LibAccountSync
-  (#18) and any non-LibGlass library must not depend on LibGlass's load order to find LibStub.
-  LibStub's version guard makes the second copy a no-op.
+- `Libs/LibStub/` — vendored, although LibGlass's XML brings its own, so the addon doesn't depend
+  on LibGlass's load order to find LibStub. LibStub's version guard makes the second copy a no-op.
+  The Link addon (#18) vendors its own for LibAccountSync.
 - `Plugins/Link/` — the separate `AltStableSyncLink` addon (#18): it embeds
   `Libs/LibAccountSync-1.0` (same embedding rules as LibGlass) and owns `AltStableSyncLAS`, so the
   household key is written to its own file. LibAccountSync **cannot** carry beta → live: project and

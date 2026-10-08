@@ -51,9 +51,14 @@ compared. A `/reload`, a stub test or the HTML mockup is never that proof.
 ## Saving from a lower-level character
 
 Load an entry on a low-level alt: the preview lists unlearned spells as skipped and leaves those
-destinations untouched. Until #28 lands, **Save** over that loaded entry is disabled; use **Save
-As**. Once #28 lands, Save keeps the inherited entries the alt couldn't load (A07–A11 in
-`docs/ACCEPTANCE.md`).
+destinations untouched.
+
+**Until #28 lands, Save is disabled**, and Save As is a fresh capture. It does **not** keep the
+entries the alt couldn't load, and its preview says how many will be dropped. So don't Save As from
+a low alt to "fork" a high-level loadout yet; fork from the character that has the spells.
+
+Once #28 lands, Save (over the entry this character loaded) and Save As both keep the inherited
+entries the alt couldn't load (A07–A11 in `docs/ACCEPTANCE.md`).
 
 ## Druid forms
 
@@ -66,15 +71,19 @@ Changing form never saves or loads anything.
 1. **Before launch, on beta:** UI setups and loadouts saved for every class and category you play;
    the rehearsal (#13) passed; a manual copy of the beta `WTF\Account` folder kept outside the game
    directory.
-2. **Live installed, both clients closed.**
-3. `pwsh Tools/Transfer-Profiles.ps1 -From "<beta>\WTF\Account\<id>" -To "<live>\WTF\Account\<id>"`
-   (#12). It copies `AltStableSync.lua` only, never `AltStableSyncLink.lua`, refuses a source that
-   contains `AltStableSyncLAS`, and refuses if a live file already exists.
+2. **Live installed.** Log each live WoW account in once (any character) and **exit fully**, so
+   its `WTF\Account\<id>\SavedVariables` folder exists. Then close every client.
+3. For **each** live WoW account:
+   `pwsh Tools/Transfer-Profiles.ps1 -From "<beta>\WTF\Account\<id>" -To "<live>\WTF\Account\<id>"`
+   (#12). It copies `AltStableSync.lua` only, never `AltStableSyncLink.lua`, and refuses a source that
+   assigns a value to `AltStableSyncLAS` (`= nil` is fine). It also refuses when the destination
+   folder is missing or a live file already exists.
 4. `pwsh Tools/deploy.ps1 -AddOnsPath "<live>\Interface\AddOns"`.
 5. Log in one character. **Nothing is written.** If a UI setup exists, the addon *offers* it
    ("Make yourself at home"); beta backups stay inert (they are keyed by beta GUIDs).
 6. **Launch gate:** on that character, preview and Apply the UI setup and Load one loadout; **full
    exit and relaunch**; compare bars, macros and bindings against the preview. Then load what you
    want on the other characters, one deliberate click at a time.
-7. Log the second WoW account in: the Link addon pairs afresh (a new store) and the catalog appears
-   there. Nothing applies until you load it.
+7. Log both WoW accounts in **at the same time** (sync needs both online): the Link addon pairs
+   afresh (a new store) and later Saves flow between them. Nothing received applies until you load
+   it.
