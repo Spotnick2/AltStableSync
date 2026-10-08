@@ -5,8 +5,9 @@ package-as: AltStableSync
 enable-nolib-creation: no
 
 # LibStub is vendored in Libs/. LibGlass-1.0 is the external, pinned to a TAG
-# (never "latest"), bumped only in a release made anyway. LibAccountSync-1.0
-# belongs to the separate Link addon (Plugins/Link, #18), not here.
+# (never "latest"), bumped only in a release made anyway. #18 adds the Link
+# addon's own external here (Plugins/Link/Libs/LibAccountSync-1.0, tag r5) and
+# a move-folders entry that ships Plugins/Link as top-level AltStableSyncLink.
 # Comments on their own lines only - the packager's YAML reader keeps an inline
 # "# ..." as part of the value (measured in GlassUnitFrames' migration).
 externals:

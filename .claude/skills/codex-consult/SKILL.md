@@ -77,8 +77,8 @@ critique of nothing. Match the instruction to the mode.
 
 For AltStableSync specifically, good things to hand Codex: anything that **writes game state**
 (the apply engine, action-bar placement and cursor handling, macro create/reindex, binding-set
-selection and `SaveBindings`, Edit Mode `SaveLayouts`), the backup/restore path, the flavour
-fingerprint and import quarantine, `Tools/Transfer-Profiles.ps1`, and any change to the
+selection and `SaveBindings`, Edit Mode `SaveLayouts`), the backup/restore path, the catalog
+sync receive rules (`Catalog.Upsert`, the Link addon), `Tools/Transfer-Profiles.ps1`, and any change to the
 SavedVariables shape — paste the relevant code/paths and ask *what silently destroys the player's
 setup*. Feed it the safety model from `docs/DESIGN.md`. Hand it `docs/forever-api-notes.md` alongside the
 diff: those findings are measured on the live client, and a cold reviewer will otherwise argue

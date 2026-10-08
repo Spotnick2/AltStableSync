@@ -2,7 +2,7 @@
 -- Core.lua - AltStableSync namespace, SavedVariables, events, slash command
 --
 -- SavedVariables (declared in AltStableSync.toc):
---   AltStableSyncDB   account-wide: schema, profiles, backups, origin
+--   AltStableSyncDB   account-wide: schema, profiles (presets from #27), backups, origin
 --   AltStableSyncLAS  unused declaration until #27 removes it. The
 --                     LibAccountSync store belongs to the separate
 --                     AltStableSyncLink addon (#18), so it is written to its

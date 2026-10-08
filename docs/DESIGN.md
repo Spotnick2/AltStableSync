@@ -158,18 +158,24 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
       conflict = { of = "<id>", from = "Other-Char" },   -- a divergent copy kept whole
     },
   },
-  backups = { [guid] = { <ring of 10>, pinned = <first-seen snapshot> } },  -- exact runtime snapshots
+  backups = { [guid] = {                       -- exact runtime snapshots
+      ring = { <up to 10, oldest evicted> },
+      firstSeen = <snapshot>,                  -- pinned forever
+      operation = <snapshot> | nil,            -- the interrupted operation's original backup;
+  } },                                         -- pinned until it completes or is abandoned
   origin = { build, region, project },         -- provenance only; never a migration trigger
 }
 
 AltStableSyncChar = {               -- per character
+  schema = 2,                       -- same number as the DB; an unknown or newer one is refused untouched
   lastSelected = { ui = id, loadout = { category = "discipline", id = id } },
   loaded = {                        -- ONE baseline per kind: the last Load/Apply, for #28
     ui = { id, version, baseline = <modules as loaded>, result = { applied = {...}, skipped = {...} } },
     loadout = { ... },
   },
   onboarding = { handled = true },  -- set by Not now, by opening the offer's preview, or by applying
-  interrupted = { id, version, done = {...}, remaining = {...} },   -- resuming = a NEW preview + click
+  interrupted = { id, version, done = {...}, remaining = {...},     -- resuming = a NEW preview + click;
+                  createdMacros = {...} },  -- {index, name, body} the operation created (for Restore)
 }
 
 AltStableSyncLAS = <LibAccountSync store only>   -- declared ONLY by AltStableSyncLink.toc (below)
@@ -222,10 +228,11 @@ Only an explicit confirmation click writes game state.
 
 1. **Backup before every apply, every resume and every restore.** If capturing the backup fails,
    nothing is written. A no-op plan needs no backup. While an operation is `interrupted`, its
-   **original backup is pinned** (never evicted) until the operation completes or the player
-   abandons it, so resumes can't push out the real before-state; each resume still takes its own
-   backup, which keeps any edits the player made in between. The ring holds 10 per character, plus
-   the pinned first-seen snapshot.
+   original backup sits in the separate `operation` slot (never evicted), so resumes can't push out
+   the real before-state; each resume still takes its own ring backup, which keeps any edits the
+   player made in between. There is at most one interrupted operation per character: starting a new
+   Load/Apply/Restore shows "Abandon the interrupted Load of X?" in its preview, and abandoning
+   moves that backup into the ring. The ring holds 10, plus the pinned `firstSeen`.
 2. **Preview before write**, in our own frame. The preview captures an **immutable copy of the entry
    and its version**. Confirming applies exactly that copy, or refuses as stale if the entry, or the
    target state the plan relied on, changed since (A38).
@@ -249,7 +256,8 @@ Only an explicit confirmation click writes game state.
    the first `UPDATE_BINDINGS` (keys still nil) are traps (measured on a fresh login, 70245). The
    order after `/reload` is re-measured in #29 before #4 relies on it.
 6. **Validation:** check the schema, module versions, class, readiness and combat state before
-   planning. Unknown or newer schemas are refused, at startup and in received envelopes.
+   planning. Unknown or newer schemas are refused, at startup (both `AltStableSyncDB` and
+   `AltStableSyncChar`) and in received envelopes.
 7. **Ranks:** keep the original ID plus name. Adaptive load uses the highest known rank in the
    same-name family where the entry says "highest known". A deliberate low rank stays exact. Exact
    restore never upgrades. Ambiguous or cross-locale mappings are deferred, never guessed.
@@ -266,7 +274,11 @@ Only an explicit confirmation click writes game state.
    - Character macros travel with a loadout (included by default). Reuse a macro only on a matching
      name + normalised body + scope; otherwise create a character macro after checking capacity.
    - **No macro is ever deleted** (character or account) unless the player explicitly asks.
-     Capacity is never freed by deleting; a shortfall is shown before any write.
+     Capacity is never freed by deleting; a shortfall is shown before any write. The one offered
+     deletion: a Restore preview lists the character macros that the operation being undone
+     **created** (by index, name and body, recorded at the time), with "Also remove N macros that
+     load created", checked by default and visible. Confirming is the player's explicit ask. A macro
+     whose body has changed since is never removed.
    - Macro mutations run first, then the name/body→index map is rebuilt, then actions are placed.
    - A button never points at a missing or mismatched macro.
    - Macro bodies are never rewritten (for faction, race, locale, rank or talents).
@@ -311,7 +323,8 @@ kind (`AltStableSyncChar.loaded`) with the applied/skipped result.
 **Which entry Save may replace:** only the entry this character currently has loaded
 (`AltStableSyncChar.loaded[kind]`), and only while that entry's current version is still the
 loaded version. A successful Save **advances that baseline** to the version it produced (with the
-saved content as the new baseline), so the same character can edit and Save again. Sync receipt
+saved content as the new baseline), so the same character can edit and Save again. A Save As sets
+the baseline to the **new** entry, so the player can keep refining what they just created. Sync receipt
 never advances a character's baseline. This restriction applies to capture Saves only; Undo and
 conflict resolution use their own catalog expected-version guards. Selecting an entry without loading it, or loading a different one since, leaves
 only Save As. A no-op Load ("Already matches") still records the baseline, so the main character
@@ -456,6 +469,11 @@ declared in exactly one TOC.
   window). Messages mode is not guaranteed delivery; repeated exchange is the recovery, and an entry
   stays "pending" until the manifests match.
 
+  To keep the recovery from flooding those limits: only **local** Saves, Save Ases and deletes
+  trigger an exchange (receipts never do), coalesced within 2 seconds. An entry already requested is
+  not requested again for 30 seconds. Requests go out at most 3 at a time per peer, and the next
+  goes when one arrives or times out.
+
 ### Receive rules (per entry, idempotent)
 
 Each version carries `ancestors`, the last 20 versions it descends from. That makes ordinary lag (B
@@ -475,7 +493,8 @@ offline while A saved three times) a plain fast-forward rather than a conflict.
   for those two versions, `<id>~<a>` and `<id>~<b>`, including the mirror copy this account never
   received. Each tombstone descends from its copy's version. The other account then fast-forwards
   the root and its own mirror copy, and a late-arriving copy is ignored because its id already
-  exists as a tombstone. Deleting a conflict copy alone only removes the copy. The entry shows
+  exists as a tombstone. **Deleting a conflict copy is "Keep mine"** (the same resolution, so the
+  roots still converge); there is no way to discard a copy without resolving. The entry shows
   "conflict" until it is resolved, and that status takes precedence over "confirmed".
 - **Deletion conflicts:**
   - Tombstone over tombstone: a successor fast-forwards as usual. Two incomparable tombstones
@@ -605,3 +624,15 @@ schema refusal, readiness and combat gates, macro ownership, read-back, or catal
   yet validated in game. A focused gpt-6-astra (high) round reached **consensus**. Its nits are
   applied: the GUID comes from `Sync.Peers()`, retries cover refused messages, and the rehearsal
   includes 100 entries.
+- **2026-10-08, `/code-review high 31`** (Claude) raised 10 candidates; all accepted:
+  - deleting a conflict copy now counts as "Keep mine", so the roots still converge;
+  - explicit backup slots: `ring`, `firstSeen`, and an `operation` slot for the interrupted
+    operation, with one interrupted operation per character;
+  - Save As sets the baseline to the new entry;
+  - exchanges are triggered by local writes only, coalesced, with a 30-second request hold-off and
+    at most 3 requests in flight per peer;
+  - `AltStableSyncChar.schema`, refused when newer;
+  - Restore offers, visibly, to remove the macros the undone load created;
+  - the mockup's differences from this design are listed in its README;
+  - stale wording fixed in the `.pkgmeta` comment, the codex-consult skill, the AGENTS docs list and
+    a `test_core` fixture.

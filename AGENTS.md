@@ -96,7 +96,8 @@ land).
   household key is written to its own file. LibAccountSync **cannot** carry beta → live: project and
   region are part of its proof, by design.
 - `tests/` — Lua 5.1 unit tests. `Tools/` — deploy and transfer scripts (never ship).
-- `docs/` — `DESIGN.md`, `WORKFLOW.md`, `RUNBOOK.md`, `forever-api-notes.md`.
+- `docs/` — `DESIGN.md`, `ACCEPTANCE.md`, `WORKFLOW.md`, `RUNBOOK.md`, `forever-api-notes.md`,
+  plus the design concepts in `storyboard/` and `mockups/` (not a running addon).
 
 ## Build & validate
 

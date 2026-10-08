@@ -14,3 +14,12 @@ The outer Main window / New character controls switch demo scenes. Inside, try U
 - Binding destination is shown, but inactive-set blocking, combat, readiness, macro capacity, stale revisions, partial failure and exact restore verification are specified in the docs rather than fully simulated.
 - Production prompts belong to AltStableSync's own frame. No StaticPopup.
 - Category selection does not change talents. Lists are manual categories on Forever.
+
+## Differences from the design (`docs/DESIGN.md` wins)
+
+- **Save** is always enabled in the mockup and is shown keeping unlearned content. In the design,
+  Save is disabled until #28. After that, it is allowed only over the entry this character loaded,
+  at its loaded version. Before #28, Save As is a fresh capture that warns about dropped entries.
+- The duplicate-name error says "use Save"; in the design that is only possible for the loaded entry.
+- Conflicts, sync status, the "operation" backup, and Restore's "remove macros that load created"
+  are not shown.
