@@ -159,19 +159,22 @@ end
 -- Bindings, cursor
 ------------------------------------------------------------
 
--- Every key bound to `command` (GetBindingKey returns them all), as a list.
+-- Every key bound to `command` (GetBindingKey returns them all), as a list;
+-- nil when the client call fails (unreadable is not "no keys").
 function Game.KeysFor(command)
     local r = { pcall(GetBindingKey, command) }
-    if not r[1] then return {} end
+    if not r[1] then return nil end
     local keys = {}
     for i = 2, #r do if type(r[i]) == "string" and r[i] ~= "" then keys[#keys + 1] = r[i] end end
     return keys
 end
 
--- The command a key runs, or false when unbound.
+-- The command a key runs, false when unbound, nil when unreadable (a failed
+-- read must never be recorded as "unbound": restoring that would wipe a key).
 function Game.CommandOf(key)
     local ok, cmd = pcall(GetBindingAction, key)
-    if not ok or cmd == nil or cmd == "" then return false end
+    if not ok then return nil end
+    if cmd == nil or cmd == "" then return false end
     return cmd
 end
 
@@ -185,10 +188,12 @@ function Game.CursorEmpty()
     return ok and kind == nil
 end
 
--- The cursor as a normalised action (macro by name, via its index), or nil.
+-- The cursor as a normalised action (macro by name, via its index), nil when
+-- empty, or { kind = "unreadable" } when the read fails (never "empty").
 function Game.Cursor()
     local ok, kind, a, b, c = pcall(GetCursorInfo)
-    if not ok or kind == nil then return nil end
+    if not ok then return { kind = "unreadable" } end
+    if kind == nil then return nil end
     if kind == "spell" then return { kind = "spell", id = c } end
     if kind == "item" then return { kind = "item", id = a } end
     if kind == "macro" then

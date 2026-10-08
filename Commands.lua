@@ -89,6 +89,10 @@ local function Report(kind, result, err)
         Print((kind == "load" and "Not loaded: " or "Not restored: ") .. tostring(err))
         return
     end
+    if result.noop and not result.partial and #(result.skips or {}) > 0 then
+        Print(("Nothing applied: %d left unchanged (see the preview's list)."):format(#result.skips))
+        return
+    end
     if result.noop and not result.partial then Print("Already matches the selected settings.") return end
     if result.noop then
         Print("Nothing could be restored: see the preview's list. The backup is kept.")
@@ -110,7 +114,8 @@ end
 function Commands.saveas(arg)
     local blocked = ASS.Loadout.Blocked()
     if blocked then Print(blocked) return end
-    local modules = ASS.Loadout.Capture()
+    local modules, cerr = ASS.Loadout.Capture()
+    if not modules then Print("Not saved: " .. tostring(cerr)) return end
     local name, realm = UnitFullName("player")
     local e, err = ASS.Catalog.Create("loadout", { class = PlayerClass(), category = "general", name = arg,
         provenance = { sourceChar = tostring(name) .. "-" .. tostring(realm), build = select(2, GetBuildInfo()) } }, modules)
@@ -136,6 +141,10 @@ function Commands.load(arg)
     if not entry then Print("No loadout named " .. tostring(arg) .. ". /altsync list") return end
     local plan = ASS.Loadout.Plan(entry)
     local lines = Commands.Describe(plan)
+    -- A no-op still gets "Done": it records what was loaded (docs/DESIGN.md: a
+    -- no-op Load records the baseline) without writing game state.
+    local confirm = "Load"
+    if plan.blocked then confirm = false elseif plan.noop then confirm = "Done" end
     local pinned = ASS.Backups.Operation()
     if pinned and not plan.blocked then
         table.insert(lines, 1, ("Abandon the incomplete load of %s? Its backup stays in your backups."):format(
@@ -144,12 +153,7 @@ function Commands.load(arg)
     ASS.Preview.Show({
         title = "Load " .. tostring(entry.name) .. "?",
         lines = lines,
-        -- A no-op still gets "Done": it records what was loaded (docs/DESIGN.md:
-        -- a no-op Load records the baseline) without writing game state.
-        confirm = (function()
-            if plan.blocked then return false end     -- (not "and false or": that always picks the fallback)
-            return plan.noop and "Done" or "Load"
-        end)(),
+        confirm = confirm,
         onConfirm = function() Report("load", ASS.Loadout.Load(entry, plan, pinned ~= nil)) end,
     })
 end
@@ -165,13 +169,16 @@ end
 function Commands.restore(arg)
     local which = (arg == "" or arg == nil) and 1 or arg
     local plan = ASS.Loadout.PlanRestore(which)
+    -- A fully matching restore of the pinned operation still gets "Done", so
+    -- its completion can release the pin; any other no-op has nothing to do.
+    local complete = #plan.unavailable == 0 and not plan.keysBlocked
+    local confirm = "Restore"
+    if plan.blocked then confirm = false
+    elseif plan.noop then confirm = (which == "op" and complete) and "Done" or false end
     ASS.Preview.Show({
         title = "Restore backup " .. tostring(which) .. "?",
         lines = Commands.Describe(plan),
-        confirm = (function()
-            if plan.blocked or (plan.noop and #plan.unavailable == 0 and not plan.keysBlocked) then return false end
-            return plan.noop and "Done" or "Restore"
-        end)(),
+        confirm = confirm,
         onConfirm = function() Report("restore", ASS.Loadout.Restore(which, plan)) end,
     })
 end

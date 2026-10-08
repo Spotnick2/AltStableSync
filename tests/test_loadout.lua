@@ -554,6 +554,105 @@ do
 end
 
 ------------------------------------------------------------
+-- Round-2 review cases
+------------------------------------------------------------
+
+-- A restore interrupted after SetBinding but before SaveBindings, then retried
+-- out of combat: the retry still saves, so the keys survive a relaunch.
+do
+    boot(); ready(); save(); alt()
+    L.Load(entry, L.Plan(entry))
+    eq("persist: load saved SHIFT-2", G.savedKeys["SHIFT-2"], "ACTIONBUTTON2")
+    local realSave = SaveBindings
+    SaveBindings = function(set) WoW.game.combat = true; return realSave(set) end
+    local rr = L.Restore(1, L.PlanRestore(1))
+    SaveBindings = realSave
+    check("persist: first restore stopped before saving", rr and rr.failed ~= nil, rr and tostring(rr.failed))
+    G.combat = false
+    local rp = L.PlanRestore(2)                  -- the load's backup is now ring #2
+    check("persist: retry still has binding work", next(rp.keys) ~= nil)
+    rr = L.Restore(2, rp)
+    check("persist: retry ok", rr and not rr.failed, rr and tostring(rr.failed))
+    WoW.relaunch(); ready()
+    eq("persist: SHIFT-2 back after relaunch", G.keys["SHIFT-2"], "MOVEFORWARD")
+end
+
+-- An unreadable binding read never becomes "unbound": nothing is planned or written.
+do
+    boot(); ready(); save(); alt()
+    local realGet = GetBindingAction
+    GetBindingAction = function() error("read failed") end
+    G.calls = {}
+    local plan = L.Plan(entry)
+    GetBindingAction = realGet
+    check("unreadable key: plan blocked", (plan.blocked or ""):find("read the key bindings") ~= nil, tostring(plan.blocked))
+    eq("unreadable key: wrote nothing", #G.calls, 0)
+    local realKey = GetBindingKey
+    GetBindingKey = function() error("read failed") end
+    local m, err = L.Capture()
+    GetBindingKey = realKey
+    check("unreadable key: capture refused", m == nil and tostring(err):find("read the key bindings") ~= nil)
+end
+
+-- A cursor read that fails right after placing: treated as a failure, the
+-- cursor is cleared, nothing reported as success.
+do
+    boot(); ready(); save(); alt({ actions = { [1] = { spell = 2052 } } })
+    local plan = L.Plan(entry)
+    local realPlace, realCursor = PlaceAction, GetCursorInfo
+    local broken = false
+    PlaceAction = function(slot) realPlace(slot); broken = true end
+    GetCursorInfo = function(...) if broken then broken = false; error("read failed") end return realCursor(...) end
+    local r = L.Load(entry, plan)
+    PlaceAction, GetCursorInfo = realPlace, realCursor
+    eq("unreadable cursor: stopped", r and r.failed, "cursor unreadable")
+    eq("unreadable cursor: cursor cleared", G.cursor, nil)
+    check("unreadable cursor: backup pinned", A.Backups.Operation() ~= nil)
+end
+
+-- A fully matching restore of the pinned operation gets "Done" and releases it.
+do
+    boot(); ready()
+    local e = custom({ actions = { [9] = { kind = "macro", name = "Late", body = "/late", scope = "char" } },
+                       macros = { Late = { body = "/late" } } })
+    alt()
+    G.combatAfter = 1                                 -- combat right after CreateMacro
+    local r = L.Load(e, L.Plan(e))
+    G.combat = false
+    eq("op done: stopped after the macro", r and r.failed, "combat")
+    A.Commands.restore("op")
+    eq("op done: preview offers Done", A._shown and A._shown.confirm, "Done")
+    A._shown.onConfirm()
+    eq("op done: released", A.Backups.Operation(), nil)
+end
+
+-- A partial restore of the pinned operation keeps it pinned.
+do
+    boot(); ready(); save(); alt({ actions = { [1] = { spell = 2050 } } })
+    local plan = L.Plan(entry)
+    G.combatAfter = 6
+    L.Load(entry, plan)
+    G.combat = false
+    for _, sp in ipairs(G.spells) do if sp.id == 2050 then sp.known = false end end
+    local rp = L.PlanRestore("op")
+    check("partial op: something unavailable", #rp.unavailable > 0)
+    local rr = L.Restore("op", rp)
+    check("partial op: reported partial", rr and rr.partial == true)
+    check("partial op: still pinned", A.Backups.Operation() ~= nil)
+end
+
+-- A load where everything was skipped says so instead of "already matches".
+do
+    boot(); ready()
+    local e = custom({ actions = { [1] = { kind = "spell", id = 2060, name = "Greater Heal", policy = "highest" } } })
+    alt()
+    WoW.chatLines = {}
+    A.Commands.Report("load", L.Load(e, L.Plan(e)))
+    local said = table.concat(WoW.chat(), "\n")
+    check("skipped only: honest message", said:find("Nothing applied") ~= nil, said)
+end
+
+------------------------------------------------------------
 -- Preview text
 ------------------------------------------------------------
 do

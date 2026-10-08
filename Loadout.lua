@@ -71,7 +71,11 @@ function Loadout.Capture()
         end
     end
     local bindings = {}
-    for _, cmd in ipairs(Game.COMMANDS) do bindings[cmd] = Game.KeysFor(cmd) end
+    for _, cmd in ipairs(Game.COMMANDS) do
+        local keys = Game.KeysFor(cmd)
+        if not keys then return nil, "Couldn't read the key bindings; try again." end
+        bindings[cmd] = keys
+    end
     return { actions = actions, bindings = bindings, macros = macros }
 end
 
@@ -159,12 +163,15 @@ local function PlanKeys(plan, wantKeys)
     end
     -- Every key that holds one of these commands now but isn't wanted for it.
     for cmd in pairs(wantKeys) do
-        for _, key in ipairs(Game.KeysFor(cmd)) do
+        local current = Game.KeysFor(cmd)
+        if not current then plan.blocked = "Couldn't read the key bindings; try again." return end
+        for _, key in ipairs(current) do
             if want[key] == nil then want[key] = false end
         end
     end
     for key, cmd in pairs(want) do
         local from = Game.CommandOf(key)
+        if from == nil then plan.blocked = "Couldn't read the key bindings; try again." return end
         if from ~= cmd then plan.keys[key] = { to = cmd, from = from } end
     end
 end
@@ -206,6 +213,7 @@ function Loadout.Plan(entry)
         end
     end
     if modules.bindings then PlanKeys(plan, modules.bindings) end
+    if plan.blocked then plan.actions, plan.creates, plan.keys = {}, {}, {} end
     return Finish(plan)
 end
 
@@ -225,7 +233,11 @@ local function Snapshot(plan, reason)
     local snap = { reason = reason, actions = {}, keys = {}, createdMacros = {},
                    characterBindings = Game.CharacterBindings() }
     for _, op in ipairs(plan.actions) do snap.actions[op.slot] = Game.ActionAt(op.slot) or false end
-    for key in pairs(plan.keys) do snap.keys[key] = Game.CommandOf(key) end
+    for key in pairs(plan.keys) do
+        local cmd = Game.CommandOf(key)
+        if cmd == nil then return nil end           -- unreadable: no backup, so no writes
+        snap.keys[key] = cmd
+    end
     return snap
 end
 
@@ -297,6 +309,7 @@ local function Execute(plan, snap)
         -- protected call, so clearing our own displaced payload is allowed even
         -- if combat began this frame.
         local held = Game.Cursor()
+        if held and held.kind == "unreadable" then return bail("cursor unreadable", at) end
         if held then
             if t and Game.SameAction(held, t) and not Game.SameAction(Game.ActionAt(op.slot), t) then
                 return bail("place failed", at)      -- our pickup never landed
@@ -310,6 +323,7 @@ local function Execute(plan, snap)
         if not Game.SameAction(Game.ActionAt(op.slot), t) then return bail("verify failed", at) end
         result.changed = result.changed + 1
     end
+    if #plan.actions > 0 and not Game.CursorEmpty() then return bail("cursor not empty after the actions", "actions") end
 
     -- 3. Bindings: the final map, each key once, guarded each time; read back
     -- whole before saving; rolled back in memory on any failure.
@@ -370,6 +384,7 @@ function Loadout.Load(entry, shown, abandon)
         return { noop = true, skips = plan.skips }
     end
     local snap = Snapshot(plan, "load " .. tostring(entry.name))
+    if not snap then return nil, "Couldn't read the current setup for the backup; nothing was changed." end
     local ok, err = ASS.Backups.Pin(snap, { kind = "load", id = entry.id, version = entry.version, name = entry.name })
     if not ok then return nil, err end
     local result = Execute(plan, snap)
@@ -431,13 +446,18 @@ function Loadout.PlanRestore(which)
         if not Game.CharacterBindings() then
             plan.keysBlocked = KEYS_BLOCKED
         else
+            -- Every touched key, even one that already matches in memory: an
+            -- earlier interrupted restore may have set it without saving, and
+            -- only SaveBindings makes it survive a relaunch.
             for key, cmd in pairs(snap.keys) do
                 local from = Game.CommandOf(key)
-                if from ~= cmd then plan.keys[key] = { to = cmd, from = from } end
+                if from == nil then plan.blocked = "Couldn't read the key bindings; try again." break end
+                plan.keys[key] = { to = cmd, from = from }
             end
         end
     end
     plan.kept = snap.createdMacros or {}
+    if plan.blocked then plan.actions, plan.keys = {}, {} end
     return Finish(plan)
 end
 
@@ -455,6 +475,7 @@ function Loadout.Restore(which, shown)
         result = { noop = true, changed = 0, created = 0, keys = 0 }
     else
         local snap = Snapshot(plan, "restore")
+        if not snap then return nil, "Couldn't read the current setup for the backup; nothing was changed." end
         ASS.Backups.PushRing(snap)
         result = Execute(plan, snap)
     end
