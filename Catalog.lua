@@ -98,6 +98,10 @@ end
 local function Trim(s)
     return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", ""))
 end
+Catalog.Trim = Trim
+
+-- The deterministic id of a conflict copy: root id + "~" + its version.
+local function CopyId(id, version) return id .. "~" .. version end
 
 local function SameList(e, kind, class, category)
     if e.kind ~= kind then return false end
@@ -121,15 +125,13 @@ end
 
 function Catalog.Get(id) return Presets()[id] end
 
--- Live entries of `kind` (and `class`) in every category, including keys this
--- build doesn't know (a newer build's, received by sync), sorted by name.
-function Catalog.ListAll(kind, class)
+-- Live entries matching `keep`, sorted by name then id. Unresolved conflict
+-- copies are included (`entry.conflict` set); tombstones and retired copies
+-- are not.
+local function Collect(keep)
     local out = {}
     for _, e in pairs(Presets()) do
-        if type(e) == "table" and not e.deleted and e.kind == kind
-            and (kind ~= "loadout" or e.class == class) then
-            out[#out + 1] = e
-        end
+        if type(e) == "table" and not e.deleted and keep(e) then out[#out + 1] = e end
     end
     table.sort(out, function(a, b)
         local x, y = tostring(a.name):lower(), tostring(b.name):lower()
@@ -139,22 +141,15 @@ function Catalog.ListAll(kind, class)
     return out
 end
 
--- Live entries of one list (kind, and for loadouts class + category), sorted
--- by name. Unresolved conflict copies are included (`entry.conflict` set);
--- tombstones and retired copies are not.
+-- One list: kind, and for loadouts class + category.
 function Catalog.List(kind, class, category)
-    local out = {}
-    for _, e in pairs(Presets()) do
-        if type(e) == "table" and not e.deleted and SameList(e, kind, class, category) then
-            out[#out + 1] = e
-        end
-    end
-    table.sort(out, function(a, b)
-        local x, y = tostring(a.name):lower(), tostring(b.name):lower()
-        if x ~= y then return x < y end
-        return a.id < b.id
-    end)
-    return out
+    return Collect(function(e) return SameList(e, kind, class, category) end)
+end
+
+-- Every category of `kind` (and `class`), including keys this build doesn't
+-- know (a newer build's, received by sync).
+function Catalog.ListAll(kind, class)
+    return Collect(function(e) return e.kind == kind and (kind ~= "loadout" or e.class == class) end)
 end
 
 -- { [id] = version } for every entry, live, tombstoned or conflict copy: what
@@ -330,6 +325,21 @@ local function Sanitize(x)
     return e
 end
 
+-- Would receiving `id` at `version` change anything here? False when we hold
+-- that version or have moved past it, or already keep it as a conflict copy:
+-- Upsert would ignore it. The Link addon asks this before fetching an entry.
+-- (A copy of OUR version listed by the other account can't be told apart from
+-- its retired tombstone by id and version alone, so it is fetched once.)
+function Catalog.Wants(id, version)
+    if type(id) ~= "string" or type(version) ~= "string" then return false end
+    local p = Presets()
+    local e = p[id]
+    if not e then return true end
+    if e.version == version or Contains(e.ancestors, version) then return false end
+    if p[CopyId(id, version)] then return false end
+    return true
+end
+
 -- Apply one entry received from `fromChar`'s account. Returns the action
 -- taken: "ignore", "replace", "conflict", or nil plus "bad-entry". Never
 -- touches game state, and never applies anything to a character.
@@ -377,7 +387,7 @@ function Catalog.Upsert(incoming, fromChar)
     end
     -- Divergent: keep ours, keep theirs whole as a deterministic conflict copy.
     -- A copy id that already exists, live or retired, means it was handled.
-    local cid = id .. "~" .. incoming.version
+    local cid = CopyId(id, incoming.version)
     if p[cid] then return "ignore" end
     local copy = Sanitize(incoming)
     local originalName = incoming.name or local_.name

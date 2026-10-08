@@ -84,19 +84,33 @@ local function Status()
     local on = Link.lib.IsEnabled()
     Print("Link: " .. (on and "on" or "off (/altsync link on)"))
     local peers = Link.sync.Peers()
-    if #peers == 0 then Print("  No other account of yours is online with AltStableSyncLink.") end
-    local entries = ASS.Catalog.Manifest()
-    for _, p in ipairs(peers) do
-        local confirmed, pending = 0, 0
-        for id in pairs(entries) do
-            local e = ASS.Catalog.Get(id)
-            local st = Link.sync.EntryStatus(e, p.guid)
-            if st == "confirmed" then confirmed = confirmed + 1 else pending = pending + 1 end
+    if #peers == 0 then Print("  No other account of yours is online.") end
+    -- The entries a player sees: live, not conflict copies (those show as
+    -- conflicts until resolved; the other account never lists our copy).
+    local entries, conflicts = {}, 0
+    for _, kind in ipairs({ "loadout", "ui" }) do
+        for id, e in pairs(ASS.db.presets) do
+            if type(e) == "table" and e.kind == kind and not e.deleted then
+                if e.conflict then conflicts = conflicts + 1 else entries[#entries + 1] = e end
+            end
         end
-        local out, queued = Link.sync.Outstanding(p.guid)
-        Print(("  %s: %d confirmed, %d pending%s"):format(p.label, confirmed, pending,
-            (out + queued) > 0 and (", fetching " .. (out + queued)) or ""))
     end
+    for _, p in ipairs(peers) do
+        if not p.heard then
+            Print(("  %s: online, no reply yet (AltStableSyncLink not running there?)"):format(p.label))
+        else
+            local n = { confirmed = 0, pending = 0, ["too large"] = 0 }
+            for _, e in ipairs(entries) do
+                local st = Link.sync.EntryStatus(e, p.guid) or "pending"
+                n[st] = (n[st] or 0) + 1
+            end
+            local out, queued = Link.sync.Outstanding(p.guid)
+            Print(("  %s: %d confirmed, %d pending%s%s"):format(p.label, n.confirmed, n.pending,
+                n["too large"] > 0 and (", " .. n["too large"] .. " too large to sync") or "",
+                (out + queued) > 0 and (", fetching " .. (out + queued)) or ""))
+        end
+    end
+    if conflicts > 0 then Print(("  %d conflict%s to resolve: /altsync conflicts"):format(conflicts, conflicts == 1 and "" or "s")) end
     if Link.lib.Diagnostics then
         for line in Link.lib.Diagnostics() do Print("  " .. tostring(line)) end
     end
@@ -107,8 +121,11 @@ local function Command(arg)
     if sub == "" or sub == "status" then return Status() end
     if not Link.sync then Print("Link: off - " .. tostring(Link.why)) return end
     if sub == "refresh" then
-        Link.sync.Refresh()
-        Print("Link: sent this account's list; entries that differ are fetched in the background.")
+        if not Link.lib.IsEnabled() then Print("Link: off (/altsync link on)") return end
+        local took = Link.sync.Refresh()
+        Print((took or 0) > 0
+            and "Link: sent this account's list; entries that differ are fetched in the background."
+            or "Link: no other account took the list yet; it is sent again in a few seconds.")
     elseif sub == "on" or sub == "off" then
         Link.lib.SetEnabled(sub == "on")
         Print("Link: " .. sub)

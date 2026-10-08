@@ -27,7 +27,9 @@ local function Adler32(s)
         a = (a + s:byte(i)) % 65521
         b = (b + a) % 65521
     end
-    return ("%08x"):format(b * 65536 + a)
+    -- Two 16-bit halves: "%08x" of b*65536+a would pass a value >= 2^31
+    -- through C's long, which differs between 32- and 64-bit clients.
+    return ("%04x%04x"):format(b, a)
 end
 Envelope.Adler32 = Adler32
 

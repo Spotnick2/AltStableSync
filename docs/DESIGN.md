@@ -486,11 +486,20 @@ declared in exactly one TOC.
   outstanding per peer, and one completes when its entry arrives or after 30 seconds, when it goes
   back in the queue while still lacking. So an entry is never requested twice at once, and an id the
   peer never answers costs at most 3 requests per 30 seconds.
-- **Wire format** (`Plugins/Link/Sync.lua`): `"<kind>\n<envelope>"`, with `MAN` (manifest batch
-  `{ g = generation, p = part, n = parts, l = { [id] = version } }`), `REQ` (`{ i = id }`, sent to one
-  peer) and `ENT` (one entry, sent to the peer that asked). The envelope is
-  `"ASE1:<Adler-32 of the CBOR>:<Base64(Deflate(CBOR))>"`. The size check is on the whole string
-  handed to the library; batches shrink 100 → 50 → 25 ids until each fits.
+- **Wire format** (`Plugins/Link/Sync.lua`): `MAN\n<envelope>` (manifest batch
+  `{ b = session, c = counter, p = part, n = parts, l = { [id] = version } }`), `REQ\n<envelope>`
+  (`{ i = id }`, sent to one peer) and `ENT\n<id>\n<envelope>` (one entry, sent to the peer that
+  asked; the id outside the envelope lets a refused envelope free its request, and that version is
+  not asked for again this session). The envelope is
+  `"ASE1:<Adler-32 of the CBOR, as two 16-bit hex halves>:<Base64(Deflate(CBOR))>"`. The size check
+  is on the whole string handed to the library; batches shrink 100 → 50 → 25 ids until each fits.
+  Manifests are ordered per peer session by counter: an older one arriving late, or a stray part of
+  one, changes nothing, and a session replaced by a newer one (the peer reloaded) is ignored.
+- **Which peers count.** LibAccountSync lists every online account of the owner, with the Link
+  addon or not. A peer counts for "confirmed" and status only once it has sent a message; until
+  then `/altsync link` names it as "no reply yet". A manifest no peer took (one still
+  mid-handshake) is sent again 5 seconds later. A peer that leaves takes its queue and requests
+  with it.
 - **Commands** (catalog only, each previewed with the id and version it shows; stale is refused):
   `/altsync list` (every category of this class, with ids and pending / confirmed / conflict
   markers), `rename <id> <name>`, `delete <id|name>`, `conflicts`, `resolve <id|name> theirs|mine`

@@ -27,7 +27,7 @@ local function PlayerClass()
     return class
 end
 
-local function Trim(s) return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "")) end
+local function Trim(s) return ASS.Catalog.Trim(s) end
 
 -- This class's live entry with id `arg`, or the one entry named `arg`; else
 -- nil plus the lines to print (none found, or the candidates with their ids).
@@ -59,6 +59,7 @@ local COPY = {
     ["unknown-id"] = "That loadout no longer exists.",
     ["conflict-copy"] = "That is a conflict copy: settle it with /altsync resolve.",
     ["not-conflict"] = "That conflict was already settled.",
+    ["rename-empty"] = "Give it a name: /altsync rename <id> <new name>.",
 }
 local function Copy(err) return COPY[err] or tostring(err) end
 
@@ -221,6 +222,10 @@ end
 function Commands.load(arg)
     local entry, why = FindEntry(arg)
     if not entry then for _, l in ipairs(why) do Print(l) end return end
+    if type(entry.modules) ~= "table" then
+        -- A deletion conflict copy stands for "deleted on the other account".
+        Print("That entry has nothing to load. " .. Copy("conflict-copy")) return
+    end
     local plan = ASS.Loadout.Plan(entry)
     local lines = Commands.Describe(plan)
     -- A no-op still gets "Done": it records what was loaded (docs/DESIGN.md: a
@@ -279,6 +284,9 @@ function Commands.rename(arg)
         Print("Usage: /altsync rename <id> <new name>  (ids are in /altsync list)") return
     end
     if e.conflict then Print(Copy("conflict-copy")) return end
+    local trimmed, nerr = ASS.Catalog.ValidateName(e.kind, e.class, e.category, name, e.id)
+    if not trimmed then Print("Not renamed: " .. Copy(nerr == "name-empty" and "rename-empty" or nerr)) return end
+    name = trimmed
     local version = e.version
     ASS.Preview.Show({
         title = "Rename " .. tostring(e.name) .. "?",
@@ -286,7 +294,8 @@ function Commands.rename(arg)
         confirm = "Rename",
         onConfirm = function()
             local r, err = ASS.Catalog.Rename(id, name, version)
-            Print(r and ("Renamed to %q."):format(r.name) or ("Not renamed: " .. Copy(err)))
+            Print(r and ("Renamed to %q."):format(r.name)
+                or ("Not renamed: " .. Copy(err == "name-empty" and "rename-empty" or err)))
         end,
     })
 end
@@ -325,7 +334,18 @@ function Commands.resolve(arg)
     end
     local copy, why = FindEntry(target)
     if not copy then for _, l in ipairs(why) do Print(l) end return end
-    if not copy.conflict then Print(Copy("not-conflict")) return end
+    if not copy.conflict then
+        -- The root named: its one open copy, or the choice of copies.
+        local copies = {}
+        for _, c in ipairs(Conflicts()) do if c.conflict.of == copy.id then copies[#copies + 1] = c end end
+        if #copies == 0 then Print(Copy("not-conflict")) return end
+        if #copies > 1 then
+            Print(("%q has %d conflict copies; resolve each by its id:"):format(tostring(copy.name), #copies))
+            for _, c in ipairs(copies) do Print("  " .. c.id .. ": " .. tostring(c.name)) end
+            return
+        end
+        copy = copies[1]
+    end
     local root = ASS.Catalog.Get(copy.conflict.of)
     if not root then Print(Copy("unknown-id")) return end
     local from = tostring(copy.conflict.from or "your other account")
@@ -333,7 +353,9 @@ function Commands.resolve(arg)
     local deletion = copy.conflict.deletion
     local apiChoice = (deletion and choice == "theirs") and "delete" or choice
     local line
-    if deletion then
+    if deletion and root.deleted then
+        line = ("%q is deleted on both accounts; it stays deleted."):format(name)
+    elseif deletion then
         line = choice == "theirs" and ("Delete %q here too, as %s did."):format(name, from)
             or ("Keep %q (deleted on %s); it comes back there too."):format(name, from)
     elseif root.deleted then

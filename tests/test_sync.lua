@@ -301,7 +301,7 @@ do
     run(10)
     check("tombstone: deleted on B", b.db.presets[e.id] and b.db.presets[e.id].deleted == true)
     use(b)
-    b.sync.Receive("ENT\n" .. stale, { guid = a.guid, name = "Alpha", realm = "Elegia" })
+    b.sync.Receive("ENT\n" .. e.id .. "\n" .. stale, { guid = a.guid, name = "Alpha", realm = "Elegia" })
     check("tombstone: stale copy doesn't resurrect", b.db.presets[e.id].deleted == true)
     eq("tombstone: no conflict copy", liveConflicts(b), 0)
 end
@@ -346,8 +346,8 @@ do
     local before = C.Copy(b.db.presets)
     local cbor = C_EncodingUtil.SerializeCBOR({ s = 2, e = { id = "loadout-zzz-1", version = "zzz:1" } })
     local newer = "ASE1:" .. Env.Adler32(cbor) .. ":" .. C_EncodingUtil.EncodeBase64(C_EncodingUtil.CompressString(cbor))
-    b.sync.Receive("ENT\n" .. newer, { guid = a.guid, name = "Alpha", realm = "Elegia" })
-    b.sync.Receive("ENT\nASE1:00000000:00", { guid = a.guid, name = "Alpha" })
+    b.sync.Receive("ENT\nloadout-zzz-1\n" .. newer, { guid = a.guid, name = "Alpha", realm = "Elegia" })
+    b.sync.Receive("ENT\nloadout-zzz-1\nASE1:00000000:00", { guid = a.guid, name = "Alpha" })
     b.sync.Receive("MAN\ngarbage", { guid = a.guid, name = "Alpha" })
     b.sync.Receive("XYZ\n" .. newer, { guid = a.guid, name = "Alpha" })
     b.sync.Receive("ENT\n" .. newer, { name = "no guid" })
@@ -358,7 +358,7 @@ do
     check("refused: said so once", #b.reports >= 1 and b.reports[1]:find("can't read", 1, true) ~= nil)
     -- A bad entry (fails the catalog's receive boundary).
     local bad = Env.Pack({ s = 1, e = { id = "x", version = "v", kind = "weird" } })
-    b.sync.Receive("ENT\n" .. bad, { guid = a.guid, name = "Alpha" })
+    b.sync.Receive("ENT\nx\n" .. bad, { guid = a.guid, name = "Alpha" })
     eq("refused: bad entry not stored", b.db.presets.x, nil)
 
     -- A valid entry from a sender with no realm.
@@ -367,7 +367,7 @@ do
     use(c)
     local text = Env.Encode(c.db.presets[e.id])
     use(b)
-    b.sync.Receive("ENT\n" .. text, { guid = c.guid, name = "Gamma", realm = nil })
+    b.sync.Receive("ENT\n" .. e.id .. "\n" .. text, { guid = c.guid, name = "Gamma", realm = nil })
     check("no realm: upserted", b.db.presets[e.id] ~= nil)
     eq("label: name only without a realm", S.Label({ name = "Gamma" }), "Gamma")
     eq("label: name-realm", S.Label({ name = "Gamma", realm = "Elegia" }), "Gamma-Elegia")
@@ -480,7 +480,7 @@ do
     a.online = true
     local t0 = T
     use(b)
-    b.sync.Receive("MAN\n" .. Env.Pack({ s = 1, g = "aaa:9", p = 1, n = 1, l = { [e.id] = a.db.presets[e.id].version } }),
+    b.sync.Receive("MAN\n" .. Env.Pack({ s = 1, b = "aaa", c = 9, p = 1, n = 1, l = { [e.id] = a.db.presets[e.id].version } }),
                    { guid = a.guid, name = "Alpha", realm = "Elegia" })
     run(S.INTERVAL + 15)
     eq("older: B never asks for A's older version", reqs("Beta", e.id, t0), 0)
@@ -521,8 +521,8 @@ do
     use(a); C.Rename(e.id, "Raid 2", e.version)
     b.online = true
     use(a); a.sync.Tick()                         -- A sees B listed
-    local function man(p, n, l)
-        a.sync.Receive("MAN\n" .. Env.Pack({ s = 1, g = "bbb:1", p = p, n = n, l = l }),
+    local function man(p, n, l, c)
+        a.sync.Receive("MAN\n" .. Env.Pack({ s = 1, b = "bbb", c = c or 1, p = p, n = n, l = l }),
                        { guid = b.guid, name = "Beta", realm = "Elegia" })
     end
     local cur = a.db.presets[e.id]
@@ -530,9 +530,152 @@ do
     eq("confirm: half a manifest is not confirmation", a.sync.EntryStatus(cur), "pending")
     man(2, 2, {})
     eq("confirm: the whole manifest confirms", a.sync.EntryStatus(cur), "confirmed")
-    a.sync.Receive("MAN\n" .. Env.Pack({ s = 1, g = "bbb:2", p = 1, n = 1, l = { [e.id] = old } }),
-                   { guid = b.guid, name = "Beta", realm = "Elegia" })
+    -- Manifests are ordered: an older one arriving late changes nothing.
+    man(1, 1, { [e.id] = old }, 0)
+    eq("order: a late older manifest is ignored", a.sync.EntryStatus(cur), "confirmed")
+    -- A newer two-part manifest with a stray older (but not yet held) part in
+    -- between still completes.
+    man(1, 1, { [e.id] = old }, 2)
+    eq("order: back to pending on a newer manifest listing the old version", a.sync.EntryStatus(cur), "pending")
+    man(1, 2, { [e.id] = cur.version }, 5)
+    man(2, 2, {}, 3)
+    man(2, 2, {}, 5)
+    eq("order: a stray older part doesn't reset a newer one", a.sync.EntryStatus(cur), "confirmed")
+    man(1, 1, { [e.id] = old }, 6)
     eq("confirm: an older version listed is pending", a.sync.EntryStatus(cur), "pending")
+    -- A new session of the peer (it reloaded) replaces the old one for good.
+    a.sync.Receive("MAN\n" .. Env.Pack({ s = 1, b = "bbb2", c = 1, p = 1, n = 1, l = { [e.id] = cur.version } }),
+                   { guid = b.guid, name = "Beta", realm = "Elegia" })
+    eq("session: the new session counts", a.sync.EntryStatus(cur), "confirmed")
+    man(1, 1, { [e.id] = old }, 99)
+    eq("session: the replaced session is ignored", a.sync.EntryStatus(cur), "confirmed")
+end
+
+------------------------------------------------------------
+-- An online account WITHOUT the Link addon never blocks "confirmed"
+------------------------------------------------------------
+do
+    reset()
+    local a, b = account("Alpha", "aaaaaaaaaaaa"), account("Beta", "bbbbbbbbbbbb")
+    local silent = { guid = "Player-1-Silent", name = "Silent", realm = "Elegia" }
+    for _, acc in ipairs({ a, b }) do
+        local peersOf = acc.transport.Peers
+        acc.transport.Peers = function() local l = peersOf(); l[#l + 1] = silent; return l end
+    end
+    local e = save(a, "Raid", 1)
+    run(10)
+    use(b); b.sync.Refresh()
+    run(5)
+    eq("silent account: still confirmed", a.sync.EntryStatus(a.db.presets[e.id]), "confirmed")
+    local heard = {}
+    for _, p in ipairs(a.sync.Peers()) do heard[p.label] = p.heard end
+    eq("silent account: listed but not heard", heard["Silent-Elegia"], false)
+    eq("silent account: the Link peer is heard", heard["Beta-Elegia"], true)
+end
+
+------------------------------------------------------------
+-- A manifest nobody took (peer mid-handshake) is sent again within seconds
+------------------------------------------------------------
+do
+    reset()
+    local a, b = account("Alpha", "aaaaaaaaaaaa"), account("Beta", "bbbbbbbbbbbb")
+    for _, acc in ipairs({ a, b }) do
+        local send, refusals = acc.transport.Send, 2
+        acc.transport.Send = function(msg)
+            if refusals > 0 then refusals = refusals - 1; return 0 end     -- "not-ready"
+            return send(msg)
+        end
+    end
+    local e = save(a, "Raid", 1)
+    run(S.RETRY * 3 + 5)
+    check("not ready: the entry arrives within seconds, not at the next 120 s exchange", b.db.presets[e.id] ~= nil)
+end
+
+------------------------------------------------------------
+-- A retry never downgrades the queued version; an older answer re-asks
+------------------------------------------------------------
+do
+    reset()
+    local a, b = account("Alpha", "aaaaaaaaaaaa"), account("Beta", "bbbbbbbbbbbb")
+    local e = save(a, "Raid", 1)
+    use(a)
+    local v1Text = Env.Encode(a.db.presets[e.id])
+    local v1 = a.db.presets[e.id].version
+    C.Rename(e.id, "Raid 2", v1)
+    local v2 = a.db.presets[e.id].version
+    a.online = false                               -- B is driven by hand below
+    use(b); b.sync.Tick()
+    local function man(c, v)
+        b.sync.Receive("MAN\n" .. Env.Pack({ s = 1, b = "aaa", c = c, p = 1, n = 1, l = { [e.id] = v } }),
+                       { guid = a.guid, name = "Alpha", realm = "Elegia" })
+    end
+    local peersOf = b.transport.Peers
+    b.transport.Peers = function() return { { guid = a.guid, name = "Alpha", realm = "Elegia" } } end
+    man(1, v1)                                     -- asks for v1
+    man(2, v2)                                     -- v2 queued while v1 is out
+    T = T + S.REQ_TIMEOUT + 1
+    use(b); b.sync.Tick()                          -- v1 expires; v2 is asked
+    b.sync.Receive("ENT\n" .. e.id .. "\n" .. v1Text, { guid = a.guid, name = "Alpha", realm = "Elegia" })
+    eq("late v1: stored", b.db.presets[e.id].version, v1)
+    local out, queued = b.sync.Outstanding(a.guid)
+    check("late v1: v2 is still wanted", out + queued >= 1)
+    b.transport.Peers = peersOf
+end
+
+------------------------------------------------------------
+-- A refused entry frees its request and isn't asked for again; an encode
+-- failure isn't called "too large"
+------------------------------------------------------------
+do
+    reset()
+    local a, b = account("Alpha", "aaaaaaaaaaaa"), account("Beta", "bbbbbbbbbbbb")
+    local realSendTo = a.transport.SendTo
+    a.transport.SendTo = function(guid, msg)
+        if msg:sub(1, 4) == "ENT\n" then
+            msg = msg:gsub("ASE1:%x+:", "ASE1:00000000:")                -- corrupt every entry
+        end
+        return realSendTo(guid, msg)
+    end
+    local e = save(a, "Raid", 1)
+    run(15)
+    eq("refused entry: not stored", b.db.presets[e.id], nil)
+    eq("refused entry: slot freed", (b.sync.Outstanding(a.guid)), 0)
+    local t0 = T
+    run(3 * S.INTERVAL)
+    eq("refused entry: not asked again this session", reqs("Beta", e.id, t0), 0)
+
+    reset()
+    local x, y = account("Alpha", "aaaaaaaaaaaa"), account("Beta", "bbbbbbbbbbbb")
+    local failing = setmetatable({ Encode = function() return nil, "encode-failed" end }, { __index = Env })
+    x.sync = S.New({ catalog = C, envelope = failing, transport = x.transport, now = function() return T end,
+                     report = function(t) x.reports[#x.reports + 1] = t end, gen = "x3" })
+    local f = save(x, "Raid", 1)
+    run(15)
+    use(x)
+    check("encode failure: not called too large", x.sync.EntryStatus(x.db.presets[f.id]) ~= "too large")
+    local said = false
+    for _, r in ipairs(x.reports) do if r:find("Couldn't encode", 1, true) then said = true end end
+    check("encode failure: said so", said)
+end
+
+------------------------------------------------------------
+-- A peer that leaves takes its queue and requests with it
+------------------------------------------------------------
+do
+    reset()
+    local a, b = account("Alpha", "aaaaaaaaaaaa"), account("Beta", "bbbbbbbbbbbb")
+    for i = 1, 20 do save(a, "E" .. i, i) end
+    net.drop = 1                                   -- nothing gets through: B's queue builds up
+    run(12)
+    net.drop = 0
+    use(a); a.sync.Refresh()
+    run(2)
+    local out, queued = b.sync.Outstanding(a.guid)
+    check("leaving: B had a backlog", out + queued > 0)
+    a.online = false
+    run(12)
+    out, queued = b.sync.Outstanding(a.guid)
+    eq("leaving: its requests are dropped", out + queued, 0)
 end
 
 eq("never touched game state", #touched, 0)
@@ -641,14 +784,53 @@ do
         check("deletion conflict: copy kept", L.Catalog.Get(copyId) ~= nil)
         L.Commands.conflicts()
         check("conflicts: listed", lines():find(copyId, 1, true) ~= nil)
+        shown = nil
+        L.Commands.load(copyId)
+        eq("load: a deletion copy has nothing to load", shown, nil)
+        L.Commands.resolve(tostring(raid.name) .. " mine")
+        check("resolve by the root's name: its one copy", shown and shown.confirm == "Resolve"
+            and shown.lines[1]:find("comes back", 1, true) ~= nil)
         L.Commands.resolve(copyId .. " theirs")
         check("resolve: previewed", shown and shown.confirm == "Resolve")
         check("resolve: says delete", shown.lines[1]:find("Delete", 1, true) ~= nil)
         shown.onConfirm()
         eq("resolve theirs on a deletion: deleted here too", L.Catalog.Get(raid.id).deleted, true)
         eq("resolve: copy retired", L.Catalog.Get(copyId).deleted, true)
+        -- Deleted here too after the deletion copy arrived: the preview says it stays deleted.
+        local r2 = L.Catalog.Create("loadout", { class = "PRIEST", category = "holy", name = "Gone" }, mods(5))
+        L.Catalog.Upsert({ id = r2.id, version = "dddddddddddd:3", kind = "loadout", class = "PRIEST",
+                           category = "holy", name = "Gone", deleted = true, ancestors = {} }, "Other-Elegia")
+        L.Catalog.Delete(r2.id, r2.version)
+        L.Commands.resolve(r2.id .. "~dddddddddddd:3 mine")
+        check("resolve: both deleted -> stays deleted", shown.lines[1]:find("stays deleted", 1, true) ~= nil)
+        -- Rename: an empty or duplicate name is refused before the preview.
+        shown = nil
+        L.Commands.rename("loadout-ffffffffffff-1 ")
+        eq("rename: empty name, no preview", shown, nil)
+        check("rename: empty name names the rename command", lines():find("/altsync rename", 1, true) ~= nil)
         L.Commands.resolve("nothing maybe")
         check("resolve: usage on a bad choice", lines():find("Usage", 1, true) ~= nil)
+    end
+    -- /altsync link status: an online account that never replies is named as
+    -- such; once one replies, counts cover what the player sees (no
+    -- tombstones), with conflicts on their own line.
+    do
+        local function lines() return table.concat(WoW.chatLines, " | ") end
+        local peer = { guid = "Player-1-0000CCCC", name = "Gamma", realm = "Elegia" }
+        inst.Peers = function() return { peer } end
+        WoW.clock = WoW.clock + 20
+        L.Link.Tick()
+        L.Commands.link("")
+        check("status: silent peer named", lines():find("no reply yet", 1, true) ~= nil)
+        local list = {}
+        for id, e in pairs(L.db.presets) do list[id] = e.version end
+        inst.handler("MAN\n" .. L.Envelope.Pack({ s = 1, b = "ccc", c = 1, p = 1, n = 1, l = list }), peer)
+        L.Commands.link("")
+        local live = 0
+        for _, e in pairs(L.db.presets) do if not e.deleted and not e.conflict then live = live + 1 end end
+        check("status: confirmed counts only live entries",
+              lines():find(("Gamma-Elegia: %d confirmed, 0 pending"):format(live), 1, true) ~= nil, lines())
+        inst.Peers = function() return {} end
     end
     eq("commands: no game state touched", #touched, 0)
 

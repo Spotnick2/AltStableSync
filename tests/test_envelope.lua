@@ -84,6 +84,12 @@ end
 
 -- Adler-32 known value ("Wikipedia" = 0x11E60398).
 eq("adler32 known value", E.Adler32("Wikipedia"), "11e60398")
+-- High half >= 2^15: the value is >= 2^31, which "%08x" of the whole would
+-- pass through C's long (zlib.adler32 reference values).
+eq("adler32 high half", E.Adler32(string.rep("a", 1000)), "f9d87af8")
+local bytes = {}
+for i = 0, 255 do bytes[#bytes + 1] = string.char(i) end
+eq("adler32 all bytes x4", E.Adler32(string.rep(table.concat(bytes), 4)), "e4c9fe10")
 
 -- No codec on this client: refused, never an error.
 do
