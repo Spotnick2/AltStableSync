@@ -251,6 +251,13 @@ local function ValidIncoming(x)
         return false
     end
     if x.kind ~= "ui" and x.kind ~= "loadout" then return false end
+    -- A loadout belongs to a class/category list or it can't be listed,
+    -- resolved or kept. Any non-empty key is accepted (a newer build may add
+    -- categories); Categories.Label shows an unknown key as itself.
+    if x.kind == "loadout" and (type(x.class) ~= "string" or x.class == ""
+                                or type(x.category) ~= "string" or x.category == "") then
+        return false
+    end
     if not (OptionalType(x.ancestors, "table") and OptionalType(x.deleted, "boolean")
             and OptionalType(x.name, "string") and OptionalType(x.class, "string")
             and OptionalType(x.category, "string") and OptionalType(x.modules, "table")

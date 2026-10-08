@@ -306,6 +306,16 @@ do
     bad("name a table", with("name", {}))
     bad("modules a string", with("modules", "x"))
     bad("empty version", with("version", ""))
+    local lo = { id = "loadout-peer-1", version = "peer:2", kind = "loadout", name = "Everyday", modules = {} }
+    local function lwith(k, v) local x = C.Copy(lo); x[k] = v; return x end
+    bad("loadout without class or category", C.Copy(lo))
+    bad("loadout without category", lwith("class", "PRIEST"))
+    bad("loadout with empty class", (function() local x = lwith("class", ""); x.category = "holy"; return x end)())
+    -- A category key this build doesn't know (a newer build's) is accepted.
+    local newer = lwith("class", "PRIEST"); newer.category = "newcategory"
+    eq("loadout with a newer category key: accepted", C.Upsert(newer, "Kaleid"), "replace")
+    eq("loadout with a newer category key: listed under it", #C.List("loadout", "PRIEST", "newcategory"), 1)
+    a.db.presets[newer.id] = nil
     -- A would-be fast-forward of a known id with a broken field.
     local ff = C.Copy(root(a, id))
     ff.version, ff.ancestors, ff.conflict = "peer:9", { rootBefore }, true
@@ -624,7 +634,7 @@ do
         local tag = given and "given" or "auto"
         check("kept name (" .. tag .. "): resolved", r ~= nil and kept ~= nil)
         eq("kept name (" .. tag .. "): name", kept and kept.name, given and "Everyday from Kaleid" or "Everyday (kept 2)")
-        eq("kept name (" .. tag .. "): content", kept and kept.modules.actions[1].spell, "B-edit")
+        eq("kept name (" .. tag .. "): content", type(kept) == "table" and kept.modules.actions[1].spell, "B-edit")
         check("kept name (" .. tag .. "): root still deleted", root(a, id).deleted)
         sync(a, b)
         eq("kept name (" .. tag .. "): no live copies", liveConflicts(a) + liveConflicts(b), 0)
