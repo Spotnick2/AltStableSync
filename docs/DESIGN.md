@@ -673,3 +673,11 @@ schema refusal, readiness and combat gates, macro ownership, read-back, or catal
   here too ("keep it deleted", in either writer-token order).
 - **PR #32 round 3: consensus.** Nits applied: a stale-resolution test, and the tombstone
   tie-break edge case is documented.
+- **PR #32, posted Codex review + three confirming rounds (gpt-6-astra, high):**
+  - **Receive boundary:** it now rejects entries whose read fields have the wrong type (`conflict`,
+    `deleted`, `name`, `modules`, ...). Loadouts must carry non-empty class and category strings (any
+    key: forward compatible). A conflict copy's id must be `<of>~<version>`, which rules out
+    self-reference.
+  - **Keeping an edit of a deleted entry:** it takes the caller's name, or the first free
+    "(kept)"/"(kept N)" name, and preserves the received class/category keys.
+  - **Consensus reached.

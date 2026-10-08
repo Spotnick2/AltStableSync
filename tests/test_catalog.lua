@@ -301,7 +301,9 @@ do
     bad("conflict = true", with("conflict", true))
     bad("conflict without of", with("conflict", { from = "X" }))
     bad("conflict.of empty", with("conflict", { of = "" }))
-    bad("conflict.deletion a string", with("conflict", { of = id, deletion = "yes" }))
+    -- A valid "<of>~<version>" id, so only the deletion flag is wrong.
+    bad("conflict.deletion a string", (function()
+        local x = with("conflict", { of = id, deletion = "yes" }); x.id = id .. "~peer:1"; return x end)())
     bad("deleted a string", with("deleted", "false"))
     bad("name a table", with("name", {}))
     bad("modules a string", with("modules", "x"))
