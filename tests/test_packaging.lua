@@ -43,6 +43,7 @@ local REQUIRED = {
     "Core.lua",
     "Categories.lua",
     "Catalog.lua",
+    "Envelope.lua",
     "Game.lua",
     "Backups.lua",
     "Ready.lua",
@@ -92,6 +93,58 @@ for _, line in ipairs(files) do
             check(path .. " never uses StaticPopup", not code:find("StaticPopup", 1, true))
         end
     end
+end
+
+------------------------------------------------------------
+-- The Link addon (#18): Plugins/Link, shipped as top-level AltStableSyncLink.
+------------------------------------------------------------
+local LINK_DIR = "Plugins/Link/"
+local LAS_XML = "Libs\\LibAccountSync-1.0\\LibAccountSync-1.0.xml"
+local ltoc = read(LINK_DIR .. "AltStableSyncLink.toc")
+check("link toc exists", ltoc ~= nil)
+ltoc = ltoc or ""
+check("link: interface 16001", ltoc:find("## Interface: 16001", 1, true) ~= nil)
+check("link: version is the packager keyword", ltoc:find("## Version: @project-version@", 1, true) ~= nil)
+check("link: depends on AltStableSync", ltoc:find("## Dependencies: AltStableSync%s*[\r\n]") ~= nil)
+check("link: owns the LAS store", ltoc:find("## SavedVariables: AltStableSyncLAS%s*[\r\n]") ~= nil)
+check("link: not LoadOnDemand", not ltoc:find("LoadOnDemand", 1, true))
+check("link: no per-character store", not ltoc:find("SavedVariablesPerCharacter", 1, true))
+
+local lfiles = {}
+for line in (ltoc .. "\n"):gmatch("([^\r\n]*)\r?\n") do
+    if line ~= "" and not line:find("^#") then lfiles[#lfiles + 1] = line end
+end
+eq("link: loads the library, then Sync, then Link", table.concat(lfiles, ","),
+   LAS_XML .. ",Sync.lua,Link.lua")
+for _, line in ipairs(lfiles) do
+    if line ~= LAS_XML then
+        local path = LINK_DIR .. line:gsub("\\", "/")
+        local src = read(path)
+        check("link file exists: " .. path, src ~= nil)
+        local code = (src or ""):gsub("%-%-[^\n]*", "")
+        check(path .. " never uses StaticPopup", not code:find("StaticPopup", 1, true))
+    end
+end
+
+-- The household key lives in exactly one file: the store is declared once.
+local declared = 0
+for _, t in ipairs({ toc, ltoc }) do
+    if t:find("AltStableSyncLAS", 1, true) then declared = declared + 1 end
+end
+eq("LAS store declared in exactly one TOC", declared, 1)
+
+-- .pkgmeta: the external key is a path from the project root and lands where
+-- the Link TOC loads it once the folder is moved; move-folders names the
+-- package. (A key prefixed with the package name would nest it elsewhere.)
+local lasKey = LINK_DIR .. LAS_XML:gsub("\\", "/"):gsub("/LibAccountSync%-1%.0%.xml$", "")
+check("LibAccountSync external at the Link addon's Libs, pinned to r5",
+      pkg:find("\n  " .. lasKey:gsub("%p", "%%%0") .. ":%s*\r?\n%s+url: https://github.com/Spotnick2/LibAccountSync%s*\r?\n%s+tag: r5%s*\r?\n") ~= nil)
+check("move-folders ships the Link addon top-level",
+      pkg:find("\nmove%-folders:%s*\r?\n  AltStableSync/Plugins/Link: AltStableSyncLink%s*\r?\n") ~= nil)
+check("no external under the package name", not pkg:find("\n  AltStableSync/[^\n]*Libs", 1))
+for _, sub in ipairs({ "tests", "docs", "Tools", "CLAUDE.md", "README.md" }) do
+    check(".pkgmeta ignores the library's " .. sub,
+          pkg:find("\n  %- " .. (lasKey .. "/" .. sub):gsub("%p", "%%%0") .. "\r?\n") ~= nil)
 end
 
 finish("test_packaging")

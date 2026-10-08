@@ -1,0 +1,12 @@
+## Interface: 16001
+## Title: AltStableSync Link
+## Notes: Shares AltStableSync's saved setups between your own WoW accounts. Never applies anything to a character.
+## IconTexture: 8197123
+## Author: Spotnick
+## Version: @project-version@
+## Dependencies: AltStableSync
+## SavedVariables: AltStableSyncLAS
+
+Libs\LibAccountSync-1.0\LibAccountSync-1.0.xml
+Sync.lua
+Link.lua

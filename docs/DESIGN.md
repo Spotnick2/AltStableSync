@@ -481,9 +481,21 @@ declared in exactly one TOC.
 
   To keep the recovery from flooding those limits: catalog mutations trigger an exchange only when
   they are **local**, coalesced within 2 seconds, and receipts never do. The other triggers above
-  (peer sighting, the timer, Refresh) remain. An entry already requested is
-  not requested again for 30 seconds. Requests go out at most 3 at a time per peer, and the next
-  goes when one arrives or times out.
+  (peer sighting, the timer every 120 s, Refresh) remain. Each side **pulls**: it requests what it
+  lacks from the other's manifest, and nothing is pushed. A request names **one id**; at most 3 are
+  outstanding per peer, and one completes when its entry arrives or after 30 seconds, when it goes
+  back in the queue while still lacking. So an entry is never requested twice at once, and an id the
+  peer never answers costs at most 3 requests per 30 seconds.
+- **Wire format** (`Plugins/Link/Sync.lua`): `"<kind>\n<envelope>"`, with `MAN` (manifest batch
+  `{ g = generation, p = part, n = parts, l = { [id] = version } }`), `REQ` (`{ i = id }`, sent to one
+  peer) and `ENT` (one entry, sent to the peer that asked). The envelope is
+  `"ASE1:<Adler-32 of the CBOR>:<Base64(Deflate(CBOR))>"`. The size check is on the whole string
+  handed to the library; batches shrink 100 → 50 → 25 ids until each fits.
+- **Commands** (catalog only, each previewed with the id and version it shows; stale is refused):
+  `/altsync list` (every category of this class, with ids and pending / confirmed / conflict
+  markers), `rename <id> <name>`, `delete <id|name>`, `conflicts`, `resolve <id|name> theirs|mine`
+  ("theirs" on a deletion conflict means delete here too), and `/altsync link [refresh|on|off]`. A
+  name works only when exactly one entry has it, since sync can bring two entries with one name.
 
 ### Receive rules (per entry, idempotent)
 

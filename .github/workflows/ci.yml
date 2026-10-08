@@ -30,6 +30,13 @@ jobs:
           echo "checking $count files"
           find . -name '*.lua' -not -path './.git/*' -print0 | xargs -0 luac5.1 -p
 
+      # The Link addon's LibAccountSync, at the ref .pkgmeta pins
+      # (tests/test_link_lib.lua loads it from $LIBACCOUNTSYNC).
+      - name: Fetch LibAccountSync at the pinned ref
+        run: |
+          bash tests/fetch_libaccountsync.sh "$RUNNER_TEMP/LibAccountSync"
+          echo "LIBACCOUNTSYNC=$RUNNER_TEMP/LibAccountSync" >> "$GITHUB_ENV"
+
       - name: Unit tests
         run: |
           set -e

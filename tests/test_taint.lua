@@ -69,11 +69,15 @@ local function read(path)
 end
 
 local function shippedLua()
-    local toc = read("AltStableSync.toc") or ""
     local files = {}
-    for line in (toc .. "\n"):gmatch("([^\r\n]*)\r?\n") do
-        if line:match("%.lua$") and not line:find("^#") and not line:find("^Libs") then
-            files[#files + 1] = (line:gsub("\\", "/"))
+    -- The core addon and the Link addon (#18), each relative to its TOC.
+    for _, t in ipairs({ { "", "AltStableSync.toc" }, { "Plugins/Link/", "AltStableSyncLink.toc" } }) do
+        local toc = read(t[1] .. t[2])
+        check("toc readable: " .. t[1] .. t[2], toc ~= nil)
+        for line in ((toc or "") .. "\n"):gmatch("([^\r\n]*)\r?\n") do
+            if line:match("%.lua$") and not line:find("^#") and not line:find("^Libs") then
+                files[#files + 1] = t[1] .. (line:gsub("\\", "/"))
+            end
         end
     end
     return files

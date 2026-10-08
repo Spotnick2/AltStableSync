@@ -1,0 +1,89 @@
+------------------------------------------------------------
+-- Envelope.lua - the catalog's wire format (#17, M1 part)
+--
+--   "ASE1:<adler32 of the CBOR, 8 hex>:<Base64(Deflate(CBOR({ s = 1, ... })))>"
+--
+-- C_EncodingUtil (declared on 70245, round trip measured: a worst-case
+-- loadout is 2.7 KB, docs/forever-api-notes.md). Base64 is kept although
+-- LibAccountSync is binary-safe: the same string is the paste format of #17's
+-- later part. Every step is pcall'd; a malformed or newer string is refused
+-- whole and nothing is touched. Pure: no game state, no SavedVariables.
+------------------------------------------------------------
+
+AltStableSync = AltStableSync or {}
+local ASS = AltStableSync
+
+local Envelope = {}
+ASS.Envelope = Envelope
+
+local PREFIX = "ASE1:"
+local SCHEMA = 1
+Envelope.SCHEMA = SCHEMA
+
+-- Adler-32 in plain Lua 5.1 arithmetic (no bit library needed).
+local function Adler32(s)
+    local a, b = 1, 0
+    for i = 1, #s do
+        a = (a + s:byte(i)) % 65521
+        b = (b + a) % 65521
+    end
+    return ("%08x"):format(b * 65536 + a)
+end
+Envelope.Adler32 = Adler32
+
+local function Call(fn, ...)
+    if type(fn) ~= "function" then return nil end
+    local ok, out = pcall(fn, ...)
+    if ok then return out end
+    return nil
+end
+
+-- Any table with `s = SCHEMA` -> the string, or nil plus "encode-failed".
+function Envelope.Pack(value)
+    local E = C_EncodingUtil
+    if type(E) ~= "table" then return nil, "encode-failed" end
+    local cbor = Call(E.SerializeCBOR, value)
+    if type(cbor) ~= "string" then return nil, "encode-failed" end
+    local z = Call(E.CompressString, cbor)
+    if type(z) ~= "string" then return nil, "encode-failed" end
+    local b64 = Call(E.EncodeBase64, z)
+    if type(b64) ~= "string" then return nil, "encode-failed" end
+    return PREFIX .. Adler32(cbor) .. ":" .. b64
+end
+
+-- The string -> the table, or nil plus "bad-envelope" / "bad-checksum" /
+-- "newer-schema" (unknown or newer: refused, never guessed at).
+function Envelope.Unpack(text)
+    if type(text) ~= "string" then return nil, "bad-envelope" end
+    local sum, b64 = text:match("^ASE1:(%x%x%x%x%x%x%x%x):(.+)$")
+    if not sum then return nil, "bad-envelope" end
+    local E = C_EncodingUtil
+    if type(E) ~= "table" then return nil, "bad-envelope" end
+    local z = Call(E.DecodeBase64, b64)
+    if type(z) ~= "string" then return nil, "bad-envelope" end
+    local cbor = Call(E.DecompressString, z)
+    if type(cbor) ~= "string" then return nil, "bad-envelope" end
+    if Adler32(cbor) ~= sum:lower() then return nil, "bad-checksum" end
+    local value = Call(E.DeserializeCBOR, cbor)
+    if type(value) ~= "table" then return nil, "bad-envelope" end
+    if value.s ~= SCHEMA then return nil, "newer-schema" end
+    return value
+end
+
+-- One catalog entry, never its `previous` (local Save recovery stays on the
+-- account that saved).
+function Envelope.Encode(entry)
+    if type(entry) ~= "table" then return nil, "encode-failed" end
+    local e = ASS.Catalog.Copy(entry)
+    e.previous = nil
+    return Envelope.Pack({ s = SCHEMA, e = e })
+end
+
+-- The entry, or nil plus why. Catalog.Upsert validates its fields.
+function Envelope.Decode(text)
+    local value, err = Envelope.Unpack(text)
+    if not value then return nil, err end
+    if type(value.e) ~= "table" then return nil, "bad-envelope" end
+    value.e.previous = nil
+    return value.e
+end
