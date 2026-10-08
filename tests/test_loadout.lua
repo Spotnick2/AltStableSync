@@ -740,6 +740,32 @@ do
           table.concat(WoW.chat(), " / "))
 end
 
+-- Combat after the first of two macro creations: the second CreateMacro is
+-- never attempted (its own guard), and the backup stays pinned.
+do
+    boot(); ready()
+    local e = custom({
+        actions = { [9] = { kind = "macro", name = "One", body = "/one", scope = "char" },
+                    [10] = { kind = "macro", name = "Two", body = "/two", scope = "char" } },
+        macros = { One = { body = "/one" }, Two = { body = "/two" } } })
+    alt()
+    G.combatAfter = 1
+    local r = L.Load(e, L.Plan(e))
+    eq("two creates: stopped", r and r.failed, "combat")
+    eq("two creates: only the first exists", #A.Game.MacrosNamed("One") .. "/" .. #A.Game.MacrosNamed("Two"), "1/0")
+    eq("two creates: nothing protected attempted in combat", #G.blocked, 0)
+    check("two creates: backup pinned", A.Backups.Operation() ~= nil)
+    G.combat = false
+end
+
+-- An interrupted restore points to the backups list, not to "restore op".
+do
+    WoW.chatLines = {}
+    A.Commands.Report("restore", { failed = "combat", at = "slot 1", changed = 0, keys = 0, created = 0 })
+    local said = table.concat(WoW.chat(), "\n")
+    check("restore stopped: points to backups", said:find("/altsync backups") ~= nil and not said:find("restore op"), said)
+end
+
 ------------------------------------------------------------
 -- Preview text
 ------------------------------------------------------------

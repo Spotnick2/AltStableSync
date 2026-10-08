@@ -108,8 +108,11 @@ local function Report(kind, result, err)
     end
     local skipped = #(result.skips or {}) + #(result.unavailable or {})
     if result.failed then
-        Print(("Stopped (%s at %s): %d slots, %d keys done. Use /altsync restore op to undo, or load again to abandon it.")
-            :format(result.failed, tostring(result.at), result.changed, result.keys))
+        local next_ = kind == "load"
+            and "Use /altsync restore op to undo, or load again to abandon it."
+            or "Its pre-restore snapshot is in /altsync backups (newest first)."
+        Print(("Stopped (%s at %s): %d slots, %d keys done. %s")
+            :format(result.failed, tostring(result.at), result.changed, result.keys, next_))
         return
     end
     local msg = ("%s: %d slots, %d keys%s."):format(kind == "load" and "Loaded" or "Restored",
