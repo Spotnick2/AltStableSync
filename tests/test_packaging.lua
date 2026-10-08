@@ -43,6 +43,12 @@ local REQUIRED = {
     "Core.lua",
     "Categories.lua",
     "Catalog.lua",
+    "Game.lua",
+    "Backups.lua",
+    "Ready.lua",
+    "Loadout.lua",
+    "Preview.lua",
+    "Commands.lua",
 }
 do
     local at = 0

@@ -25,6 +25,7 @@ function WoW.reset()
     WoW.chatLines = {}
     WoW.build = "70245"
     WoW.now = 1760000000          -- what time() returns; test_catalog moves it forward
+    WoW.clock = 1000              -- what GetTime() returns (seconds of uptime)
     WoW.metadata = { AltStableSync = { Version = "dev" } }
     AltStableSync = nil
     AltStableSyncDB, AltStableSyncChar, AltStableSyncLAS = nil, nil, nil
@@ -43,6 +44,9 @@ end
 
 -- The client's time(): Unix seconds. Controlled by WoW.now.
 function time() return WoW.now end
+
+-- The client's GetTime(): seconds of uptime. Controlled by WoW.clock.
+function GetTime() return WoW.clock end
 
 C_AddOns = {
     GetAddOnMetadata = function(name, field)

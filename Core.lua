@@ -179,7 +179,8 @@ local function CountKeys(t)
 end
 
 local function SlashHandler(msg)
-    local cmd = (msg or ""):match("^%s*(%S*)"):lower()
+    local cmd, rest = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
+    cmd = (cmd or ""):lower()
     if ASS.disabled then
         Print("disabled: " .. ASS.disabled)
         return
@@ -197,8 +198,10 @@ local function SlashHandler(msg)
         end
         Print(("version %s, schema %d, %d saved setup(s), %d character backup set(s)"):format(
             tostring(version), ASS.db.schema, live, CountKeys(ASS.db.backups)))
+    elseif ASS.Commands and ASS.Commands[cmd] and cmd ~= "Describe" and cmd ~= "Report" then
+        ASS.Commands[cmd](rest)
     else
-        Print("commands: /altsync status")
+        Print("commands: /altsync status | saveas <name> | list | load <name> | backups | restore [n|op]")
     end
 end
 ASS.SlashHandler = SlashHandler
