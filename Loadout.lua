@@ -26,6 +26,17 @@ ASS.Loadout = Loadout
 
 local function G() return ASS.Game end
 
+-- Per-character: bindings were changed in memory and not yet saved. Set
+-- before the first SetBinding, cleared by a successful SaveBindings (or a
+-- verified rollback); while set, the next load or restore saves even when
+-- every key already matches, so nothing unsaved is mistaken for done.
+local function Unsaved() return ASS.char and ASS.char.bindingsUnsaved end
+local function SetUnsaved(v) if ASS.char then ASS.char.bindingsUnsaved = v or nil end end
+
+-- An authored macro body is at most 254 characters (the server appends a
+-- newline; docs/forever-api-notes.md).
+local MACRO_MAX = 254
+
 local function PlayerClass()
     local _, class = UnitClass("player")
     return class
@@ -98,7 +109,7 @@ local function Resolve(want, modules, book)
     local Game = G()
     if want.kind == "spell" then
         if want.policy == "exact" then
-            if Game.SpellKnown(want.id) then return { kind = "spell", id = want.id } end
+            if Game.SpellKnown(want.id, book) then return { kind = "spell", id = want.id } end
             return nil, "rank not known"
         end
         local id = want.name and book.top[want.name]
@@ -120,7 +131,9 @@ local function Resolve(want, modules, book)
         local def = modules.macros and modules.macros[want.name]
         if not def then return nil, "macro definition missing" end
         if #matches == 0 then
-            return { kind = "macro", name = want.name, body = def.body, scope = "char", icon = def.icon }, nil, true
+            local body = Game.Normalize(def.body)
+            if #body > MACRO_MAX then return nil, "macro too long" end
+            return { kind = "macro", name = want.name, body = body, scope = "char", icon = def.icon }, nil, true
         end
         local m = matches[1]
         if #matches == 1 and m.scope == "char" and Game.Normalize(m.body) == Game.Normalize(def.body) then
@@ -135,21 +148,32 @@ end
 --          creates = {{name, body, icon}}, keys = {[key] = {to = cmd|false, from}},
 --          keysBlocked, skips = {{slot, reason}}, unavailable, noop, fingerprint }
 local function Finish(plan)
-    plan.noop = #plan.actions == 0 and #plan.creates == 0 and next(plan.keys) == nil
+    plan.noop = #plan.actions == 0 and #plan.creates == 0 and next(plan.keys) == nil and not plan.resave
     plan.fingerprint = Serialize({ v = plan.version, w = plan.which, a = plan.actions, c = plan.creates,
                                    k = plan.keys, kb = plan.keysBlocked or false, s = plan.skips,
+                                   r = plan.resave or false,
                                    u = plan.unavailable or {}, b = plan.blocked or false })
     return plan
 end
 
 local KEYS_BLOCKED = "Enable character-specific keybindings in WoW settings, then try again."
 
--- The binding part of a plan: one final key -> command|unbound map.
+-- The binding part of a plan: one final key -> command|unbound map. A
+-- command the entry has no key for is left alone (an empty entry never
+-- erases), and a load that has keys to set is blocked, not partly applied,
+-- while Account bindings are active (#7: block and explain, never switch).
 local function PlanKeys(plan, wantKeys)
     local Game = G()
-    if not Game.CharacterBindings() then plan.keysBlocked = KEYS_BLOCKED return end
-    local want = {}
+    local has = {}
     for cmd, keys in pairs(wantKeys) do
+        for i = 1, table.maxn(keys) do
+            if type(keys[i]) == "string" and keys[i] ~= "" then has[cmd] = keys end
+        end
+    end
+    if next(has) == nil then return end
+    if not Game.CharacterBindings() then plan.blocked = KEYS_BLOCKED return end
+    local want = {}
+    for cmd, keys in pairs(has) do
         -- By position up to maxn: a missing first key never hides the second.
         for i = 1, table.maxn(keys) do
             local key = keys[i]
@@ -163,7 +187,7 @@ local function PlanKeys(plan, wantKeys)
         end
     end
     -- Every key that holds one of these commands now but isn't wanted for it.
-    for cmd in pairs(wantKeys) do
+    for cmd in pairs(has) do
         local current = Game.KeysFor(cmd)
         if not current then plan.blocked = "Couldn't read the key bindings; try again." return end
         for _, key in ipairs(current) do
@@ -214,7 +238,8 @@ function Loadout.Plan(entry)
         end
     end
     if modules.bindings then PlanKeys(plan, modules.bindings) end
-    if plan.blocked then plan.actions, plan.creates, plan.keys = {}, {}, {} end
+    if Unsaved() and Game.CharacterBindings() then plan.resave = true end
+    if plan.blocked then plan.actions, plan.creates, plan.keys, plan.resave = {}, {}, {}, nil end
     return Finish(plan)
 end
 
@@ -270,8 +295,8 @@ local function Execute(plan, snap)
     local function call(forBindings, fn, ...)
         local why = Guard(forBindings)
         if why then return false, why end
-        local ok, err = pcall(fn, ...)
-        if not ok then return false, "client error: " .. tostring(err) end
+        local ok, ret = pcall(fn, ...)
+        if not ok then return false, "client error: " .. tostring(ret) end
         return true
     end
 
@@ -284,7 +309,7 @@ local function Execute(plan, snap)
             or Game.Normalize(matches[1].body) ~= Game.Normalize(c.body) then
             return fail("macro not created", "macro " .. c.name)
         end
-        snap.createdMacros[#snap.createdMacros + 1] = { name = c.name, body = c.body }
+        snap.createdMacros[#snap.createdMacros + 1] = { index = matches[1].index, name = c.name, body = c.body }
         result.created = result.created + 1
     end
 
@@ -333,34 +358,33 @@ local function Execute(plan, snap)
     if #plan.actions > 0 and not Game.CursorEmpty() then return bail("cursor not empty after the actions", "actions") end
 
     -- 3. Bindings: the final map, each key once, guarded each time; read back
-    -- whole before saving; rolled back in memory on any failure.
-    if next(plan.keys) then
-        local failed
-        for key, v in pairs(plan.keys) do
-            local ok, why = call(true, SetBinding, key, v.to or nil)
-            if not ok then failed = why break end
-        end
-        if not failed then
-            for key, v in pairs(plan.keys) do
-                if Game.CommandOf(key) ~= v.to then failed = "bindings failed" end
+    -- whole before saving; on any failure (saving included) rolled back in
+    -- memory and the rollback read back too.
+    if next(plan.keys) or plan.resave then
+        local wasUnsaved = Unsaved()
+        local function rollback(why)
+            for key in pairs(plan.keys) do
+                if Game.CommandOf(key) ~= snap.keys[key] then call(true, SetBinding, key, snap.keys[key] or nil) end
             end
-        end
-        if failed then
             for key in pairs(plan.keys) do
                 if Game.CommandOf(key) ~= snap.keys[key] then
-                    local ok = call(true, SetBinding, key, snap.keys[key] or nil)
-                    if not ok then
-                        return fail(failed .. "; some keys couldn't be put back (unsaved): restore op", "bindings")
-                    end
+                    return fail(why .. "; some keys couldn't be put back (not saved)", "bindings")
                 end
             end
-            return fail(failed, "bindings")
+            SetUnsaved(wasUnsaved)
+            return fail(why, "bindings")
         end
-        local saved = call(true, SaveBindings, Enum.BindingSet.Character)
+        if next(plan.keys) then SetUnsaved(true) end
         for key, v in pairs(plan.keys) do
-            if Game.CommandOf(key) ~= v.to then saved = false end
+            local ok, why = call(true, SetBinding, key, v.to or nil)
+            if not ok then return rollback(why) end
         end
-        if not saved then return fail("bindings not saved", "bindings") end
+        for key, v in pairs(plan.keys) do
+            if Game.CommandOf(key) ~= v.to then return rollback("bindings failed") end
+        end
+        local saved, why = call(true, SaveBindings, Enum.BindingSet.Character)
+        if not saved then return rollback("bindings not saved (" .. tostring(why) .. ")") end
+        SetUnsaved(nil)
         for _ in pairs(plan.keys) do result.keys = result.keys + 1 end
     end
     return result
@@ -373,25 +397,32 @@ end
 -- Apply the plan the player confirmed. `shown` is that plan; `abandon` is
 -- the player's answer to "Abandon the incomplete load of X?".
 function Loadout.Load(entry, shown, abandon)
+    -- The catalog's CURRENT entry: a sync or another command may have replaced
+    -- or deleted it since the preview (its version is in the fingerprint).
+    local live = ASS.Catalog.Get(entry.id)
+    if not live or live.deleted then return nil, "That loadout was deleted since the preview." end
+    entry = live
     local plan = Loadout.Plan(entry)
     if plan.blocked then return nil, plan.blocked end
     if plan.fingerprint ~= shown.fingerprint then return nil, "Something changed since the preview: review it again." end
     local pinned = ASS.Backups.Operation()
-    if pinned then
-        if not abandon then return nil, "incomplete" end
-        ASS.Backups.Release()
+    if pinned and not abandon then return nil, "incomplete" end
+    local function abandonPinned()
+        if pinned then ASS.Backups.Release(); ASS.char.interrupted = nil end
     end
     local function record(result)
         ASS.char.loaded = ASS.char.loaded or {}
         ASS.char.loaded.loadout = { id = entry.id, version = entry.version,
-                                    requested = ASS.Catalog.Copy(entry.modules), result = result }
+                                    baseline = ASS.Catalog.Copy(entry.modules), result = result }
     end
     if plan.noop then
-        record({ noop = true })
-        return { noop = true, skips = plan.skips }
+        abandonPinned()
+        record({ noop = true, skips = plan.skips })
+        return { noop = true, skips = plan.skips, changed = 0, created = 0, keys = 0 }
     end
     local snap = Snapshot(plan, "load " .. tostring(entry.name))
     if not snap then return nil, "Couldn't read the current setup for the backup; nothing was changed." end
+    abandonPinned()               -- only now: nothing above can fail after this
     local ok, err = ASS.Backups.Pin(snap, { kind = "load", id = entry.id, version = entry.version, name = entry.name })
     if not ok then return nil, err end
     local result = Execute(plan, snap)
@@ -417,6 +448,7 @@ function Loadout.PlanRestore(which)
     if not snap then plan.blocked = "No such backup." return Finish(plan) end
     plan.blocked = Loadout.Blocked()
     if plan.blocked then return Finish(plan) end
+    local book = Game.Spellbook()
     local slots = {}
     for slot in pairs(snap.actions or {}) do slots[#slots + 1] = slot end
     table.sort(slots)
@@ -427,7 +459,7 @@ function Loadout.PlanRestore(which)
         if want == false then
             target = nil
         elseif want.kind == "spell" then
-            if Game.SpellKnown(want.id) then target = { kind = "spell", id = want.id } else why = "spell no longer known" end
+            if Game.SpellKnown(want.id, book) then target = { kind = "spell", id = want.id } else why = "spell no longer known" end
         elseif want.kind == "item" then
             if Game.ItemCount(want.id) > 0 then target = { kind = "item", id = want.id } else why = "item not in bags" end
         elseif want.kind == "macro" then
@@ -453,18 +485,18 @@ function Loadout.PlanRestore(which)
         if not Game.CharacterBindings() then
             plan.keysBlocked = KEYS_BLOCKED
         else
-            -- Every touched key, even one that already matches in memory: an
-            -- earlier interrupted restore may have set it without saving, and
-            -- only SaveBindings makes it survive a relaunch.
+            -- Only real differences; unsaved earlier changes are covered by
+            -- plan.resave below.
             for key, cmd in pairs(snap.keys) do
                 local from = Game.CommandOf(key)
                 if from == nil then plan.blocked = "Couldn't read the key bindings; try again." break end
-                plan.keys[key] = { to = cmd, from = from }
+                if from ~= cmd then plan.keys[key] = { to = cmd, from = from } end
             end
         end
     end
     plan.kept = snap.createdMacros or {}
-    if plan.blocked then plan.actions, plan.keys = {}, {} end
+    if Unsaved() and Game.CharacterBindings() then plan.resave = true end
+    if plan.blocked then plan.actions, plan.keys, plan.resave = {}, {}, nil end
     return Finish(plan)
 end
 
@@ -483,7 +515,7 @@ function Loadout.Restore(which, shown)
     else
         local snap = Snapshot(plan, "restore")
         if not snap then return nil, "Couldn't read the current setup for the backup; nothing was changed." end
-        ASS.Backups.PushRing(snap)
+        ASS.Backups.PushRing(snap, ASS.Backups.Get(which))
         result = Execute(plan, snap)
     end
     result.unavailable, result.kept = plan.unavailable, plan.kept

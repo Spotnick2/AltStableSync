@@ -26,19 +26,29 @@ Backups.RING = RING
 
 local function Now() return time and time() or 0 end
 
-local function Store()
+-- This character's record. Only writers pass `create`: reading never adds one.
+local function Store(create)
     local guid = UnitGUID("player")
     if type(guid) ~= "string" then return nil end
     local all = ASS.db.backups
-    all[guid] = all[guid] or { ring = {} }
+    if not all[guid] then
+        if not create then return nil end
+        all[guid] = { ring = {} }
+    end
     local b = all[guid]
     b.ring = b.ring or {}
     return b
 end
 
-local function Push(b, snapshot)
+-- Newest first; past RING the oldest goes, except `keep` (the snapshot a
+-- restore is reading from, so restoring the oldest backup can be retried).
+local function Push(b, snapshot, keep)
     table.insert(b.ring, 1, snapshot)
-    while #b.ring > RING do table.remove(b.ring) end
+    while #b.ring > RING do
+        local i = #b.ring
+        if b.ring[i] == keep then i = i - 1 end
+        table.remove(b.ring, i)
+    end
     if not b.firstSeen then b.firstSeen = ASS.Catalog.Copy(snapshot) end
 end
 
@@ -50,7 +60,7 @@ end
 -- Pin `snapshot` for operation `op` ({ kind, id, version, name }). Refuses
 -- when another operation is already pinned.
 function Backups.Pin(snapshot, op)
-    local b = Store()
+    local b = Store(true)
     if not b then return nil, "no-guid" end
     if b.operation then return nil, "incomplete" end
     snapshot.at = snapshot.at or Now()
@@ -61,7 +71,7 @@ end
 
 -- The pinned operation completed, or the player abandoned it: into the ring.
 function Backups.Release()
-    local b = Store()
+    local b = Store(true)
     if not b or not b.operation then return end
     local snap = b.operation.snapshot
     snap.op = b.operation.op
@@ -69,22 +79,25 @@ function Backups.Release()
     Push(b, snap)
 end
 
--- A restore's own pre-write snapshot.
-function Backups.PushRing(snapshot)
-    local b = Store()
+-- A restore's own pre-write snapshot; `keep` is the snapshot being restored.
+function Backups.PushRing(snapshot, keep)
+    local b = Store(true)
     if not b then return nil, "no-guid" end
     snapshot.at = snapshot.at or Now()
-    Push(b, snapshot)
+    Push(b, snapshot, keep)
     return true
 end
 
--- "op" for the pinned one, a ring index (1 = newest), or "first".
+-- "op" for the pinned one, "first", or a ring index (1 = newest). Anything
+-- else is nil: an unrecognised name never falls back to some other backup.
 function Backups.Get(which)
     local b = Store()
     if not b then return nil end
     if which == "op" then return b.operation and b.operation.snapshot end
     if which == "first" then return b.firstSeen end
-    return b.ring[tonumber(which) or 1]
+    local n = tonumber(which)
+    if n and n == math.floor(n) then return b.ring[n] end
+    return nil
 end
 
 function Backups.List()

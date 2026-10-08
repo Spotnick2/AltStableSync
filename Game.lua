@@ -103,9 +103,11 @@ function Game.Spellbook()
     return { byId = byId, top = top }
 end
 
-function Game.SpellKnown(id)
-    local ok, known = pcall(C_SpellBook.IsSpellKnown, id, BANK)
-    return ok and known == true
+-- Known = in the spellbook scan (measured, 70245), low ranks included.
+-- IsSpellKnown is not used: its answer for superseded low ranks is unmeasured.
+function Game.SpellKnown(id, book)
+    book = book or Game.Spellbook()
+    return book.byId[id] ~= nil
 end
 
 ------------------------------------------------------------

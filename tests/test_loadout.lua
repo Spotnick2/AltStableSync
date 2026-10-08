@@ -296,15 +296,18 @@ do
     for _, s in ipairs(plan.skips) do why[s.slot] = s.reason end
     eq("account macro missing: skipped", why[5], "account macro missing")
 
-    -- A20: account bindings -> bindings blocked, actions still load.
+    -- A20: account bindings -> the load is blocked with the instruction (#7:
+    -- block and explain; never a partial load reported as done).
     boot(); ready(); save()
     alt({ bindingSet = 1 })
     plan = L.Plan(entry)
-    check("A20: bindings blocked with the instruction", (plan.keysBlocked or ""):find("character%-specific") ~= nil)
+    check("A20: load blocked with the instruction", (plan.blocked or ""):find("character%-specific") ~= nil, tostring(plan.blocked))
     G.calls = {}
-    local r = L.Load(entry, plan)
-    check("A20: actions loaded", r and r.changed > 0)
-    for _, c in ipairs(G.calls) do check("A20: no binding write", c ~= "SetBinding" and c ~= "SaveBindings") end
+    local r, err = L.Load(entry, plan)
+    check("A20: refused", r == nil and tostring(err):find("character%-specific") ~= nil)
+    eq("A20: nothing written", #G.calls, 0)
+    A.Commands.load("Everyday")
+    eq("A20: preview offers no confirm", A._shown.confirm, false)
 end
 
 ------------------------------------------------------------
@@ -321,7 +324,7 @@ local function interrupted(label, arrange, wantWhy, cleanup)
     if cleanup then cleanup() end
     eq(label .. ": cursor empty after the stop", G.cursor, nil)
     check(label .. ": stopped", r and r.failed ~= nil, r and tostring(r.failed))
-    if wantWhy then eq(label .. ": why", r and r.failed, wantWhy) end
+    if wantWhy then eq(label .. ": why", r and tostring(r.failed):sub(1, #wantWhy), wantWhy) end
     check(label .. ": backup pinned", A.Backups.Operation() ~= nil)
     check(label .. ": interrupted recorded", A.char.interrupted ~= nil)
     -- No resume: a plain Load is refused until abandoned.
@@ -570,7 +573,7 @@ do
     check("persist: first restore stopped before saving", rr and rr.failed ~= nil, rr and tostring(rr.failed))
     G.combat = false
     local rp = L.PlanRestore(2)                  -- the load's backup is now ring #2
-    check("persist: retry still has binding work", next(rp.keys) ~= nil)
+    check("persist: retry still saves the bindings", rp.resave == true)
     rr = L.Restore(2, rp)
     check("persist: retry ok", rr and not rr.failed, rr and tostring(rr.failed))
     WoW.relaunch(); ready()
@@ -764,6 +767,279 @@ do
     A.Commands.Report("restore", { failed = "combat", at = "slot 1", changed = 0, keys = 0, created = 0 })
     local said = table.concat(WoW.chat(), "\n")
     check("restore stopped: points to backups", said:find("/altsync backups") ~= nil and not said:find("restore op"), said)
+end
+
+------------------------------------------------------------
+-- PR #35 review cases (Codex + /code-review)
+------------------------------------------------------------
+
+-- An unrecognised restore argument never falls back to another backup;
+-- the argument is case-insensitive.
+do
+    boot(); ready(); save(); alt()
+    G.combatAfter = 6
+    L.Load(entry, L.Plan(entry))
+    G.combat, G.combatAfter = false, nil
+    A.Backups.PushRing({ reason = "newest", actions = {}, keys = {}, createdMacros = {} })
+    eq("restore arg: 'pinned' is no backup", A.Backups.Get("pinned"), nil)
+    eq("restore arg: 'last' is no backup", A.Backups.Get("last"), nil)
+    eq("restore arg: '1.5' is no backup", A.Backups.Get("1.5"), nil)
+    check("restore arg: unknown -> blocked", L.PlanRestore("last").blocked == "No such backup.")
+    A.Commands.restore("OP")
+    eq("restore arg: OP means op", A._shown.title, "Restore backup op?")
+    A._shown.onConfirm()
+    eq("restore arg: OP released the pinned op", A.Backups.Operation(), nil)
+end
+
+-- Restoring the oldest backup with a full ring keeps it, so it can be retried.
+do
+    boot(); ready(); save(); alt()
+    L.Load(entry, L.Plan(entry))
+    for i = 1, A.Backups.RING - 1 do
+        A.Backups.PushRing({ reason = "filler " .. i, actions = {}, keys = {}, createdMacros = {} })
+    end
+    local target = A.Backups.Get(A.Backups.RING)
+    check("full ring: oldest is the load's backup", tostring(target and target.reason):find("^load") ~= nil)
+    G.combatAfter = 1
+    local rr = L.Restore(A.Backups.RING, L.PlanRestore(A.Backups.RING))
+    G.combat, G.combatAfter = false, nil
+    check("full ring: restore interrupted", rr and rr.failed ~= nil)
+    eq("full ring: target still at the oldest position", A.Backups.Get(A.Backups.RING), target)
+    rr = L.Restore(A.Backups.RING, L.PlanRestore(A.Backups.RING))
+    check("full ring: retry ok", rr and not rr.failed, rr and tostring(rr.failed))
+end
+
+-- A failed rollback says so without pointing at "restore op"; a rollback is
+-- read back (SetBinding signals failure by returning false).
+do
+    boot(); ready(); save(); alt()
+    local before = G.keys["2"]
+    local realSet = SetBinding
+    local n = 0
+    SetBinding = function(k, c)
+        n = n + 1
+        if n == 1 then return realSet(k, c) end
+        return false                                   -- refused, nothing changed
+    end
+    local r = L.Load(entry, L.Plan(entry))
+    SetBinding = realSet
+    check("rollback refused: reported", r and tostring(r.failed):find("couldn't be put back") ~= nil, r and tostring(r.failed))
+    check("rollback refused: no 'restore op' in the engine message", not tostring(r and r.failed):find("restore op"))
+    check("rollback refused: still marked unsaved", A.char.bindingsUnsaved == true)
+    local rp = L.PlanRestore("op")
+    check("rollback refused: restore saves", rp.resave == true)
+    local rr = L.Restore("op", rp)
+    check("rollback refused: restored", rr and not rr.failed, rr and tostring(rr.failed))
+    eq("rollback refused: key back", G.keys["2"], before)
+    eq("rollback refused: no longer unsaved", A.char.bindingsUnsaved, nil)
+end
+
+-- SaveBindings fails: the in-memory keys are rolled back at once.
+do
+    boot(); ready(); save(); alt()
+    local keysBefore = {}
+    for k, c in pairs(G.keys) do keysBefore[k] = c end
+    G.saveFails = true
+    local r = L.Load(entry, L.Plan(entry))
+    G.saveFails = false
+    check("save fails: stopped", r and tostring(r.failed):find("not saved") ~= nil, r and tostring(r.failed))
+    for k, c in pairs(keysBefore) do eq("save fails: " .. k .. " rolled back in memory", G.keys[k], c) end
+    eq("save fails: rollback verified, nothing unsaved", A.char.bindingsUnsaved, nil)
+end
+
+-- Codex 2: keys set but not saved, then a confirmed new load of the same
+-- setup: not a no-op; it saves, and the keys survive a relaunch.
+do
+    boot(); ready(); save(); alt()
+    local realSave = SaveBindings
+    SaveBindings = function() return false end            -- "saved" nothing
+    local realSet = SetBinding
+    L.Load(entry, L.Plan(entry))
+    SaveBindings = realSave
+    -- Simulate a rollback that couldn't run: put the loaded keys back in memory only.
+    for k, c in pairs({ ["1"] = "ACTIONBUTTON1", ["2"] = "ACTIONBUTTON2", ["SHIFT-2"] = "ACTIONBUTTON2" }) do G.keys[k] = c end
+    A.char.bindingsUnsaved = true
+    local plan = L.Plan(entry)
+    check("unsaved: not a no-op", not plan.noop)
+    check("unsaved: resave planned", plan.resave == true)
+    local r = L.Load(entry, plan, true)
+    check("unsaved: load ok", r and not r.failed, r and tostring(r.failed))
+    eq("unsaved: interrupted cleared", A.char.interrupted, nil)
+    WoW.relaunch(); ready()
+    eq("unsaved: keys survive a relaunch", G.keys["SHIFT-2"], "ACTIONBUTTON2")
+end
+
+-- Readiness: entering the world is not "quiet" before any data event.
+do
+    boot(); main()
+    WoW.fire("PLAYER_ENTERING_WORLD", true, false)
+    check("ready: not right after entering the world", (L.Blocked() or ""):find("still loading") ~= nil, L.Blocked())
+    WoW.clock = WoW.clock + 3
+    eq("ready: 2 s after entering with no events", L.Blocked(), nil)
+end
+
+-- Abandon: a backup read that fails leaves the old pin and record in place;
+-- an abandoning no-op releases the pin and clears the record.
+do
+    boot(); ready(); save(); alt()
+    G.combatAfter = 6
+    L.Load(entry, L.Plan(entry))
+    G.combat, G.combatAfter = false, nil
+    local pinned = A.Backups.Operation()
+    local plan = L.Plan(entry)
+    local real = GetActionInfo
+    local n, perPlan = 0, 0
+    GetActionInfo = function(...) perPlan = perPlan + 1; return real(...) end
+    L.Plan(entry)
+    GetActionInfo = function(slot, ...)
+        n = n + 1
+        if n == perPlan + 1 then error("read failed") end
+        return real(slot, ...)
+    end
+    local r, err = L.Load(entry, plan, true)
+    GetActionInfo = real
+    check("abandon: backup read failed -> refused", r == nil, tostring(err))
+    eq("abandon: old pin kept", A.Backups.Operation(), pinned)
+    check("abandon: interrupted kept", A.char.interrupted ~= nil)
+
+    -- An abandoning load that turns out to be a no-op still releases the old
+    -- pin and clears its record.
+    boot(); ready(); save(); alt()
+    L.Load(entry, L.Plan(entry))                       -- fully loaded
+    A.Backups.Pin({ reason = "older", actions = {}, keys = {}, createdMacros = {} }, { kind = "load", name = "Older" })
+    A.char.interrupted = { id = "x", version = "y", why = "combat" }
+    plan = L.Plan(entry)
+    check("abandon no-op: plan is a no-op", plan.noop)
+    r = L.Load(entry, plan, true)
+    check("abandon no-op: ok", r and r.noop)
+    eq("abandon no-op: pin released", A.Backups.Operation(), nil)
+    eq("abandon no-op: interrupted cleared", A.char.interrupted, nil)
+end
+
+-- Codex 1: the catalog entry changes between preview and confirmation.
+do
+    boot(); ready(); save(); alt()
+    local plan = L.Plan(entry)
+    local succ = A.Catalog.Copy(entry)
+    succ.version, succ.ancestors = "beefbeefbeef:1", { entry.version }
+    succ.modules.actions[1] = nil
+    eq("stale entry: upsert fast-forwards", (A.Catalog.Upsert(succ, "Other-Realm")), "replace")
+    G.calls = {}
+    local r, err = L.Load(entry, plan)
+    check("stale entry (replaced): refused", r == nil and tostring(err):find("changed") ~= nil, tostring(err))
+    eq("stale entry (replaced): nothing written", #G.calls, 0)
+
+    boot(); ready(); save(); alt()
+    plan = L.Plan(entry)
+    local tomb = { id = entry.id, kind = "loadout", class = entry.class, category = entry.category, name = entry.name,
+                   version = "beefbeefbeef:2", ancestors = { entry.version }, deleted = true }
+    eq("stale entry: tombstone upserted", (A.Catalog.Upsert(tomb, "Other-Realm")), "replace")
+    G.calls = {}
+    r, err = L.Load(entry, plan)
+    check("stale entry (deleted): refused", r == nil and tostring(err):find("deleted") ~= nil, tostring(err))
+    eq("stale entry (deleted): nothing written", #G.calls, 0)
+end
+
+-- Restoring the same backup twice: the second is a true no-op.
+do
+    boot(); ready(); save(); alt()
+    L.Load(entry, L.Plan(entry))
+    L.Restore(1, L.PlanRestore(1))
+    local rp = L.PlanRestore(2)
+    check("restore twice: no-op", rp.noop, A.Commands.Describe(rp)[1])
+    eq("restore twice: no key listed", next(rp.keys), nil)
+end
+
+-- A command with no key in the entry leaves the destination's keys alone.
+do
+    boot(); ready()
+    local e = custom({ bindings = { ACTIONBUTTON1 = { "1" }, ACTIONBUTTON7 = {} } })
+    alt({ keys = { ["1"] = "ACTIONBUTTON1", ["7"] = "ACTIONBUTTON7" } })
+    local plan = L.Plan(e)
+    eq("no keys in entry: nothing planned", next(plan.keys), nil)
+    L.Load(e, plan)
+    eq("no keys in entry: 7 kept", G.keys["7"], "ACTIONBUTTON7")
+end
+
+-- A loadout with no keys at all still loads while Account bindings are active.
+do
+    boot(); ready()
+    local e = custom({ actions = { [1] = { kind = "spell", id = 2061, name = "Flash Heal", policy = "highest" } },
+                       bindings = { ACTIONBUTTON1 = {} } })
+    alt({ bindingSet = 1, actions = {} })
+    local plan = L.Plan(e)
+    eq("no keys + account set: not blocked", plan.blocked, nil)
+    local r = L.Load(e, plan)
+    check("no keys + account set: loaded", r and r.changed == 1, r and tostring(r.failed))
+end
+
+-- Macro bodies: the server's trailing newline is dropped before creating; an
+-- over-long body is skipped, never created.
+do
+    boot(); ready()
+    local e = custom({ actions = { [9] = { kind = "macro", name = "Nl", body = "/nl\n", scope = "char" },
+                                   [10] = { kind = "macro", name = "Long", body = string.rep("x", 255), scope = "char" } },
+                       macros = { Nl = { body = "/nl\n" }, Long = { body = string.rep("x", 255) } } })
+    alt()
+    local plan = L.Plan(e)
+    eq("macro body: one create", #plan.creates, 1)
+    eq("macro body: newline dropped", plan.creates[1] and plan.creates[1].body, "/nl")
+    local why
+    for _, sk in ipairs(plan.skips) do if sk.slot == 10 then why = sk.reason end end
+    eq("macro body: too long skipped", why, "macro too long")
+    L.Load(e, plan)
+    eq("macro body: Long not created", #A.Game.MacrosNamed("Long"), 0)
+end
+
+-- Low ranks come from the spellbook scan, not IsSpellKnown.
+do
+    boot(); ready(); save(); alt()
+    local real = C_SpellBook.IsSpellKnown
+    C_SpellBook.IsSpellKnown = function() return false end
+    local plan = L.Plan(entry)
+    C_SpellBook.IsSpellKnown = real
+    local skipped2
+    for _, sk in ipairs(plan.skips) do if sk.slot == 2 then skipped2 = sk.reason end end
+    eq("downrank: not skipped when IsSpellKnown says no", skipped2, nil)
+end
+
+-- Reading never creates a backup record.
+do
+    boot(); ready(); save(); alt()
+    A.Commands.backups()
+    L.Plan(entry)
+    L.PlanRestore("op")
+    eq("read-only: no backup record", A.db.backups["Player-70-ALT"], nil)
+end
+
+-- Error codes are shown as sentences.
+do
+    boot(); ready(); save()
+    WoW.chatLines = {}
+    A.Commands.saveas("Everyday")
+    local said = table.concat(WoW.chat(), "\n")
+    check("copy: duplicate name explained", said:find("already has a loadout with that name") ~= nil, said)
+end
+
+-- Codex 3: Save As after a load that skipped entries warns first.
+do
+    boot(); ready(); save(); alt()
+    L.Load(entry, L.Plan(entry))
+    local n = #A.Catalog.List("loadout", "PRIEST", "general")
+    A._shown = nil
+    A.Commands.saveas("Alt copy")
+    check("saveas warning: preview shown", A._shown ~= nil)
+    check("saveas warning: names the lost entries", A._shown and A._shown.lines[1]:find("won't be kept") ~= nil,
+          A._shown and A._shown.lines[1])
+    eq("saveas warning: confirm label", A._shown and A._shown.confirm, "Save As")
+    eq("saveas warning: nothing saved before confirming", #A.Catalog.List("loadout", "PRIEST", "general"), n)
+    A._shown.onConfirm()
+    eq("saveas warning: saved on confirm", #A.Catalog.List("loadout", "PRIEST", "general"), n + 1)
+    -- With nothing skipped, Save As saves directly.
+    boot(); ready(); save()
+    A._shown = nil
+    A.Commands.saveas("Direct")
+    eq("saveas: no warning when nothing was skipped", A._shown, nil)
 end
 
 ------------------------------------------------------------

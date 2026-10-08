@@ -32,6 +32,15 @@ end
 
 local function Plural(n, word) return n .. " " .. word .. (n == 1 and "" or "s") end
 
+-- Catalog and Backups return short codes; this is the copy the player sees.
+local COPY = {
+    ["name-empty"] = "Give it a name: /altsync saveas <name>.",
+    ["name-duplicate"] = "This class already has a loadout with that name. Pick another name.",
+    ["incomplete"] = "An interrupted load is still pinned: /altsync restore op, or load again and abandon it.",
+    ["no-guid"] = "Character data isn't available yet; try again in a moment.",
+}
+local function Copy(err) return COPY[err] or tostring(err) end
+
 local function DescribeAction(a)
     if not a then return "empty" end
     if a.kind == "spell" then
@@ -90,7 +99,7 @@ end
 
 local function Report(kind, result, err)
     if not result then
-        Print((kind == "load" and "Not loaded: " or "Not restored: ") .. tostring(err))
+        Print((kind == "load" and "Not loaded: " or "Not restored: ") .. Copy(err))
         return
     end
     if result.noop and not result.partial and #(result.skips or {}) > 0 then
@@ -110,7 +119,7 @@ local function Report(kind, result, err)
     if result.failed then
         local next_ = kind == "load"
             and "Use /altsync restore op to undo, or load again to abandon it."
-            or "Its pre-restore snapshot is in /altsync backups (newest first)."
+            or "What was there before this restore is backup 1 in /altsync backups."
         Print(("Stopped (%s at %s): %d slots, %d keys done. %s")
             :format(result.failed, tostring(result.at), result.changed, result.keys, next_))
         return
@@ -122,7 +131,7 @@ local function Report(kind, result, err)
     Print(msg)
 end
 
-function Commands.saveas(arg)
+local function SaveAs(arg)
     local blocked = ASS.Loadout.Blocked()
     if blocked then Print(blocked) return end
     local modules, cerr = ASS.Loadout.Capture()
@@ -130,11 +139,29 @@ function Commands.saveas(arg)
     local name, realm = UnitFullName("player")
     local e, err = ASS.Catalog.Create("loadout", { class = PlayerClass(), category = "general", name = arg,
         provenance = { sourceChar = tostring(name) .. "-" .. tostring(realm), build = select(2, GetBuildInfo()) } }, modules)
-    if not e then Print("Not saved: " .. tostring(err)) return end
-    local n = 0
+    if not e then Print("Not saved: " .. Copy(err)) return end
+    local n, c = 0, 0
     for _ in pairs(modules.actions) do n = n + 1 end
-    Print(("Saved %q (%d slots, bindings, %d character macros)."):format(e.name, n,
-        (function() local c = 0; for _ in pairs(modules.macros) do c = c + 1 end; return c end)()))
+    for _ in pairs(modules.macros) do c = c + 1 end
+    Print(("Saved %q (%d slots, bindings, %d character macros)."):format(e.name, n, c))
+end
+
+-- Until #28, Save As is a fresh capture: when the last load here left entries
+-- unapplied, say first that they won't be kept (docs/DESIGN.md, Preserve intent).
+function Commands.saveas(arg)
+    local loaded = ASS.char and ASS.char.loaded and ASS.char.loaded.loadout
+    local lost = loaded and loaded.result and #(loaded.result.skips or {}) or 0
+    if lost == 0 then return SaveAs(arg) end
+    ASS.Preview.Show({
+        title = "Save As " .. tostring(arg) .. "?",
+        lines = {
+            ("%s from the loaded setup %s available on this character and won't be kept."):format(
+                Plural(lost, "entry"):gsub("entrys", "entries"), lost == 1 and "isn't" or "aren't"),
+            "Save As captures this character's bars, keys and character macros as they are now.",
+        },
+        confirm = "Save As",
+        onConfirm = function() SaveAs(arg) end,
+    })
 end
 
 function Commands.save()
@@ -178,7 +205,8 @@ function Commands.backups()
 end
 
 function Commands.restore(arg)
-    local which = (arg == "" or arg == nil) and 1 or arg
+    local which = tostring(arg or ""):lower():match("^%s*(.-)%s*$")
+    if which == "" then which = "1" end
     local plan = ASS.Loadout.PlanRestore(which)
     -- A fully matching restore of the pinned operation still gets "Done", so
     -- its completion can release the pin; any other no-op has nothing to do.
