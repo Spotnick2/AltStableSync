@@ -241,12 +241,31 @@ local Retire, RetireCovered
 -- Receiving from the other account (#18): docs/DESIGN.md "Receive rules"
 ------------------------------------------------------------
 
+local function OptionalType(v, t) return v == nil or type(v) == t end
+
+-- The receive boundary admits only entries the catalog's own operations can
+-- handle: every field this file reads has the type it expects, or is absent.
 local function ValidIncoming(x)
     if type(x) ~= "table" then return false end
-    if type(x.id) ~= "string" or x.id == "" or type(x.version) ~= "string" then return false end
+    if type(x.id) ~= "string" or x.id == "" or type(x.version) ~= "string" or x.version == "" then
+        return false
+    end
     if x.kind ~= "ui" and x.kind ~= "loadout" then return false end
-    if x.ancestors ~= nil and type(x.ancestors) ~= "table" then return false end
-    local contentless = x.deleted or (type(x.conflict) == "table" and x.conflict.deletion)
+    if not (OptionalType(x.ancestors, "table") and OptionalType(x.deleted, "boolean")
+            and OptionalType(x.name, "string") and OptionalType(x.class, "string")
+            and OptionalType(x.category, "string") and OptionalType(x.modules, "table")
+            and OptionalType(x.provenance, "table")) then
+        return false
+    end
+    if x.conflict ~= nil then
+        local c = x.conflict
+        if type(c) ~= "table" or type(c.of) ~= "string" or c.of == "" then return false end
+        if not (OptionalType(c.deletion, "boolean") and OptionalType(c.retired, "boolean")
+                and OptionalType(c.name, "string") and OptionalType(c.from, "string")) then
+            return false
+        end
+    end
+    local contentless = x.deleted or (x.conflict and x.conflict.deletion)
     if not contentless and type(x.modules) ~= "table" then return false end
     return true
 end
@@ -363,7 +382,8 @@ end
 -- Every copy that version covers is retired here; the other account retires
 -- its mirror the same way when it fast-forwards to it, so both settle.
 -- Returns the root entry, plus the new entry for "theirs" over a deleted root.
-function Catalog.Resolve(copyId, choice, expectedRootVersion)
+-- `newName` (optional) names that new entry; otherwise the first free name.
+function Catalog.Resolve(copyId, choice, expectedRootVersion, newName)
     local p = Presets()
     local copy = p[copyId]
     if not copy or not copy.conflict or copy.deleted then return nil, "not-conflict" end
@@ -385,8 +405,23 @@ function Catalog.Resolve(copyId, choice, expectedRootVersion)
         if deletedThere and choice ~= "mine" and choice ~= "delete" then return nil, "bad-choice" end
         if deletedThere then choice = "mine" end
         if choice == "theirs" then
-            local name = Catalog.ValidateName(root.kind, root.class, root.category, copy.conflict.name)
-                or (tostring(copy.conflict.name) .. " (kept)")
+            -- The caller's name if given (validated), else the original name, else
+            -- the first free "<name> (kept)", "<name> (kept 2)", ...
+            local base = tostring(copy.conflict.name or root.name)
+            local name, nerr
+            if newName ~= nil then
+                name, nerr = Catalog.ValidateName(root.kind, root.class, root.category, newName)
+                if not name then return nil, nerr end
+            else
+                name = Catalog.ValidateName(root.kind, root.class, root.category, base)
+                local n = 1
+                while not name and n <= 99 do
+                    name = Catalog.ValidateName(root.kind, root.class, root.category,
+                        base .. (n == 1 and " (kept)" or (" (kept " .. n .. ")")))
+                    n = n + 1
+                end
+                if not name then return nil, "name-duplicate" end
+            end
             local err
             created, err = Catalog.Create(root.kind,
                 { class = root.class, category = root.category, name = name, provenance = copy.provenance },

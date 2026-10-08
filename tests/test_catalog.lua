@@ -283,6 +283,38 @@ do
     check("copy id: retired copy stays retired", a.db.presets[cid].deleted == true)
 end
 
+-- Malformed metadata never crosses the receive boundary: the catalog is left
+-- untouched, whether the id is unknown or the entry would fast-forward.
+do
+    local a, b, id = pair()
+    use(a)
+    local function count() local n = 0; for _ in pairs(a.db.presets) do n = n + 1 end; return n end
+    local before, rootBefore = count(), root(a, id).version
+    local function bad(label, x)
+        local act, err = C.Upsert(x, "Kaleid")
+        eq("malformed (" .. label .. "): rejected", err, "bad-entry")
+        eq("malformed (" .. label .. "): nothing stored", count(), before)
+        eq("malformed (" .. label .. "): root unchanged", root(a, id).version, rootBefore)
+    end
+    local base = { id = "ui-peer-1", version = "peer:1", kind = "ui", name = "Broken", modules = {} }
+    local function with(k, v) local x = C.Copy(base); x[k] = v; return x end
+    bad("conflict = true", with("conflict", true))
+    bad("conflict without of", with("conflict", { from = "X" }))
+    bad("conflict.of empty", with("conflict", { of = "" }))
+    bad("conflict.deletion a string", with("conflict", { of = id, deletion = "yes" }))
+    bad("deleted a string", with("deleted", "false"))
+    bad("name a table", with("name", {}))
+    bad("modules a string", with("modules", "x"))
+    bad("empty version", with("version", ""))
+    -- A would-be fast-forward of a known id with a broken field.
+    local ff = C.Copy(root(a, id))
+    ff.version, ff.ancestors, ff.conflict = "peer:9", { rootBefore }, true
+    bad("fast-forward with conflict = true", ff)
+    local ff2 = C.Copy(root(a, id))
+    ff2.version, ff2.ancestors, ff2.deleted = "peer:10", { rootBefore }, "true"
+    bad("fast-forward with deleted a string", ff2)
+end
+
 -- Copied DB: the two accounts can't mint the same version (fresh writers).
 do
     local a, b, id = pair()
@@ -568,6 +600,36 @@ do
     eq("stale resolve: root content unchanged", root(a, id).modules.actions[1].spell, "A2")
     eq("stale resolve: copy unchanged", a.db.presets[cid].version, copyBefore)
     check("stale resolve: copy still live", not a.db.presets[cid].deleted)
+end
+
+-- Keeping their edit of an entry we deleted, when its name and the first
+-- fallback are both taken: the next free name is used, or the caller's.
+do
+    for _, given in ipairs({ false, true }) do
+        local a, b, id = pair()
+        use(a); C.Delete(id, root(a, id).version)
+        loadout("PRIEST", "discipline", "Everyday", "new1")
+        loadout("PRIEST", "discipline", "Everyday (kept)", "new2")
+        use(b); C.Replace(id, mods("B-edit"), root(b, id).version)
+        send(b, a)
+        use(a)
+        local cid = id .. "~" .. root(b, id).version
+        local r, kept
+        if given then
+            eq("kept name: caller's duplicate refused", select(2, C.Resolve(cid, "theirs", root(a, id).version, "everyday")), "name-duplicate")
+            r, kept = C.Resolve(cid, "theirs", root(a, id).version, "Everyday from Kaleid")
+        else
+            r, kept = C.Resolve(cid, "theirs", root(a, id).version)
+        end
+        local tag = given and "given" or "auto"
+        check("kept name (" .. tag .. "): resolved", r ~= nil and kept ~= nil)
+        eq("kept name (" .. tag .. "): name", kept and kept.name, given and "Everyday from Kaleid" or "Everyday (kept 2)")
+        eq("kept name (" .. tag .. "): content", kept and kept.modules.actions[1].spell, "B-edit")
+        check("kept name (" .. tag .. "): root still deleted", root(a, id).deleted)
+        sync(a, b)
+        eq("kept name (" .. tag .. "): no live copies", liveConflicts(a) + liveConflicts(b), 0)
+        check("kept name (" .. tag .. "): converged", same(a, b))
+    end
 end
 
 -- A stale Delete can't destroy a newer version that arrived unreviewed.
