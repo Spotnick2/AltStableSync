@@ -741,7 +741,7 @@ quietFrame:SetScript("OnEvent", function() predicate.lastQuiet = NowMs() end)
 local function PredicateTick()
     if predicate.at then return end
     local now = NowMs()
-    local since = now - math.max(predicate.pew or now, predicate.lastQuiet or 0)
+    local since = now - (predicate.lastQuiet or 0)
     if predicate.pew and #SpellBook() > 0 and since >= 2000 then
         predicate.at, predicate.state = now, readiness()
         -- And the state 10 s later: did anything still change after "ready"?
@@ -835,6 +835,7 @@ local function EMBlocked()
     if type(em) ~= "table" then return "Edit Mode isn't available" end
     if em:IsShown() then return "close Edit Mode first" end
     if em.accountSettings == nil then return "Edit Mode hasn't loaded its layouts yet" end
+    if em.overrideLayoutInfo ~= nil then return "an override layout is active" end
     if not (C_EditMode and C_EditMode.GetLayouts and C_EditMode.SaveLayouts and C_EditMode.OnLayoutAdded
             and C_EditMode.SetActiveLayout and C_EditMode.OnLayoutDeleted) then return "C_EditMode incomplete" end
     if not (EditModePresetLayoutManager and EditModePresetLayoutManager.GetCopyOfPresetLayouts) then
@@ -855,10 +856,25 @@ local function EMRead()
     return { merged = merged, presets = #presets, active = saved.activeLayout }
 end
 
-local function EMFindOurs(L)
+-- Any saved layout called SyncProbe, of any type (for the collision check).
+local function EMFindNamed(L)
+    local found, n = nil, 0
     for i = L.presets + 1, #L.merged do
-        if L.merged[i].layoutName == EM_NAME then return i end
+        if L.merged[i].layoutName == EM_NAME then found, n = i, n + 1 end
     end
+    return found, n
+end
+
+-- The probe's own layout: exactly one, Character-scoped, named SyncProbe.
+-- Deletion also requires this character's creation record (emCreated).
+local function EMFindOurs(L)
+    local T = EMTypes()
+    local found, n = nil, 0
+    for i = L.presets + 1, #L.merged do
+        local l = L.merged[i]
+        if l.layoutName == EM_NAME and l.layoutType == T.Character then found, n = i, n + 1 end
+    end
+    if n == 1 then return found end
 end
 
 local function EMDescribe(L)
@@ -873,7 +889,16 @@ function P.editwrite()
     local T = EMTypes()
     local L = EMRead(); if not L then Record("couldn't read the layouts"); return end
     Record(("%-44s %s"):format("before", EMDescribe(L)))
-    if EMFindOurs(L) then Record("a layout named " .. EM_NAME .. " already exists - /syncprobe editrestore first"); return end
+    local cdb0 = CharDB()
+    local named = EMFindNamed(L)
+    if named and cdb0.emCreated then
+        Record("the probe's " .. EM_NAME .. " layout already exists - /syncprobe editcheck or editrestore"); return
+    elseif named then
+        Record("you already have a layout named " .. EM_NAME .. " (not made by this probe): rename it in Edit Mode first"); return
+    end
+    local nChar, maxPer = 0, (Constants and Constants.EditModeConsts and Constants.EditModeConsts.EditModeMaxLayoutsPerType) or 5
+    for i = L.presets + 1, #L.merged do if L.merged[i].layoutType == T.Character then nChar = nChar + 1 end end
+    if nChar >= maxPer then Record(("this character already has %d character layouts - delete one first"):format(nChar)); return end
     local source = L.merged[L.active]
     local target = CopyTable(source)
     target.layoutIndex = nil
@@ -891,9 +916,14 @@ function P.editwrite()
     -- layout by name and type), so editrestore always has it.
     cdb.emReturn = (source.layoutType == T.Preset) and { preset = source.layoutIndex }
         or { name = source.layoutName, layoutType = source.layoutType }
+    cdb.emCreated = true   -- intent recorded before the write, so a partial failure stays cleanable
     local okS = Call("C_EditMode.SaveLayouts(merged, active as was)", C_EditMode.SaveLayouts,
         { layouts = L.merged, activeLayout = L.active })
-    if not okS then Record("save failed - nothing activated"); return end
+    if not okS then
+        local chk = EMRead()
+        if not (chk and EMFindOurs(chk)) then cdb.emCreated, cdb.emReturn = nil, nil end
+        Record("save failed - nothing activated"); return
+    end
     local okA = Call(("C_EditMode.OnLayoutAdded(%d, true, false)"):format(index), C_EditMode.OnLayoutAdded, index, true, false)
     local after = EMRead()
     if after then
@@ -944,26 +974,34 @@ function P.editrestore()
                 found, n = i, n + 1
             end
         end
-        if n ~= 1 then Record(("earlier layout matches %d layouts - pick it in Edit Mode, then rerun"):format(n)); return end
-        if found ~= L.active then
+        if n == 1 and found ~= L.active then
             Call(("C_EditMode.SetActiveLayout(%d)"):format(found), C_EditMode.SetActiveLayout, found)
+        elseif n ~= 1 then
+            Record(("the earlier layout matches %d layouts (renamed or deleted?) - not switching"):format(n))
         end
+    end
+    if not cdb.emCreated then
+        Record("no creation record on this character: nothing of the probe's to delete"); return
     end
     L = EMRead()
     local i = L and EMFindOurs(L)
     if i then
-        if L.active == i then Record("SyncProbe is still active - switch away in Edit Mode, then rerun"); return end
+        if L.active == i then
+            Record("SyncProbe is still active: pick any other layout in Edit Mode, then rerun (it will then delete SyncProbe)")
+            return
+        end
+        -- Blizzard's DeleteLayout order: remove, SaveLayouts with the active
+        -- index as it is, then OnLayoutDeleted(index).
         table.remove(L.merged, i)
-        local active = L.active > i and L.active - 1 or L.active
         local okS = Call("C_EditMode.SaveLayouts(without SyncProbe)", C_EditMode.SaveLayouts,
-            { layouts = L.merged, activeLayout = active })
+            { layouts = L.merged, activeLayout = L.active })
         if okS then Call(("C_EditMode.OnLayoutDeleted(%d)"):format(i), C_EditMode.OnLayoutDeleted, i) end
     end
     local after = EMRead()
     if after then
         Record(("%-44s %s"):format("after", EMDescribe(after)))
         Record(("%-44s %s"):format("SyncProbe gone", tostring(EMFindOurs(after) == nil)))
-        if not EMFindOurs(after) then cdb.emReturn, cdb.emWritten = nil, nil end
+        if not EMFindOurs(after) then cdb.emReturn, cdb.emWritten, cdb.emCreated = nil, nil, nil end
     end
     Record(("%-44s %s"):format("taint", TaintSince(mark)))
     Record("A /reload is recommended (reference addons reload after Edit Mode writes).")
