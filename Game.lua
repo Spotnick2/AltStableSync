@@ -79,7 +79,8 @@ Game.MAX_CHAR_MACROS = (Constants and Constants.MacroConsts and Constants.MacroC
 
 local BANK = (Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player) or 0
 
--- The player's learned castable spells: { [id] = { name, low } }, and by name
+-- The player's learned castable spells: { [id] = { name, low, order } }
+-- (`order`: the book index; ranks are ascending book items), and by name
 -- the top known rank (the same-name Spell entry that is not low rank).
 function Game.Spellbook()
     local byId, top = {}, {}

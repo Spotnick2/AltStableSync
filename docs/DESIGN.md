@@ -333,17 +333,23 @@ kind (`AltStableSyncChar.loaded`) with the applied/skipped result.
 | Inherited entry was unresolvable, and the slot was not deliberately replaced | Keep the inherited entry |
 | Same family on a low alt, policy "highest known" | Keep "highest known"; don't freeze the low ID. A rank update (a hunter bar after training, or the new rank dragged in) is no change |
 | Deliberate downrank | Keep the exact rank |
-
-**Which captured rank is deliberate** (#42). Caster bars keep an old rank after training, while hunter
-bars update, so the bars alone can't show intent. A spell on the bars at **two or more ranks** is a
-ladder: the highest of them on the bars is "highest known", and the lower ones are "exact". A spell at
-**one rank** is "highest known", whatever the rank. Rank order is spellbook order. A lone deliberate
-downrank is read as "highest known"; a macro (`/cast Heal(Rank 2)`) keeps its text as written. Save
-keeps the loaded policy for untouched slots, so a downrank inherited from the main stays exact.
 | Inherited addon absent, or field unreadable | Keep the prior payload |
 | Empty or ambiguous slot after a skipped load | Keep, unless the review chose `save drop` |
 | `save drop` chosen | The entries this character couldn't use stop being part of the entry; other characters' slots are left alone |
 | *(deferred)* Explicit clear | Storing "clear this slot", so later previews show a deletion, is **deferred past launch** (#28). Nil never erases another character's slot |
+
+**Which captured rank is deliberate** (#42). Caster bars keep an old rank after training, while hunter
+bars update, so the bars alone can't show intent. A spell on the bars at **two or more ranks** is a
+ladder: the highest of them on the bars is "highest known", and the lower ones are "exact". A spell at
+**one rank** is "highest known", whatever the rank. Rank order is spellbook order, and the top known
+rank always ranks highest. A lone deliberate downrank is read as "highest known"; a macro
+(`/cast Heal(Rank 2)`) keeps its text as written.
+
+On Save, a slot holding **the same rank** as after the load is unchanged, even when its policy reads
+differently because other slots changed: it keeps the loaded policy, so a downrank inherited from the
+main stays exact and a stale caster rank never freezes into one. A rank change of a "highest known"
+spell is a rank update, not an edit. A ladder built on an alt by adding a rank to another slot
+therefore leaves the untouched lower rank as loaded; a plain Save As captures it.
 
 **How Save tells "unchanged" from "changed"** (#28). A completed load records `after`, a capture of
 the slots, keys and character macros right after it, and `unavailable`, the slots it skipped. Save

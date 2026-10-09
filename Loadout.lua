@@ -63,24 +63,27 @@ end
 function Loadout.Capture()
     local Game = G()
     local book = Game.Spellbook()
-    local actions, macros, seen = {}, {}, {}
+    local actions, macros = {}, {}
     -- Rank policy (#42). Caster bars keep an old rank after training (hunter
     -- bars update), so one low rank alone is stale, not a choice: "highest".
     -- A spell on the bars at several ranks is a healer's mana ladder: the
     -- highest of them follows the trainer, the lower ones stay "exact".
-    local top = {}
+    -- Rank order is book order; the measured low-rank flag wins, so the
+    -- known top rank always ranks highest.
+    local function rank(s) return s.low and s.order or math.huge end
+    local seen, ladderTop = {}, {}
     for slot = Game.SLOTS.first, Game.SLOTS.last do
-        seen[slot] = Game.ActionAt(slot)
-        local a = seen[slot]
+        local a = Game.ActionAt(slot)
+        seen[slot] = a
         local s = a and a.kind == "spell" and book.byId[a.id]
-        if s and (top[s.name] or 0) < s.order then top[s.name] = s.order end
+        if s and (ladderTop[s.name] or 0) < rank(s) then ladderTop[s.name] = rank(s) end
     end
     for slot = Game.SLOTS.first, Game.SLOTS.last do
         local a = seen[slot]
         if a and a.kind == "spell" then
             local s = book.byId[a.id]
             local name = (s and s.name) or (C_Spell.GetSpellName and C_Spell.GetSpellName(a.id))
-            local exact = s and s.order < top[s.name]
+            local exact = s and rank(s) < ladderTop[s.name]
             actions[slot] = { kind = "spell", id = a.id, name = name, policy = exact and "exact" or "highest" }
         elseif a and a.kind == "item" then
             actions[slot] = { kind = "item", id = a.id }
@@ -511,12 +514,12 @@ local function SaveSame(c, a, cMods, aMods)
         if c.scope == "char" and MacroIcon(c, cMods) ~= MacroIcon(a, aMods) then return false end
         return true
     end
-    -- A rank update (a hunter bar after training, or the new rank dragged in)
-    -- is no change while both say "highest" for the same spell; the same rank
-    -- that became a ladder's downrank is one (#42).
-    if c.kind == "spell" then
-        if c.policy == "highest" and a.policy == "highest" and c.name ~= nil and c.name == a.name then return true end
-        return c.id == a.id and c.policy == a.policy
+    -- Spells (#42). The same rank is unchanged even when its policy flipped:
+    -- a policy depends on the other slots, so an untouched slot keeps the
+    -- loaded one. A rank update (a hunter bar after training, or the new rank
+    -- dragged in) is no change while both say "highest" for the same spell.
+    if c.kind == "spell" and c.policy == "highest" and a.policy == "highest" and c.name ~= nil and c.name == a.name then
+        return true
     end
     return c.id == a.id
 end

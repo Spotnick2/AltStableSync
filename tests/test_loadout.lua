@@ -53,7 +53,7 @@ local function main()
         spells = MAIN_SPELLS, items = { [5512] = 3 }, macros = MAIN_MACROS,
         actions = {
             [1] = { spell = 9472 },                 -- Flash Heal, top rank -> highest
-            [2] = { spell = 2050 },                 -- Lesser Heal r1 while r2 known -> exact (downrank)
+            [2] = { spell = 2050 },                 -- Lesser Heal r1 below slot 12's r2 -> exact (#42 ladder)
             [3] = { item = 5512 },                  -- Healthstone
             [4] = { macro = "Shield" },             -- character macro
             [5] = { macro = "Acct" },               -- account macro
@@ -1449,10 +1449,53 @@ do
     G.actions[1] = { kind = "spell", id = 2061 }            -- a caster bar: the old rank stays
     m = L.PlanSave()
     check("#42: stale rank is no change", m and m.noop, m and #m.changed)
-    G.actions[11] = { kind = "spell", id = 9473 }           -- a new ladder: r1 in slot 1 is now a choice
+    -- r1 untouched in slot 1, r2 dragged into slot 11: slot 1 now reads as
+    -- a ladder's downrank, but a caster's stale rank looks the same, so the
+    -- untouched slot keeps the loaded policy (never freeze a low rank).
+    G.actions[11] = { kind = "spell", id = 9473 }
     m = L.PlanSave()
-    eq("#42: new ladder saves the downrank", m and m.modules.actions[1].policy, "exact")
-    eq("#42: and its rank", m and m.modules.actions[1].id, 2061)
+    eq("#42: untouched rank keeps the loaded policy", m and m.modules.actions[1].policy, "highest")
+    eq("#42: and the main's rank", m and m.modules.actions[1].id, 9472)
+
+    -- A rung removed: the untouched downrank stays exact.
+    loadedAlt()
+    eq("#42: ladder loaded", rec().after.actions[2].policy, "exact")
+    G.actions[12] = nil
+    m = L.PlanSave()
+    eq("#42: rung removed, the downrank stays exact", m and m.modules.actions[2].policy, "exact")
+    -- A record taken by the old rule (a lone low rank as exact) reads the same.
+    loadedAlt()
+    G.actions[12] = nil
+    rec().after.actions[12] = nil
+    rec().after.actions[2].policy = "exact"
+    m = L.PlanSave()
+    eq("#42: old-rule record: nothing listed", m and #m.changed, 0)
+    eq("#42: old-rule record: policy as loaded", m and m.modules.actions[2].policy, "exact")
+
+    -- The low-rank flag wins over book order.
+    boot(); ready()
+    G.setup{ class = "PRIEST", guid = "Player-70-ODD",
+             spells = { { id = 2052, name = "Lesser Heal" }, { id = 2050, name = "Lesser Heal", low = true } },
+             actions = { [1] = { spell = 2050 }, [2] = { spell = 2052 } } }
+    m = L.Capture()
+    eq("#42: flag over order: the low rank", m.actions[1].policy, "exact")
+    eq("#42: flag over order: the top rank", m.actions[2].policy, "highest")
+    -- Two low ranks (r3 known): book order says which is the ladder's top.
+    boot(); ready()
+    G.setup{ class = "PRIEST", guid = "Player-70-THREE",
+             spells = { { id = 1, name = "Heal", low = true }, { id = 2, name = "Heal", low = true }, { id = 3, name = "Heal" } },
+             actions = { [1] = { spell = 2 }, [2] = { spell = 1 } } }
+    m = L.Capture()
+    eq("#42: two low ranks: the higher one", m.actions[1].policy, "highest")
+    eq("#42: two low ranks: the lower one", m.actions[2].policy, "exact")
+
+    -- A rung changed to another rank of the same spell is an edit.
+    loadedAlt()
+    G.actions[10] = { kind = "spell", id = 2052 }           -- r2 into a new slot
+    G.actions[12] = { kind = "spell", id = 2050 }           -- slot 12's r2 becomes r1: a downrank
+    m = L.PlanSave()
+    eq("#42: rung edit saved", m and m.modules.actions[12].id, 2050)
+    eq("#42: rung edit exact", m and m.modules.actions[12].policy, "exact")
 end
 
 -- Commands: the preview is frozen; no record means Save As; fresh Save As sets the record.
