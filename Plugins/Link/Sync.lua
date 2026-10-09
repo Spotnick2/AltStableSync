@@ -392,17 +392,22 @@ function Sync.New(o)
 
     -- "confirmed" when every peer that has spoken (or just `guid`) lists our
     -- exact version in its whole manifest, "too large", or "pending"; nil
-    -- with no such peer.
+    -- with no such peer. A peer on another schema is paused, not pending:
+    -- "sync paused" when no other peer answers for the entry.
     function self.EntryStatus(e, guid)
         if tooLarge[e.id] == e.version then return "too large" end
-        local any = false
+        local any, paused = false, false
         for _, p in pairs(peers) do
             if p.listed and p.heard and (guid == nil or p.guid == guid) then
-                any = true
-                if not (p.manifest and p.manifest[e.id] == e.version) then return "pending" end
+                if p.schema then
+                    paused = true
+                else
+                    any = true
+                    if not (p.manifest and p.manifest[e.id] == e.version) then return "pending" end
+                end
             end
         end
-        return any and "confirmed" or nil
+        return any and "confirmed" or (paused and "sync paused") or nil
     end
 
     function self.Outstanding(guid)

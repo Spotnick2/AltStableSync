@@ -216,6 +216,9 @@ do
     end
     eq("old peer: paused", schemaOf(b, a.guid), "older-schema")
     eq("old peer: no request sent", reqs("Beta", e.id), 0)
+    -- Per entry it reads paused, not pending (#44 review).
+    local mine = save(b, "Mine", 2052)
+    eq("old peer: entry status says paused", b.sync.EntryStatus(b.db.presets[mine.id]), "sync paused")
     -- Its first schema-2 manifest clears the pause on its own.
     b.sync.Receive("MAN\n" .. Env.Pack({ s = Env.SCHEMA, b = "aaa2", c = 1, p = 1, n = 1, l = {} }), from)
     eq("updated peer: a manifest clears the pause", schemaOf(b, a.guid), nil)

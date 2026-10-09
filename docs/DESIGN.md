@@ -208,8 +208,11 @@ AltStableSyncLAS = <LibAccountSync store only>   -- declared ONLY by AltStableSy
   `loaded.loadout.baseline`/`after` get `cover = { {1, 12} }`: what the 1-12 builds captured. A slot
   outside an entry's cover was never captured, which is not the same as captured empty. A cover is
   never guessed: an entry arriving by sync without a valid one is rejected; locally, Create, Replace,
-  Undo and Resolve refuse content without one ("bad-modules"), and Save refuses a loaded record whose
-  baseline or comparison lacks one ("load it again"); Save As then warns before a plain capture.
+  Undo and Resolve refuse content without one ("bad-modules"), Load refuses an entry without one, and
+  Save refuses a loaded record whose baseline or comparison lacks one ("load it again"); Save As then
+  warns before a plain capture. A valid cover is ascending and canonical: adjacent ranges are merged,
+  so one slot set has one spelling. Slots outside this build's set are listed by Load and Restore
+  ("not supported on this build"), never written, and don't keep a backup "partial".
 - **Coverage moves with the values.** Save outside the comparison's cover keeps B and says how many
   such slots differ ("load it again to save them"); outside the entry's cover it takes a readable C,
   so the first Save over a 1-12 entry adds the other bars, and an unreadable slot never gains cover.

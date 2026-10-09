@@ -256,7 +256,7 @@ function Commands.save(arg)
     end
     local lines = { ("%s and %s change in %q."):format(Plural(#m.changed, "slot"), Plural(#m.keysChanged, "key"), name) }
     if (m.added or 0) > 0 then
-        lines[#lines + 1] = ("Adds %s this loadout didn't cover yet (%d with an action)."):format(
+        lines[#lines + 1] = ("Adds %s this loadout didn't cover yet (%d with an action, counted above)."):format(
             Plural(m.added, "slot"), m.addedFull or 0)
     end
     local items = {}

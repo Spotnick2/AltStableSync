@@ -50,7 +50,9 @@ function Cover.Valid(c)
         local r = c[i]
         if type(r) ~= "table" or type(r[1]) ~= "number" or type(r[2]) ~= "number" then return false end
         if r[1] ~= math.floor(r[1]) or r[2] ~= math.floor(r[2]) then return false end
-        if r[1] <= prev or r[2] < r[1] or r[2] > Cover.MAX then return false end
+        -- Ascending and canonical: adjacent ranges are merged, so one slot
+        -- set has one spelling (Save's no-op check compares it as text).
+        if r[1] < 1 or (i > 1 and r[1] <= prev + 1) or r[2] < r[1] or r[2] > Cover.MAX then return false end
         prev = r[2]
     end
     for k in pairs(c) do

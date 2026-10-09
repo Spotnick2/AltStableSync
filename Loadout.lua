@@ -237,11 +237,26 @@ function Loadout.Plan(entry)
     if entry.class ~= PlayerClass() then
         plan.blocked = "This loadout is for another class." return Finish(plan)
     end
+    -- Without its cover a later Save can't use what this load records, so
+    -- "load it again" would never help (#5).
+    if not ASS.Cover.Ok(entry.modules) then
+        plan.blocked = "This loadout is damaged (no list of covered slots); it can't be loaded."
+        return Finish(plan)
+    end
     plan.blocked = Loadout.Blocked()
     if plan.blocked then return Finish(plan) end
     local modules = entry.modules or {}
     local book = Game.Spellbook()
     local creating, charCount = {}, Game.CharMacroCount()
+    -- Slots this build doesn't read or write are listed, never applied.
+    local outside = {}
+    for slot in pairs(modules.actions or {}) do
+        if type(slot) == "number" and not Game.IS_SLOT[slot] then outside[#outside + 1] = slot end
+    end
+    table.sort(outside)
+    for _, slot in ipairs(outside) do
+        plan.skips[#plan.skips + 1] = { slot = slot, reason = "not supported on this build" }
+    end
     for _, slot in ipairs(Game.SLOT_LIST) do
         local want = modules.actions and modules.actions[slot]
         if want then
@@ -543,6 +558,16 @@ end
 
 local function Unsupported(a) return a ~= nil and a.kind == "unsupported" end
 
+-- Does slot content `x` differ from B's `b`? A character macro counts its
+-- body and icon too: `def(name)` gives x's definition (nil: action only).
+local function SlotDiffers(x, b, def, B)
+    if Serialize(x) ~= Serialize(b) then return true end
+    if def and x and x.kind == "macro" and x.scope == "char" then
+        return Serialize(def(x.name)) ~= Serialize(CharMacro(B, x.name))
+    end
+    return false
+end
+
 -- The merge (pure). `rec` is the loaded record (baseline B, after A,
 -- unavailable), `current` a fresh Capture() (C). Per slot:
 --   C unreadable or ambiguous            -> B, and A stays the comparison
@@ -596,12 +621,7 @@ function Loadout.Merge(rec, current, characterBindings, drop)
         elseif not inA then
             if inB then
                 keepB, keepA = true, true
-                -- A character macro's body and icon count, as for `changed`.
-                local differs = Serialize(c) ~= Serialize(b)
-                if not differs and c and c.kind == "macro" and c.scope == "char" then
-                    differs = Serialize(CharMacro(current, c.name)) ~= Serialize(CharMacro(B, c.name))
-                end
-                if differs then stale = stale + 1 end
+                if SlotDiffers(c, b, function(n) return CharMacro(current, n) end, B) then stale = stale + 1 end
             end
         elseif not inB then         -- the entry never covered it: C
         -- An unreadable A only hides an edit where the load skipped the slot;
@@ -663,11 +683,8 @@ function Loadout.Merge(rec, current, characterBindings, drop)
     -- What the preview lists as changed: the slot's action, or the body or
     -- icon of the character macro it uses. Dropped slots are listed apart.
     for _, slot in ipairs(Game.SLOT_LIST) do
-        local x, b = actions[slot], bAct[slot]
-        local diff = Serialize(x) ~= Serialize(b)
-        if not diff and src[slot] == "C" and x and x.kind == "macro" and x.scope == "char" then
-            diff = Serialize(macros[x.name]) ~= Serialize(CharMacro(B, x.name))
-        end
+        local x = actions[slot]
+        local diff = SlotDiffers(x, bAct[slot], src[slot] == "C" and function(n) return macros[n] end, B)
         if diff and not gone[slot] then changed[#changed + 1] = slot end
     end
 
@@ -727,8 +744,9 @@ function Loadout.Merge(rec, current, characterBindings, drop)
     out.cover = Cover.FromSet(outSet)
     -- Slots this Save adds to the entry's cover, and how many hold an action.
     if stale > 0 then
-        notes[#notes + 1] = ("%d slots differ from the loadout but weren't loaded by this version, so they aren't saved: load it again to save them.")
-            :format(stale)
+        notes[#notes + 1] = (stale == 1
+            and "1 slot differs from the loadout but wasn't loaded by this version, so it isn't saved: load it again to save it."
+            or ("%d slots differ from the loadout but weren't loaded by this version, so they aren't saved: load it again to save them."):format(stale))
     end
     local added, addedFull = 0, 0
     for slot in pairs(outSet) do
@@ -875,7 +893,11 @@ function Loadout.PlanRestore(which)
         if not why and not Game.SameAction(current, target) and not Game.Restorable(current) then
             why = "slot now holds something that couldn't be put back"
         end
-        if why then
+        if why and not Game.IS_SLOT[slot] then
+            -- No build of this one writes it: listed, and the backup can still
+            -- finish (otherwise it would stay "partial" forever).
+            plan.skips[#plan.skips + 1] = { slot = slot, reason = why }
+        elseif why then
             plan.unavailable[#plan.unavailable + 1] = { slot = slot, reason = why }
         elseif not Game.SameAction(current, target) then
             plan.actions[#plan.actions + 1] = { slot = slot, target = target, current = current }
@@ -922,7 +944,7 @@ function Loadout.Restore(which, shown)
         local rec = ASS.char.loaded and ASS.char.loaded.loadout
         if rec then rec.after, rec.unavailable = nil, nil end
     end
-    result.unavailable, result.kept = plan.unavailable, plan.kept
+    result.unavailable, result.kept, result.skips = plan.unavailable, plan.kept, plan.skips
     result.keysBlocked = plan.keysBlocked
     result.partial = not Complete(plan, result) or nil
     -- The pinned operation is released only when it is fully restored.

@@ -187,14 +187,15 @@ end
 -- Local changes (each one is an explicit, confirmed player action)
 ------------------------------------------------------------
 
--- A new entry. `keepKeys` is for keeping an entry that arrived from the other
--- account: its class/category stay as they are, even keys this build doesn't
--- know (a newer build's), exactly as the receive boundary accepted them.
 -- Content a loadout may hold: a table, with a valid cover (#5).
 local function GoodModules(kind, modules)
     if type(modules) ~= "table" then return false end
     return kind ~= "loadout" or ASS.Cover.Ok(modules)
 end
+
+-- A new entry. `keepKeys` is for keeping an entry that arrived from the other
+-- account: its class/category stay as they are, even keys this build doesn't
+-- know (a newer build's), exactly as the receive boundary accepted them.
 
 local function NewEntry(kind, meta, modules, keepKeys)
     meta = meta or {}
@@ -326,11 +327,7 @@ local function ValidIncoming(x)
     end
     local contentless = x.deleted or (x.conflict and x.conflict.deletion)
     -- Every schema-2 sender stamps a loadout's cover (#5).
-    if x.kind == "loadout" and not contentless and type(x.modules) == "table"
-        and not ASS.Cover.Valid(x.modules.cover) then
-        return false
-    end
-    if not contentless and type(x.modules) ~= "table" then return false end
+    if not contentless and not GoodModules(x.kind, x.modules) then return false end
     return true
 end
 

@@ -1342,7 +1342,7 @@ do
                    after = { cover = { { 1, 12 } }, actions = {} } }
     local outS = L.Merge(recS, { actions = { [30] = mac }, macros = { Far = { body = "/x", icon = 2 } }, bindings = {} }, true)
     eq("#5 stale icon: B kept", outS and outS.modules.macros.Far.icon, 1)
-    check("#5 stale icon: noted", outS and outS.notes[1] and outS.notes[1]:find("1 slots differ", 1, true) ~= nil, outS and outS.notes[1])
+    check("#5 stale icon: noted", outS and outS.notes[1] and outS.notes[1]:find("1 slot differs", 1, true) ~= nil, outS and outS.notes[1])
     eq("outside slots: slot 130 kept", out and out.modules.actions[130] and out.modules.actions[130].name, "Far")
     eq("outside slots: its macro kept", out and out.modules.macros.Far and out.modules.macros.Far.body, "/x")
     eq("outside commands: kept", out and out.modules.bindings.MULTIACTIONBAR1BUTTON1[1], "F")
@@ -1576,13 +1576,33 @@ do
     L.Restore(1, L.PlanRestore(1))
     eq("#5: restored exactly across bars", state(), before)
 
-    -- A backup slot outside the set is reported, never written.
+    -- A backup slot outside the set is reported, never written, and doesn't
+    -- keep the restore "partial" forever.
     A.Backups.Get(1).actions[130] = false
     local rp = L.PlanRestore(1)
     local why
-    for _, u in ipairs(rp.unavailable) do if u.slot == 130 then why = u.reason end end
+    for _, u in ipairs(rp.skips) do if u.slot == 130 then why = u.reason end end
     eq("#5: restore outside the set: reported", why, "not supported on this build")
+    eq("#5: restore outside the set: not unavailable", #rp.unavailable, 0)
+    local rr = L.Restore(1, rp)
     eq("#5: restore outside the set: untouched", G.actions[130].id, 4540)
+    check("#5: restore outside the set: not partial", rr and not rr.partial)
+
+    -- Load lists an entry's slots outside the set instead of ignoring them.
+    local wide = A.Catalog.Copy(entry)
+    wide.modules.actions[130] = { kind = "item", id = 5512 }
+    local lp = L.Plan(wide)
+    why = nil
+    for _, s in ipairs(lp.skips) do if s.slot == 130 then why = s.reason end end
+    eq("#5: load outside the set: listed", why, "not supported on this build")
+    for _, op in ipairs(lp.actions) do check("#5: load outside the set: never written", op.slot ~= 130) end
+
+    -- An entry without a valid cover can't be loaded: Save could never use
+    -- the record ("load it again" would loop).
+    local bare = A.Catalog.Copy(entry)
+    bare.modules.cover = nil
+    local bp = L.Plan(bare)
+    check("#5: no cover: load refused", bp.blocked and bp.blocked:find("damaged", 1, true) ~= nil, bp.blocked)
 
     -- A rank ladder split across two bars (#42).
     boot(); ready(); main()
@@ -1625,7 +1645,7 @@ do
     eq("#5 old entry: with an action", m and m.addedFull, 1)
     A._shown = nil
     A.Commands.save()
-    check("#5 old entry: preview says so", A._shown and table.concat(A._shown.lines, "\n"):find("didn't cover yet (1 with an action)", 1, true) ~= nil)
+    check("#5 old entry: preview says so", A._shown and table.concat(A._shown.lines, "\n"):find("didn't cover yet (1 with an action, counted above)", 1, true) ~= nil)
     check("#5 old entry: grouped under the bar", A._shown and table.concat(A._shown.lines, "\n"):find("  Action Bar 5 (1):\n    button 4: item 4540", 1, true) ~= nil,
           A._shown and table.concat(A._shown.lines, " | "))
     local p = L.PlanSaveAs()
@@ -1666,7 +1686,7 @@ do
     G.actions[10] = { kind = "spell", id = 2052 }           -- a real edit, so the Save happens
     local m = L.PlanSave()
     eq("#5 old comparison: inherited slot kept", m and m.modules.actions[30].id, 5512)
-    check("#5 old comparison: says to load again", m and m.notes[1] and m.notes[1]:find("load it again to save them", 1, true) ~= nil,
+    check("#5 old comparison: says to load again", m and m.notes[1] and m.notes[1]:find("load it again to save", 1, true) ~= nil,
           m and m.notes[1])
     check("#5 old comparison: saved", L.Save(m) ~= nil)
     check("#5 old comparison: still not covered by the comparison", not A.Cover.Has(rec().after.cover, 30))

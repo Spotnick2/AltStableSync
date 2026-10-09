@@ -135,6 +135,9 @@ do
     check("cover: too large invalid", not C.Valid({ { 1, 5000 } }))
     check("cover: stray key invalid", not C.Valid({ { 1, 12 }, x = 1 }))
     check("cover: zero invalid", not C.Valid({ { 0, 12 } }))
+    -- One slot set, one spelling: adjacent ranges must be merged (#44 review).
+    check("cover: adjacent ranges invalid", not C.Valid({ { 1, 12 }, { 13, 24 } }))
+    check("cover: a gap of one slot valid", C.Valid({ { 1, 12 }, { 14, 24 } }))
     check("cover: Ok needs one", not C.Ok({}) and not C.Ok({ cover = { { 2, 1 } } }) and C.Ok({ cover = { { 1, 12 } } }))
     eq("cover: from set", R(C.FromSet({ [1] = true, [2] = true, [3] = true, [7] = true })), "1-3,7-7")
     eq("cover: empty set", C.FromSet({}), nil)
