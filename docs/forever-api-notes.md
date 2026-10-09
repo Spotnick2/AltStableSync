@@ -162,6 +162,12 @@ The client was built on Oct 7, 2026, interface 16001.
 
 **Verdict:** nothing this addon depends on changed. `MEASURED_ON_BUILD` is now 70291.
 
+**Profession spells are outside the class skill lines** (owner, 2026-10-09, level-18 warlock; #46/#48):
+Enchanting 7411, Tailoring 3909, Disenchant 13262, First Aid 3273, Cooking 2550 are **not** in the
+`C_SpellBook` skill-line scan (`Game.Spellbook`), yet `C_SpellBook.IsSpellKnown(id)` and
+`IsPlayerSpell(id)` both return `true`. So "not in the scan" is never proof of "not learned": absence
+also needs both by-id answers to be `false`.
+
 **Action bars after training a new rank** (owner, 2026-10-09, from play; #42):
 - **Hunter** bars switch to the new rank by themselves.
 - **Caster** bars keep the old rank, unless the spell is cast through a macro.
