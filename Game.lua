@@ -79,7 +79,8 @@ Game.MAX_CHAR_MACROS = (Constants and Constants.MacroConsts and Constants.MacroC
 
 local BANK = (Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player) or 0
 
--- The player's learned castable spells: { [id] = { name, low } }, and by name
+-- The player's learned castable spells: { [id] = { name, low, order } }
+-- (`order`: the book index; ranks are ascending book items), and by name
 -- the top known rank (the same-name Spell entry that is not low rank).
 function Game.Spellbook()
     local byId, top = {}, {}
@@ -94,7 +95,8 @@ function Game.Spellbook()
                     and (not T or info.itemType == T.Spell) then
                     local okR, low = pcall(C_SpellBook.IsSpellBookItemLowRank, i, BANK)
                     low = okR and low == true
-                    byId[info.spellID] = { name = info.name, low = low }
+                    -- `order`: ranks are separate, ascending book items (measured).
+                    byId[info.spellID] = { name = info.name, low = low, order = i }
                     if not low then top[info.name] = info.spellID end
                 end
             end

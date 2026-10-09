@@ -53,13 +53,14 @@ local function main()
         spells = MAIN_SPELLS, items = { [5512] = 3 }, macros = MAIN_MACROS,
         actions = {
             [1] = { spell = 9472 },                 -- Flash Heal, top rank -> highest
-            [2] = { spell = 2050 },                 -- Lesser Heal r1 while r2 known -> exact (downrank)
+            [2] = { spell = 2050 },                 -- Lesser Heal r1 below slot 12's r2 -> exact (#42 ladder)
             [3] = { item = 5512 },                  -- Healthstone
             [4] = { macro = "Shield" },             -- character macro
             [5] = { macro = "Acct" },               -- account macro
             [6] = { flyout = 1 },                   -- unsupported
             [7] = { macro = "Dup" },                -- ambiguous name -> unsupported
             [8] = { spell = 2060 },                 -- Greater Heal (an alt won't know it)
+            [12] = { spell = 2052 },                -- Lesser Heal r2: with slot 2, a rank ladder
         },
         keys = { ["1"] = "ACTIONBUTTON1", ["2"] = "ACTIONBUTTON2", ["SHIFT-2"] = "ACTIONBUTTON2" },
     }
@@ -109,6 +110,7 @@ do
     eq("capture: top rank -> highest", m.actions[1].policy, "highest")
     eq("capture: name kept for the family", m.actions[1].name, "Flash Heal")
     eq("A11: deliberate downrank -> exact", m.actions[2].policy, "exact")
+    eq("#42: the ladder's highest rank -> highest", m.actions[12].policy, "highest")
     eq("capture: item", m.actions[3].kind .. ":" .. m.actions[3].id, "item:5512")
     eq("A15: macro by name, not the shown spell id", m.actions[4].name, "Shield")
     eq("capture: char macro scope", m.actions[4].scope, "char")
@@ -1412,6 +1414,113 @@ do
     eq("frozen comparison: refused", r, nil)
     check("frozen comparison: says so", tostring(why):find("changed since the preview", 1, true) ~= nil, why)
     eq("frozen comparison: catalog untouched", A.Catalog.Get(entry.id).version, v)
+end
+
+-- #42: rank policy. Caster bars keep an old rank after training; hunter
+-- bars switch to the new one; healers keep a ladder of ranks on purpose.
+do
+    boot(); main(); ready()
+    G.actions[2], G.actions[12] = nil, nil
+    G.actions[10] = { kind = "spell", id = 2050 }           -- Lesser Heal r1 alone, r2 known: stale
+    local m = L.Capture()
+    eq("#42: a lone low rank -> highest", m.actions[10].policy, "highest")
+    G.actions[11] = { kind = "spell", id = 2050 }           -- the same rank twice is no ladder
+    m = L.Capture()
+    eq("#42: one rank twice -> highest", m.actions[11].policy, "highest")
+    G.actions[11] = { kind = "spell", id = 2052 }
+    m = L.Capture()
+    eq("#42: ladder low rank -> exact", m.actions[10].policy, "exact")
+    eq("#42: ladder high rank -> highest", m.actions[11].policy, "highest")
+    G.actions[10], G.actions[11] = { kind = "spell", id = 2052 }, { kind = "spell", id = 2050 }
+    m = L.Capture()
+    eq("#42: rank order, not slot order: high", m.actions[10].policy, "highest")
+    eq("#42: rank order, not slot order: low", m.actions[11].policy, "exact")
+
+    -- The alt trains Flash Heal r2 after loading.
+    local function train()
+        G.spells[1].low = true
+        G.spells[#G.spells + 1] = { id = 9473, name = "Flash Heal" }    -- not the main's id
+    end
+    loadedAlt()
+    train()
+    G.actions[1] = { kind = "spell", id = 9473 }            -- a hunter-style bar update
+    m = L.PlanSave()
+    check("#42: auto-updated rank is no change", m and m.noop, m and #m.changed)
+    G.actions[1] = { kind = "spell", id = 2061 }            -- a caster bar: the old rank stays
+    m = L.PlanSave()
+    check("#42: stale rank is no change", m and m.noop, m and #m.changed)
+    -- r1 untouched in slot 1, r2 dragged into slot 11: slot 1 now reads as
+    -- a ladder's downrank, but a caster's stale rank looks the same, so the
+    -- untouched slot keeps the loaded policy (never freeze a low rank).
+    G.actions[11] = { kind = "spell", id = 9473 }
+    m = L.PlanSave()
+    eq("#42: untouched rank keeps the loaded policy", m and m.modules.actions[1].policy, "highest")
+    eq("#42: and the main's rank", m and m.modules.actions[1].id, 9472)
+
+    -- A rung removed: the untouched downrank stays exact.
+    loadedAlt()
+    eq("#42: ladder loaded", rec().after.actions[2].policy, "exact")
+    G.actions[12] = nil
+    m = L.PlanSave()
+    eq("#42: rung removed, the downrank stays exact", m and m.modules.actions[2].policy, "exact")
+    -- A record taken by the old rule (a lone low rank as exact) reads the same.
+    loadedAlt()
+    G.actions[12] = nil
+    rec().after.actions[12] = nil
+    rec().after.actions[2].policy = "exact"
+    m = L.PlanSave()
+    eq("#42: old-rule record: nothing listed", m and #m.changed, 0)
+    eq("#42: old-rule record: policy as loaded", m and m.modules.actions[2].policy, "exact")
+
+    -- The low-rank flag wins over book order.
+    boot(); ready()
+    G.setup{ class = "PRIEST", guid = "Player-70-ODD",
+             spells = { { id = 2052, name = "Lesser Heal" }, { id = 2050, name = "Lesser Heal", low = true } },
+             actions = { [1] = { spell = 2050 }, [2] = { spell = 2052 } } }
+    m = L.Capture()
+    eq("#42: flag over order: the low rank", m.actions[1].policy, "exact")
+    eq("#42: flag over order: the top rank", m.actions[2].policy, "highest")
+    -- Two low ranks (r3 known): book order says which is the ladder's top.
+    boot(); ready()
+    G.setup{ class = "PRIEST", guid = "Player-70-THREE",
+             spells = { { id = 1, name = "Heal", low = true }, { id = 2, name = "Heal", low = true }, { id = 3, name = "Heal" } },
+             actions = { [1] = { spell = 2 }, [2] = { spell = 1 } } }
+    m = L.Capture()
+    eq("#42: two low ranks: the higher one", m.actions[1].policy, "highest")
+    eq("#42: two low ranks: the lower one", m.actions[2].policy, "exact")
+
+    -- A rung changed to another rank of the same spell is an edit.
+    loadedAlt()
+    G.actions[10] = { kind = "spell", id = 2052 }           -- r2 into a new slot
+    G.actions[12] = { kind = "spell", id = 2050 }           -- slot 12's r2 becomes r1: a downrank
+    m = L.PlanSave()
+    eq("#42: rung edit saved", m and m.modules.actions[12].id, 2050)
+    eq("#42: rung edit exact", m and m.modules.actions[12].policy, "exact")
+
+    -- An entry's lone exact rank (the old rule made these), loaded: the
+    -- post-load capture reads it as highest. Changing its rank is an edit,
+    -- for Save and Save As.
+    boot(); ready(); main()
+    entry = custom({ actions = { [9] = { kind = "spell", id = 2050, name = "Lesser Heal", policy = "exact" } } })
+    alt()
+    local lr = L.Load(entry, L.Plan(entry))
+    check("#42: lone exact loaded", lr and not lr.failed)
+    eq("#42: post-load reads highest", rec().after.actions[9].policy, "highest")
+    G.actions[9] = { kind = "spell", id = 2052 }
+    m = L.PlanSave()
+    eq("#42: exact rank edited: saved", m and m.modules.actions[9].id, 2052)
+    eq("#42: exact rank edited: its policy", m and m.modules.actions[9].policy, "highest")
+    local p = L.PlanSaveAs()
+    eq("#42: exact rank edited: Save As too", p and p.modules.actions[9].id, 2052)
+
+    -- The documented way to record a rung built on an alt: the lower rank
+    -- in a slot that held something else after the load.
+    loadedAlt()
+    train()
+    G.actions[11] = { kind = "spell", id = 9473 }           -- r2 into slot 11
+    G.actions[10] = { kind = "spell", id = 2061 }           -- r1 into slot 10, which was empty
+    m = L.PlanSave()
+    eq("#42: rung via a changed slot: exact", m and m.modules.actions[10].policy, "exact")
 end
 
 -- Commands: the preview is frozen; no record means Save As; fresh Save As sets the record.

@@ -64,13 +64,26 @@ function Loadout.Capture()
     local Game = G()
     local book = Game.Spellbook()
     local actions, macros = {}, {}
+    -- Rank policy (#42). Caster bars keep an old rank after training (hunter
+    -- bars update), so one low rank alone is stale, not a choice: "highest".
+    -- A spell on the bars at several ranks is a healer's mana ladder: the
+    -- highest of them follows the trainer, the lower ones stay "exact".
+    -- Rank order is book order; the measured low-rank flag wins, so the
+    -- known top rank always ranks highest.
+    local function rank(s) return s.low and s.order or math.huge end
+    local seen, ladderTop = {}, {}
     for slot = Game.SLOTS.first, Game.SLOTS.last do
         local a = Game.ActionAt(slot)
+        seen[slot] = a
+        local s = a and a.kind == "spell" and book.byId[a.id]
+        if s and (ladderTop[s.name] or 0) < rank(s) then ladderTop[s.name] = rank(s) end
+    end
+    for slot = Game.SLOTS.first, Game.SLOTS.last do
+        local a = seen[slot]
         if a and a.kind == "spell" then
             local s = book.byId[a.id]
             local name = (s and s.name) or (C_Spell.GetSpellName and C_Spell.GetSpellName(a.id))
-            -- A deliberate downrank: a low rank placed while the top rank is known.
-            local exact = s and s.low and name and book.top[name] ~= nil
+            local exact = s and rank(s) < ladderTop[s.name]
             actions[slot] = { kind = "spell", id = a.id, name = name, policy = exact and "exact" or "highest" }
         elseif a and a.kind == "item" then
             actions[slot] = { kind = "item", id = a.id }
@@ -490,7 +503,7 @@ end
 -- Save's own "unchanged since the load?": action identity, plus a character
 -- macro's body and icon (an icon-only edit is a change). Game.SameAction is
 -- left as it is: it verifies writes.
-local function SaveSame(c, a, cMods, aMods)
+local function SaveSame(c, a, cMods, aMods, b)
     if c == nil or a == nil then return c == a end
     if c.kind ~= a.kind then return false end
     if c.kind == "macro" then
@@ -499,6 +512,15 @@ local function SaveSame(c, a, cMods, aMods)
             return false
         end
         if c.scope == "char" and MacroIcon(c, cMods) ~= MacroIcon(a, aMods) then return false end
+        return true
+    end
+    -- Spells (#42). The same rank is unchanged even when its policy flipped:
+    -- a policy depends on the other slots, so an untouched slot keeps the
+    -- loaded one. A rank update (a hunter bar after training, or the new rank
+    -- dragged in) is no change while both say "highest" for the same spell,
+    -- and the loaded entry does too (an entry's exact rank, edited, is an edit).
+    if c.kind == "spell" and c.policy == "highest" and a.policy == "highest" and c.name ~= nil and c.name == a.name
+        and b and b.kind == "spell" and b.policy == "highest" then
         return true
     end
     return c.id == a.id
@@ -536,7 +558,7 @@ function Loadout.Merge(rec, current, characterBindings, drop)
         -- An unreadable A only hides an edit where the load skipped the slot;
         -- where the load placed B, a readable C is what is there now.
         elseif Unsupported(a) and was[slot] then keepB, keepA = true, true
-        elseif SaveSame(c, a, current, A) then keepB = true
+        elseif SaveSame(c, a, current, A, b) then keepB = true
         elseif c == nil and was[slot] then keepB = true
         end
         if keepB and drop and was[slot] and b ~= nil then
