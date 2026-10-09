@@ -1382,6 +1382,38 @@ do
     G.keys["3"] = nil
 end
 
+-- Codex on #41 at 094882a.
+do
+    -- A frozen slot keeps its own macro icon comparison when another slot
+    -- using the same macro advances.
+    local M = { kind = "macro", name = "M", scope = "char", body = "/m" }
+    local fut = { kind = "spell", id = 7, name = "Future", policy = "highest" }
+    local rec1 = { baseline = { actions = { [1] = fut, [2] = M }, macros = { M = { body = "/m", icon = 1 } } },
+                   after = { actions = { [1] = M, [2] = M }, macros = { M = { body = "/m", icon = 1 } } },
+                   unavailable = { [1] = "not learned" } }
+    local cur1 = { actions = { [1] = { kind = "unsupported", what = "unreadable" }, [2] = M },
+                   macros = { M = { body = "/m", icon = 2 } }, bindings = {} }
+    local o1 = L.Merge(rec1, cur1, true)
+    eq("frozen icon: slot 1 kept", o1 and o1.modules.actions[1].name, "Future")
+    eq("frozen icon: slot 2 icon saved", o1 and o1.modules.macros.M.icon, 2)
+    local rec2 = { baseline = o1.modules, after = o1.advanced, unavailable = o1.unavailable }
+    local cur2 = { actions = { [1] = M, [2] = M }, macros = { M = { body = "/m", icon = 2 } }, bindings = {} }
+    local o2 = L.Merge(rec2, cur2, true)
+    eq("frozen icon: slot 1's edit compared with its own icon", o2 and o2.modules.actions[1].kind, "macro")
+
+    -- The confirm refuses when the comparison it would commit changed, even
+    -- if the saved modules didn't.
+    loadedAlt()
+    G.actions[10] = { kind = "spell", id = 2052 }
+    local m = L.PlanSave()
+    local v = A.Catalog.Get(entry.id).version
+    G.actions[8] = nil                                      -- the food leaves the skipped slot
+    local r, why = L.Save(m)
+    eq("frozen comparison: refused", r, nil)
+    check("frozen comparison: says so", tostring(why):find("changed since the preview", 1, true) ~= nil, why)
+    eq("frozen comparison: catalog untouched", A.Catalog.Get(entry.id).version, v)
+end
+
 -- Commands: the preview is frozen; no record means Save As; fresh Save As sets the record.
 do
     boot(); ready(); main()

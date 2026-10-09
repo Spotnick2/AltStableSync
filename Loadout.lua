@@ -479,6 +479,14 @@ end
 
 local function CharMacro(mods, name) return mods and mods.macros and mods.macros[name] end
 
+-- A character macro's icon as this slot last saw it: a comparison slot
+-- carries its own (frozen slots and advancing ones can share a name).
+local function MacroIcon(act, mods)
+    if act.icon ~= nil then return act.icon end
+    local d = CharMacro(mods, act.name)
+    return d and d.icon
+end
+
 -- Save's own "unchanged since the load?": action identity, plus a character
 -- macro's body and icon (an icon-only edit is a change). Game.SameAction is
 -- left as it is: it verifies writes.
@@ -490,10 +498,7 @@ local function SaveSame(c, a, cMods, aMods)
         if c.name ~= a.name or c.scope ~= a.scope or Game.Normalize(c.body or "") ~= Game.Normalize(a.body or "") then
             return false
         end
-        if c.scope == "char" then
-            local x, y = CharMacro(cMods, c.name), CharMacro(aMods, a.name)
-            if (x and x.icon) ~= (y and y.icon) then return false end
-        end
+        if c.scope == "char" and MacroIcon(c, cMods) ~= MacroIcon(a, aMods) then return false end
         return true
     end
     return c.id == a.id
@@ -571,7 +576,9 @@ function Loadout.Merge(rec, current, characterBindings, drop)
         end
         local x = adv[slot]
         if x and x.kind == "macro" and x.scope == "char" then
-            advMacros[x.name] = Copy(CharMacro(advSrc[slot] == "A" and A or current, x.name))
+            local mods = advSrc[slot] == "A" and A or current
+            x.icon = MacroIcon(x, mods)
+            advMacros[x.name] = Copy(CharMacro(mods, x.name))
         end
     end
 
@@ -675,7 +682,9 @@ function Loadout.PlanSave(drop)
     local m, merr = Loadout.Merge(rec, current, G().CharacterBindings(), drop)
     if not m then return nil, merr end
     m.entry, m.drop = entry, drop or false
-    m.fingerprint = Serialize({ id = entry.id, v = entry.version, m = m.modules, d = m.drop })
+    -- Everything the confirm commits: the entry and the new comparison.
+    m.fingerprint = Serialize({ id = entry.id, v = entry.version, m = m.modules, d = m.drop,
+                                a = m.advanced, u = m.unavailable })
     return m
 end
 
