@@ -151,6 +151,9 @@ local function Resolve(want, modules, book)
         if type(want.name) ~= "string" then return nil, "spell name unknown" end
         local id = book.top[want.name]
         if id then return { kind = "spell", id = id } end
+        -- "Highest" needs a verified top rank: with an incomplete scan a known
+        -- id may be a lower rank (Codex on #48), so nothing is placed.
+        if not book.complete then return nil, "spellbook unreadable" end
         return absent("not learned")
     elseif want.kind == "item" then
         local n = Game.ItemCountRead(want.id)

@@ -1927,6 +1927,17 @@ do
     local book = A.Game.Spellbook()
     C_SpellBook.IsSpellBookItemLowRank = realLow
     eq("#46: unverified rank is not a top rank", book.top["Lesser Heal"], nil)
+    -- And a known "highest" spell with no verified top rank isn't placed at
+    -- its stored (possibly lower) rank.
+    boot(); ready()
+    local eL = custom({ actions = { [3] = { kind = "spell", id = 2050, name = "Lesser Heal", policy = "highest" } } })
+    alt({ actions = { [3] = { item = 4540 } } })
+    C_SpellBook.IsSpellBookItemLowRank = function() error("read failed") end
+    local pL = L.Plan(eL)
+    C_SpellBook.IsSpellBookItemLowRank = realLow
+    eq("#48 Codex: known id, unverified top: no op", ops(pL)[3], nil)
+    eq("#48 Codex: left alone as unreadable", byReason(pL.skips)[3], "spellbook unreadable")
+    boot(); ready(); alt()
     check("#46: but the spell is known", book.byId[2050] ~= nil)
     eq("#46: book marked incomplete", book.complete, false)
     boot(); ready(); alt()
