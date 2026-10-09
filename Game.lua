@@ -150,6 +150,8 @@ function Game.Spellbook()
                 local okI, info = pcall(C_SpellBook.GetSpellBookItemInfo, i, BANK)
                 if not okI or type(info) ~= "table" then
                     complete = false
+                elseif (not T or info.itemType == T.Spell) and not (info.spellID and info.name) then
+                    complete = false        -- spell data not loaded yet: not proof of absence
                 elseif info.spellID and info.name and not info.isPassive
                     and (not T or info.itemType == T.Spell) then
                     local okR, low = pcall(C_SpellBook.IsSpellBookItemLowRank, i, BANK)
@@ -168,11 +170,28 @@ function Game.Spellbook()
     return { byId = byId, top = top, complete = complete }
 end
 
--- Known = in the spellbook scan (measured, 70245), low ranks included.
--- IsSpellKnown is not used: its answer for superseded low ranks is unmeasured.
+-- Known by id, outside the book scan: true when the client says so, false
+-- when every answer is a plain "no", nil when it can't be read. For spells
+-- the class skill lines may not hold (professions, #48 review).
+function Game.SpellKnownById(id)
+    local answered, known = false, false
+    for _, fn in ipairs({ C_SpellBook and C_SpellBook.IsSpellKnown or false, IsPlayerSpell or false }) do
+        if fn then
+            local ok, v = pcall(fn, id)
+            if not ok or type(v) ~= "boolean" then return nil end
+            answered, known = true, known or v
+        end
+    end
+    if known then return true end
+    if answered then return false end
+    return nil
+end
+
+-- Known = in the spellbook scan (measured, 70245), low ranks included, or
+-- known by id (a spell outside the class skill lines).
 function Game.SpellKnown(id, book)
     book = book or Game.Spellbook()
-    return book.byId[id] ~= nil
+    return book.byId[id] ~= nil or Game.SpellKnownById(id) == true
 end
 
 ------------------------------------------------------------
@@ -220,9 +239,9 @@ end
 -- Do two normalised actions hold the same thing?
 -- Can the slot content `a` be captured and put back exactly by this slice?
 -- Empty, a known spell, an item still in the bags, an unambiguous macro.
-function Game.Restorable(a)
+function Game.Restorable(a, book)
     if a == nil then return true end
-    if a.kind == "spell" then return Game.SpellKnown(a.id) end
+    if a.kind == "spell" then return Game.SpellKnown(a.id, book) end
     if a.kind == "item" then return Game.ItemCount(a.id) > 0 end
     if a.kind == "macro" then
         local m = Game.MacrosNamed(a.name)

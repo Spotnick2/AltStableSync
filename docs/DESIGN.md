@@ -270,13 +270,17 @@ Only an explicit confirmation click writes game state.
    - **Inside the entry's cover, a Load makes the slot match the entry (#46, owner 2026-10-09).** An
      empty slot in the entry is "captured empty", so the destination is emptied. An entry this
      character **verifiably** can't use empties the destination too, and stays in the saved entry.
-     The verified reasons: not learned, rank not known, not in bags, account macro missing, macro
-     name conflict, macro slots full. Each emptied slot is listed in the preview with its reason;
+     The verified reasons: not learned, rank not known (absent from a complete spellbook read **and**
+     unknown to the client by id, since profession spells may sit outside the class skill lines),
+     not in bags, account macro missing (no macro of that name at all), macro name conflict, macro
+     slots full. Each emptied slot is listed in the preview with its reason;
      one that is already empty is listed as "stays empty until this character can use it".
    - **Left untouched:** a slot outside the entry's cover (never captured) or outside the supported
      set; content the backup can't put back (a mount, a companion, an ambiguous macro); and any
      slot whose answer rests on a failed read (spellbook, bag count or macro list unreadable) or on
-     the entry itself (a missing macro definition, a body too long, an unsupported kind).
+     the entry itself (a missing macro definition, a body too long, an unsupported kind, a spell
+     with no name). An account macro of that name with another body is the player's own: left alone.
+     A slot the entry has empty that holds content the backup can't restore is not listed at all.
    - The player loads or retries **explicitly**; nothing retries on an event.
    - **Cursor hygiene:** refuse to start unless the cursor is empty (so the player's own payload is
      never touched). Before each `PlaceAction`, the cursor must hold exactly what we picked up.

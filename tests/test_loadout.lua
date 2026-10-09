@@ -137,6 +137,7 @@ local function alt(opts)
     G.setup{
         class = opts.class or "PRIEST", guid = "Player-70-ALT",
         bindingSet = opts.bindingSet,
+        extra = opts.extra,
         spells = opts.spells or {
             { id = 2061, name = "Flash Heal" },             -- only rank 1: it is this alt's top
             { id = 2050, name = "Lesser Heal", low = true }, { id = 2052, name = "Lesser Heal" },
@@ -1836,7 +1837,7 @@ do
     eq("#46: not listed as left unchanged", byReason(plan.skips)[3], nil)
     local text = table.concat(A.Commands.Describe(plan), "\n")
     check("#46: preview names what goes and why", text:find("button 3: Flash Heal -> empty (Greater Heal: not learned)", 1, true) ~= nil, text)
-    check("#46: preview footer", text:find("can't use yet are emptied", 1, true) ~= nil, text)
+    check("#46: preview footer", text:find("Backup first. Verify every write.", 1, true) ~= nil, text)
     WoW.chatLines = {}
     A.Commands.Report("load", L.Load(e, plan), nil, plan)
     local said = table.concat(WoW.chat(), "\n")
@@ -1905,7 +1906,7 @@ do
         -- Only the wanted rank's item fails (a whole failed book blocks on readiness).
         C_SpellBook.GetSpellBookItemInfo = function(i, ...) if i == 3 then error("read failed") end return realInfo(i, ...) end
     end, function() C_SpellBook.GetSpellBookItemInfo = realInfo end,
-        { kind = "spell", id = 2052, name = "Lesser Heal", policy = "exact" }, "spellbook unreadable")
+        { kind = "spell", id = 2060, name = "Greater Heal", policy = "exact" }, "spellbook unreadable")
     local realCount = C_Item.GetItemCount
     untouched("#46 item count fails", function()
         C_Item.GetItemCount = function() error("read failed") end
@@ -2060,6 +2061,84 @@ do
     check("#46 interrupted: no emptied count claimed", said:find("emptied", 1, true) == nil, said)
     L.Restore("op", L.PlanRestore("op"))
     eq("#46 interrupted: restored exactly", state(), before)
+end
+
+-- /code-review on #48.
+do
+    -- A loadout-empty slot holding what the backup can't restore is not this
+    -- load's business: not listed, not unavailable, and a later edit there
+    -- is saved.
+    boot(); ready()
+    local e = custom({ actions = { [3] = GH } })
+    alt({ actions = { [30] = { flyout = 7 } } })
+    local plan = L.Plan(e)
+    eq("#48: blank slot with a flyout: not listed", byReason(plan.skips)[30], nil)
+    L.Load(e, plan)
+    eq("#48: not unavailable", rec().unavailable[30], nil)
+    WoW.chatLines = {}
+    local again = L.Plan(e)
+    A.Commands.Report("load", L.Load(e, again), nil, again)
+    local said = table.concat(WoW.chat(), "\n")
+    check("#48: still 'already matches'", said:find("Already matches the loadout", 1, true) ~= nil, said)
+    G.actions[30] = { kind = "spell", id = 2061 }
+    local m = L.PlanSave()
+    eq("#48: the edit there is saved", m and m.modules.actions[30] and m.modules.actions[30].id, 2061)
+
+    -- A spell outside the class skill lines (a profession) is known by id:
+    -- placed, never emptied as "not learned".
+    local FA = { kind = "spell", id = 3273, name = "First Aid", policy = "highest" }
+    boot(); ready()
+    e = custom({ actions = { [3] = FA } })
+    alt({ extra = { [3273] = "First Aid" }, actions = { [3] = { item = 4540 } } })
+    plan = L.Plan(e)
+    eq("#48: profession spell placed by id", ops(plan)[3] and ops(plan)[3].target and ops(plan)[3].target.id, 3273)
+    L.Load(e, plan)
+    eq("#48: on the bar", G.actions[3] and G.actions[3].id, 3273)
+    alt({ actions = { [3] = { item = 4540 } } })
+    plan = L.Plan(e)
+    eq("#48: not known by id either: emptied", ops(plan)[3] and ops(plan)[3].why, "not learned")
+    -- No name to look it up by: left alone.
+    e = custom({ actions = { [3] = { kind = "spell", id = 9999, policy = "highest" } } })
+    plan = L.Plan(e)
+    eq("#48: no name: left alone", byReason(plan.skips)[3], "spell name unknown")
+    -- The by-id answer can't be read: left alone.
+    e = custom({ actions = { [3] = GH } })
+    local realPS = IsPlayerSpell
+    IsPlayerSpell = function() error("read failed") end
+    plan = L.Plan(e)
+    IsPlayerSpell = realPS
+    eq("#48: by-id read fails: left alone", byReason(plan.skips)[3], "spellbook unreadable")
+
+    -- A book item of Spell type with no data yet: the book is incomplete.
+    boot(); ready(); alt()
+    local realInfo = C_SpellBook.GetSpellBookItemInfo
+    C_SpellBook.GetSpellBookItemInfo = function(i, ...)
+        if i == 1 then return { itemType = Enum.SpellBookItemType.Spell } end
+        return realInfo(i, ...)
+    end
+    local book = A.Game.Spellbook()
+    C_SpellBook.GetSpellBookItemInfo = realInfo
+    eq("#48: nameless book spell: incomplete", book.complete, false)
+
+    -- An account macro of that name with another body is the player's own:
+    -- left alone, not "missing".
+    boot(); ready()
+    e = custom({ actions = { [3] = { kind = "macro", name = "Acct", scope = "account", body = "/say bye" } } })
+    alt({ actions = { [3] = { macro = "Acct" } } })
+    plan = L.Plan(e)
+    eq("#48: edited account macro left alone", byReason(plan.skips)[3], "account macro differs")
+    eq("#48: no op", ops(plan)[3], nil)
+
+    -- Save preview: a rank change says so, not "macro text".
+    boot(); ready()
+    e = custom({ actions = { [2] = { kind = "spell", id = 2050, name = "Lesser Heal", policy = "exact" } } })
+    alt({ actions = {} })
+    L.Load(e, L.Plan(e))
+    G.actions[2] = { kind = "spell", id = 2052 }
+    A._shown = nil
+    A.Commands.save("")
+    local text = A._shown and table.concat(A._shown.lines, "\n") or ""
+    check("#48: rank change labelled", text:find("Lesser Heal (rank or rank policy changed)", 1, true) ~= nil, text)
 end
 
 finish("test_loadout")

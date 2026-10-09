@@ -136,13 +136,22 @@ end
 local function Resolve(want, modules, book)
     local Game = G()
     if want.kind == "spell" then
-        if want.policy == "exact" then
-            if Game.SpellKnown(want.id, book) then return { kind = "spell", id = want.id } end
-            return nil, book.complete and "rank not known" or "spellbook unreadable"
+        -- Absent only when the whole book read and the client says no by id
+        -- too: profession spells may not be in the class skill lines.
+        local function absent(reason)
+            local k = Game.SpellKnownById(want.id)
+            if k then return { kind = "spell", id = want.id } end
+            if k == false and book.complete then return nil, reason end
+            return nil, "spellbook unreadable"
         end
-        local id = want.name and book.top[want.name]
+        if want.policy == "exact" then
+            if book.byId[want.id] then return { kind = "spell", id = want.id } end
+            return absent("rank not known")
+        end
+        if type(want.name) ~= "string" then return nil, "spell name unknown" end
+        local id = book.top[want.name]
         if id then return { kind = "spell", id = id } end
-        return nil, book.complete and "not learned" or "spellbook unreadable"
+        return absent("not learned")
     elseif want.kind == "item" then
         local n = Game.ItemCountRead(want.id)
         if n == nil then return nil, "items unreadable" end
@@ -156,7 +165,9 @@ local function Resolve(want, modules, book)
             if #matches == 1 and m.scope == "account" and Game.Normalize(m.body) == Game.Normalize(want.body) then
                 return { kind = "macro", name = m.name, body = m.body, scope = "account" }
             end
-            return nil, "account macro missing"
+            -- Only a name nobody uses is "missing" (#46 empties that slot);
+            -- a different macro of that name is left alone.
+            return nil, #matches == 0 and "account macro missing" or "account macro differs"
         end
         local def = modules.macros and modules.macros[want.name]
         if not def then return nil, "macro definition missing" end
@@ -283,7 +294,7 @@ function Loadout.Plan(entry)
             local target, why, create
             if want then target, why, create = Resolve(want, modules, book) end
             local same = Game.SameAction(current, target)
-            if target and not same and create and not creating[target.name] and Game.Restorable(current) then
+            if target and not same and create and not creating[target.name] and Game.Restorable(current, book) then
                 if charCount == nil then
                     target, why = nil, "macros unreadable"
                 elseif charCount + #plan.creates >= Game.MAX_CHAR_MACROS then
@@ -298,8 +309,13 @@ function Loadout.Plan(entry)
                 plan.skips[#plan.skips + 1] = { slot = slot, reason = why }
             elseif same then
                 if want and not target then plan.waiting[#plan.waiting + 1] = { slot = slot, reason = why, want = want } end
-            elseif not Game.Restorable(current) then
-                plan.skips[#plan.skips + 1] = { slot = slot, reason = "slot holds something this slice can't put back" }
+            elseif not Game.Restorable(current, book) then
+                -- Only the loadout's own slots are listed (and so recorded as
+                -- unavailable): a loadout-empty slot holding a mount is
+                -- simply not this load's business.
+                if want then
+                    plan.skips[#plan.skips + 1] = { slot = slot, reason = "slot holds something this slice can't put back" }
+                end
             else
                 local unusable = want ~= nil and target == nil
                 plan.actions[#plan.actions + 1] = { slot = slot, target = target, current = current,
@@ -328,11 +344,12 @@ local function Snapshot(plan, reason)
     local Game = G()
     local snap = { reason = reason, actions = {}, keys = {}, createdMacros = {},
                    characterBindings = Game.CharacterBindings() }
+    local book = Game.Spellbook()
     for _, op in ipairs(plan.actions) do
         local a = Game.ActionAt(op.slot)
         -- A slot read that fails (or reads back something this slice can't
         -- put back) means no backup, so no writes.
-        if not Game.Restorable(a) then return nil end
+        if not Game.Restorable(a, book) then return nil end
         snap.actions[op.slot] = a or false
     end
     for key in pairs(plan.keys) do
@@ -923,7 +940,7 @@ function Loadout.PlanRestore(which)
         else
             why = "not restorable"
         end
-        if not why and not Game.SameAction(current, target) and not Game.Restorable(current) then
+        if not why and not Game.SameAction(current, target) and not Game.Restorable(current, book) then
             why = "slot now holds something that couldn't be put back"
         end
         if why and not Game.IS_SLOT[slot] then

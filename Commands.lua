@@ -163,7 +163,7 @@ function Commands.Describe(plan)
         lines[#lines + 1] = ("Kept: %s that load created (not deleted)."):format(Plural(#plan.kept, "macro"))
     end
     lines[#lines + 1] = plan.kind == "restore" and "Restore exact captured values. A backup is taken first."
-        or "Backup first. Verify every write. Slots this character can't use yet are emptied."
+        or "Backup first. Verify every write."
     return lines
 end
 
@@ -293,7 +293,16 @@ function Commands.save(arg)
     for _, slot in ipairs(m.changed) do
         local was, now = (m.before or {})[slot], m.modules.actions[slot]
         local text = ("%s -> %s"):format(DescribeAction(was), DescribeAction(now))
-        if DescribeAction(was) == DescribeAction(now) then text = DescribeAction(now) .. " (macro text or icon changed)" end
+        if DescribeAction(was) == DescribeAction(now) then
+            local why = "changed"
+            if was and now and was.kind == "macro" and now.kind == "macro" then
+                why = was.scope ~= now.scope and ("now a " .. (now.scope == "char" and "character" or "account") .. " macro")
+                    or "macro text or icon changed"
+            elseif was and now and was.kind == "spell" and now.kind == "spell" then
+                why = "rank or rank policy changed"
+            end
+            text = ("%s (%s)"):format(DescribeAction(now), why)
+        end
         items[#items + 1] = { slot = slot, text = text }
     end
     BySlot(lines, items)
