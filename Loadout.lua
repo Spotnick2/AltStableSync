@@ -399,6 +399,16 @@ end
 -- Load
 ------------------------------------------------------------
 
+local function Copy(v) return ASS.Catalog.Copy(v) end
+
+-- This character's one loaded-loadout record (docs/DESIGN.md data model),
+-- written by Load, Save and Save As. `unavailable` only goes with `after`.
+local function Record(e, modules, after, unavailable, result)
+    ASS.char.loaded = ASS.char.loaded or {}
+    ASS.char.loaded.loadout = { id = e.id, version = e.version, baseline = Copy(modules),
+                                after = after, unavailable = after and (unavailable or {}) or nil, result = result }
+end
+
 -- Apply the plan the player confirmed. `shown` is that plan; `abandon` is
 -- the player's answer to "Abandon the incomplete load of X?".
 function Loadout.Load(entry, shown, abandon)
@@ -415,14 +425,26 @@ function Loadout.Load(entry, shown, abandon)
     local function abandonPinned()
         if pinned then ASS.Backups.Release(); ASS.char.interrupted = nil end
     end
-    local function record(result)
-        ASS.char.loaded = ASS.char.loaded or {}
-        ASS.char.loaded.loadout = { id = entry.id, version = entry.version,
-                                    baseline = ASS.Catalog.Copy(entry.modules), result = result }
+    -- One record per kind (docs/DESIGN.md "Preserve intent on Save"). Only a
+    -- COMPLETED load also records `after` (what the slots and keys hold now,
+    -- for Save to compare against) and `unavailable` (the entries this
+    -- character couldn't use). A failed load replaces the whole record, so an
+    -- older `after` never outlives a newer failed load.
+    local function record(result, complete)
+        local after = complete and Loadout.Capture() or nil
+        local unavailable
+        if after then
+            -- Keys are compared only against Character keys: under Account
+            -- bindings this character's own keys aren't what we read.
+            if not G().CharacterBindings() then after.bindings = nil end
+            unavailable = {}
+            for _, s in ipairs(plan.skips) do unavailable[s.slot] = s.reason end
+        end
+        Record(entry, entry.modules, after, unavailable, result)
     end
     if plan.noop then
         abandonPinned()
-        record({ noop = true, skips = plan.skips })
+        record({ noop = true, skips = plan.skips }, true)
         return { noop = true, skips = plan.skips, changed = 0, created = 0, keys = 0 }
     end
     local snap = Snapshot(plan, "load " .. tostring(entry.name))
@@ -432,7 +454,7 @@ function Loadout.Load(entry, shown, abandon)
     if not ok then return nil, err end
     local result = Execute(plan, snap)
     result.skips = plan.skips
-    record(result)
+    record(result, not result.failed)
     if result.failed then
         ASS.char.interrupted = { id = entry.id, version = entry.version, why = result.failed, at = result.at }
         return result
@@ -440,6 +462,276 @@ function Loadout.Load(entry, shown, abandon)
     ASS.char.interrupted = nil
     ASS.Backups.Release()
     return result
+end
+
+------------------------------------------------------------
+-- Save and Save As: preserve intent (#28, docs/DESIGN.md "Preserve intent")
+------------------------------------------------------------
+
+-- Two key lists hold the same keys (order and nil vs {} don't matter).
+local function SameKeys(a, b)
+    local x, y = {}, {}
+    for _, k in ipairs(a or {}) do x[#x + 1] = k end
+    for _, k in ipairs(b or {}) do y[#y + 1] = k end
+    table.sort(x); table.sort(y)
+    return table.concat(x, "\0") == table.concat(y, "\0")
+end
+
+local function CharMacro(mods, name) return mods and mods.macros and mods.macros[name] end
+
+-- A character macro's icon as this slot last saw it: a comparison slot
+-- carries its own (frozen slots and advancing ones can share a name).
+local function MacroIcon(act, mods)
+    if act.icon ~= nil then return act.icon end
+    local d = CharMacro(mods, act.name)
+    return d and d.icon
+end
+
+-- Save's own "unchanged since the load?": action identity, plus a character
+-- macro's body and icon (an icon-only edit is a change). Game.SameAction is
+-- left as it is: it verifies writes.
+local function SaveSame(c, a, cMods, aMods)
+    if c == nil or a == nil then return c == a end
+    if c.kind ~= a.kind then return false end
+    if c.kind == "macro" then
+        local Game = G()
+        if c.name ~= a.name or c.scope ~= a.scope or Game.Normalize(c.body or "") ~= Game.Normalize(a.body or "") then
+            return false
+        end
+        if c.scope == "char" and MacroIcon(c, cMods) ~= MacroIcon(a, aMods) then return false end
+        return true
+    end
+    return c.id == a.id
+end
+
+local function Unsupported(a) return a ~= nil and a.kind == "unsupported" end
+
+-- The merge (pure). `rec` is the loaded record (baseline B, after A,
+-- unavailable), `current` a fresh Capture() (C). Per slot:
+--   C unreadable or ambiguous            -> B, and A stays the comparison
+--   A unreadable, slot skipped at load   -> B, and A stays the comparison
+--   C same as A (unchanged since then)   -> B: the inherited intent
+--   C empty, slot unavailable at load    -> B (an emptied skipped destination)
+--   anything else                        -> C (a deliberate change)
+-- `drop`: unavailable slots stop being covered instead (nil never erases
+-- another character's slot). Modules, slots and commands this build doesn't
+-- capture are kept from B as they are (A35). Returns nil plus a reason on a
+-- macro or key clash.
+function Loadout.Merge(rec, current, characterBindings, drop)
+    local Game = G()
+    local B, A = rec.baseline or {}, rec.after or {}
+    local bAct, aAct, cAct = B.actions or {}, A.actions or {}, current.actions or {}
+    local was = rec.unavailable or {}
+    local first, last = Game.SLOTS.first, Game.SLOTS.last
+    local out = Copy(B)
+    local actions, src, adv, advSrc = {}, {}, {}, {}
+    local kept, dropped, unavailable, changed, gone = {}, {}, {}, {}, {}
+    for slot, b in pairs(bAct) do
+        if type(slot) ~= "number" or slot < first or slot > last then actions[slot], src[slot] = Copy(b), "B" end
+    end
+    for slot = first, last do
+        local b, a, c = bAct[slot], aAct[slot], cAct[slot]
+        local keepB, keepA, why = false, false, nil
+        if Unsupported(c) then keepB, keepA, why = true, true, "couldn't read this slot"
+        -- An unreadable A only hides an edit where the load skipped the slot;
+        -- where the load placed B, a readable C is what is there now.
+        elseif Unsupported(a) and was[slot] then keepB, keepA = true, true
+        elseif SaveSame(c, a, current, A) then keepB = true
+        elseif c == nil and was[slot] then keepB = true
+        end
+        if keepB and drop and was[slot] and b ~= nil then
+            dropped[#dropped + 1], gone[slot] = { slot = slot, want = b, reason = was[slot] }, true
+        elseif keepB then
+            actions[slot], src[slot] = Copy(b), "B"
+            if b ~= nil and was[slot] then
+                unavailable[slot] = was[slot]
+                kept[#kept + 1] = { slot = slot, want = b, reason = was[slot] }
+            elseif b ~= nil and why then
+                kept[#kept + 1] = { slot = slot, want = b, reason = why }
+            end
+        else
+            actions[slot], src[slot] = Copy(c), "C"
+        end
+        if keepA then adv[slot], advSrc[slot] = Copy(a), "A" else adv[slot], advSrc[slot] = Copy(c), "C" end
+    end
+
+    -- Character macros follow the slots that use them; one name, one body.
+    local slots = {}
+    for slot in pairs(actions) do if type(slot) == "number" then slots[#slots + 1] = slot end end
+    for slot = first, last do if actions[slot] == nil then slots[#slots + 1] = slot end end
+    table.sort(slots)
+    local macros, advMacros = {}, {}
+    for _, slot in ipairs(slots) do
+        local act = actions[slot]
+        if act and act.kind == "macro" and act.scope == "char" then
+            local def = CharMacro(src[slot] == "B" and B or current, act.name)
+            if def then
+                local have = macros[act.name]
+                if have and (Game.Normalize(have.body or "") ~= Game.Normalize(def.body or "") or have.icon ~= def.icon) then
+                    return nil, ("Macro %q differs between the loaded setup and this character; rename the macro here, then save.")
+                        :format(act.name)
+                end
+                macros[act.name] = Copy(def)
+            end
+        end
+        local x = adv[slot]
+        if x and x.kind == "macro" and x.scope == "char" then
+            local mods = advSrc[slot] == "A" and A or current
+            x.icon = MacroIcon(x, mods)
+            advMacros[x.name] = Copy(CharMacro(mods, x.name))
+        end
+    end
+
+    -- What the preview lists as changed: the slot's action, or the body or
+    -- icon of the character macro it uses. Dropped slots are listed apart.
+    for slot = first, last do
+        local x, b = actions[slot], bAct[slot]
+        local diff = Serialize(x) ~= Serialize(b)
+        if not diff and src[slot] == "C" and x and x.kind == "macro" and x.scope == "char" then
+            diff = Serialize(macros[x.name]) ~= Serialize(CharMacro(B, x.name))
+        end
+        if diff and not gone[slot] then changed[#changed + 1] = slot end
+    end
+
+    -- Keys: compared only against Character keys taken at a load (or a fresh
+    -- Save As) under Character bindings; a Save never sets the comparison.
+    local bB, aB, cB = B.bindings, A.bindings, current.bindings or {}
+    local notes, bindings, advB, keysChanged = {}, nil, nil, {}
+    local function differs()
+        for _, cmd in ipairs(Game.COMMANDS) do
+            if not SameKeys(cB[cmd], bB and bB[cmd]) then return true end
+        end
+        return false
+    end
+    if not characterBindings then
+        bindings, advB = Copy(bB), Copy(aB)
+        if differs() then notes[#notes + 1] = "Keys not saved: Account bindings are active." end
+    elseif not aB then
+        bindings = Copy(bB)
+        if differs() then
+            notes[#notes + 1] = "Key changes can't be saved yet: load this loadout with Character bindings active first."
+        end
+    else
+        bindings, advB = {}, Copy(cB)
+        local known, cmds = {}, {}
+        for _, cmd in ipairs(Game.COMMANDS) do known[cmd] = true end
+        for cmd, keys in pairs(bB or {}) do
+            if not known[cmd] then bindings[cmd] = Copy(keys) end
+        end
+        for _, cmd in ipairs(Game.COMMANDS) do
+            if SameKeys(cB[cmd], aB[cmd]) then
+                bindings[cmd] = Copy(bB and bB[cmd])
+            else
+                bindings[cmd] = Copy(cB[cmd])
+                if not SameKeys(cB[cmd], bB and bB[cmd]) then keysChanged[#keysChanged + 1] = cmd end
+            end
+        end
+        for cmd in pairs(bindings) do cmds[#cmds + 1] = cmd end
+        table.sort(cmds)
+        local owner = {}
+        for _, cmd in ipairs(cmds) do
+            for _, k in ipairs(bindings[cmd] or {}) do
+                if owner[k] and owner[k] ~= cmd then
+                    return nil, ("Key %s would be bound twice in the saved loadout; check your key bindings, then save."):format(k)
+                end
+                owner[k] = cmd
+            end
+        end
+    end
+
+    -- A module B doesn't have stays absent when nothing fills it, so an
+    -- unchanged entry is a noop whatever its shape.
+    local function orNil(t, had)
+        if had == nil and t ~= nil and next(t) == nil then return nil end
+        return t
+    end
+    out.actions, out.macros, out.bindings = orNil(actions, B.actions), orNil(macros, B.macros), orNil(bindings, B.bindings)
+    return {
+        modules = out,
+        noop = Serialize(out) == Serialize(B),
+        kept = kept, dropped = dropped, notes = notes,
+        changed = changed, keysChanged = keysChanged,
+        unavailable = unavailable,
+        advanced = { actions = adv, macros = advMacros, bindings = advB },
+    }
+end
+
+local function Provenance()
+    local name, realm = UnitFullName("player")
+    return { sourceChar = tostring(name) .. "-" .. tostring(realm), build = select(2, GetBuildInfo()) }
+end
+Loadout.Provenance = Provenance
+
+-- Save over the loaded entry: the merge, previewed. Only the entry this
+-- character has loaded, only at the version it loaded (A39).
+function Loadout.PlanSave(drop)
+    local rec = ASS.char and ASS.char.loaded and ASS.char.loaded.loadout
+    if not rec then return nil, "Load a loadout first. To save this character as it is, use /altsync saveas <name>." end
+    local entry = ASS.Catalog.Get(rec.id)
+    if not entry or entry.deleted or entry.conflict then
+        return nil, "The loaded loadout no longer exists. Use /altsync saveas <name>."
+    end
+    if entry.version ~= rec.version then
+        return nil, ("%q changed since you loaded it. Load it again, or use /altsync saveas <name>."):format(tostring(entry.name))
+    end
+    if not rec.after then return nil, "No usable comparison with the loaded setup. Load it again to save over it." end
+    local blocked = Loadout.Blocked()
+    if blocked then return nil, blocked end
+    local current, cerr = Loadout.Capture()
+    if not current then return nil, cerr end
+    local m, merr = Loadout.Merge(rec, current, G().CharacterBindings(), drop)
+    if not m then return nil, merr end
+    m.entry, m.drop = entry, drop or false
+    -- Everything the confirm commits: the entry and the new comparison.
+    m.fingerprint = Serialize({ id = entry.id, v = entry.version, m = m.modules, d = m.drop,
+                                a = m.advanced, u = m.unavailable })
+    return m
+end
+
+-- Apply the Save the player confirmed: recomputed, and refused unless it is
+-- exactly what the preview showed.
+function Loadout.Save(shown)
+    local m, err = Loadout.PlanSave(shown.drop)
+    if not m then return nil, err end
+    if m.fingerprint ~= shown.fingerprint then return nil, "Something changed since the preview: review it again." end
+    if m.noop then return nil, "Already saved." end
+    local r, rerr = ASS.Catalog.Replace(m.entry.id, m.modules, m.entry.version, Provenance())
+    if not r then return nil, rerr end
+    Record(r, m.modules, m.advanced, m.unavailable)
+    return r, m
+end
+
+-- What Save As would store. With a usable loaded record: the merge, so the
+-- fork keeps inherited content (A09). Without one, or when the merge refuses
+-- (a macro or key clash, given as `why`): a fresh capture, and `lossy` when a
+-- loaded record exists but can't be merged with.
+function Loadout.PlanSaveAs()
+    local blocked = Loadout.Blocked()
+    if blocked then return nil, blocked end
+    local current, cerr = Loadout.Capture()
+    if not current then return nil, cerr end
+    local rec = ASS.char and ASS.char.loaded and ASS.char.loaded.loadout
+    local why
+    if rec and rec.after then
+        local m, merr = Loadout.Merge(rec, current, G().CharacterBindings(), false)
+        if m then
+            return { modules = m.modules, after = m.advanced, unavailable = m.unavailable, kept = m.kept, notes = m.notes }
+        end
+        why = merr
+    end
+    local after = Copy(current)
+    if not G().CharacterBindings() then after.bindings = nil end
+    return { modules = current, after = after, unavailable = {}, kept = {}, notes = {}, lossy = rec ~= nil, why = why }
+end
+
+-- Create the new entry from a Save As plan, and make it this character's
+-- loaded record (the player keeps refining what they just created).
+function Loadout.SaveAs(p, name, category)
+    local e, err = ASS.Catalog.Create("loadout", { class = PlayerClass(), category = category or "general",
+        name = name, provenance = Provenance() }, p.modules)
+    if not e then return nil, err end
+    Record(e, p.modules, p.after, p.unavailable)
+    return e
 end
 
 ------------------------------------------------------------
@@ -522,6 +814,10 @@ function Loadout.Restore(which, shown)
         if not snap then return nil, "Couldn't read the current setup for the backup; nothing was changed." end
         ASS.Backups.PushRing(snap, ASS.Backups.Get(which))
         result = Execute(plan, snap)
+        -- The bars no longer hold what the last load left: Save must not read
+        -- the restore as edits, so the comparison goes (load again to save).
+        local rec = ASS.char.loaded and ASS.char.loaded.loadout
+        if rec then rec.after, rec.unavailable = nil, nil end
     end
     result.unavailable, result.kept = plan.unavailable, plan.kept
     result.keysBlocked = plan.keysBlocked
