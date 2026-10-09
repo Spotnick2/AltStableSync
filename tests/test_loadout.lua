@@ -1335,6 +1335,14 @@ do
                    after = { cover = FULL, actions = { [1] = { kind = "spell", id = 7 } }, bindings = { ACTIONBUTTON1 = { "1" } } } }
     local curF = { actions = { [1] = { kind = "spell", id = 9 } }, macros = {}, bindings = { ACTIONBUTTON1 = { "1" } } }
     local out = L.Merge(recF, curF, true)
+    -- #5: a slot with no comparison whose character macro changed only its
+    -- icon is kept from B, and the Save says it isn't saved.
+    local mac = { kind = "macro", name = "Far", scope = "char", body = "/x" }
+    local recS = { baseline = { cover = FULL, actions = { [30] = mac }, macros = { Far = { body = "/x", icon = 1 } } },
+                   after = { cover = { { 1, 12 } }, actions = {} } }
+    local outS = L.Merge(recS, { actions = { [30] = mac }, macros = { Far = { body = "/x", icon = 2 } }, bindings = {} }, true)
+    eq("#5 stale icon: B kept", outS and outS.modules.macros.Far.icon, 1)
+    check("#5 stale icon: noted", outS and outS.notes[1] and outS.notes[1]:find("1 slots differ", 1, true) ~= nil, outS and outS.notes[1])
     eq("outside slots: slot 130 kept", out and out.modules.actions[130] and out.modules.actions[130].name, "Far")
     eq("outside slots: its macro kept", out and out.modules.macros.Far and out.modules.macros.Far.body, "/x")
     eq("outside commands: kept", out and out.modules.bindings.MULTIACTIONBAR1BUTTON1[1], "F")
@@ -1364,9 +1372,9 @@ do
     L.Merge = function() return nil, "Macro clash here." end
     A._shown = nil
     A.Commands.saveas("Clash")
-    L.Merge = merge
     eq("saveas clash: warns with the reason", A._shown and A._shown.lines[1], "Macro clash here.")
     A._shown.onConfirm()
+    L.Merge = merge
     local made
     for _, e in ipairs(A.Catalog.List("loadout", "PRIEST", "general")) do if e.name == "Clash" then made = e end end
     check("saveas clash: saved on confirm", made ~= nil)
@@ -1626,6 +1634,17 @@ do
     A._shown = nil
     A.Commands.saveas("Widened")
     check("#5 old entry: Save As says it adds bars first", A._shown and A._shown.lines[1]:find("Adds", 1, true) ~= nil)
+    -- The confirm saves what was shown or nothing: a merge that refuses by
+    -- then (a new clash) must not turn into a plain capture.
+    local merge = L.Merge
+    L.Merge = function() return nil, "Macro clash here." end
+    WoW.chatLines = {}
+    A._shown.onConfirm()
+    L.Merge = merge
+    local widened
+    for _, x in ipairs(A.Catalog.List("loadout", "PRIEST", "general")) do if x.name == "Widened" then widened = x end end
+    eq("#5 widening confirm: changed plan refused", widened, nil)
+    check("#5 widening confirm: says so", table.concat(WoW.chat(), " "):find("changed since the preview", 1, true) ~= nil)
     check("#5 old entry: saved", L.Save(m) ~= nil)
     local e = A.Catalog.Get(entry.id)
     eq("#5 old entry: cover now every bar", R(e.modules.cover), "1-120,145-180")

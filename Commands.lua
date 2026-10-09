@@ -228,7 +228,16 @@ function Commands.saveas(arg)
         title = "Save As " .. tostring(arg) .. "?",
         lines = lines,
         confirm = "Save As",
-        onConfirm = function() SaveAs(arg) end,
+        -- The confirm saves what the preview showed, or nothing.
+        onConfirm = function()
+            local q, qerr = ASS.Loadout.PlanSaveAs()
+            if not q then Print("Not saved: " .. tostring(qerr)) return end
+            if ASS.Loadout.SaveAsFingerprint(q) ~= ASS.Loadout.SaveAsFingerprint(p) then
+                Print("Not saved: Something changed since the preview: review it again.")
+                return
+            end
+            SaveAs(arg, q)
+        end,
     })
 end
 

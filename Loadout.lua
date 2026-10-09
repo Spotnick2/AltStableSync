@@ -596,7 +596,12 @@ function Loadout.Merge(rec, current, characterBindings, drop)
         elseif not inA then
             if inB then
                 keepB, keepA = true, true
-                if Serialize(c) ~= Serialize(b) then stale = stale + 1 end
+                -- A character macro's body and icon count, as for `changed`.
+                local differs = Serialize(c) ~= Serialize(b)
+                if not differs and c and c.kind == "macro" and c.scope == "char" then
+                    differs = Serialize(CharMacro(current, c.name)) ~= Serialize(CharMacro(B, c.name))
+                end
+                if differs then stale = stale + 1 end
             end
         elseif not inB then         -- the entry never covered it: C
         -- An unreadable A only hides an edit where the load skipped the slot;
@@ -810,6 +815,14 @@ function Loadout.PlanSaveAs()
     local after = Copy(current)
     if not G().CharacterBindings() then after.bindings = nil end
     return { modules = current, after = after, unavailable = {}, kept = {}, notes = {}, lossy = rec ~= nil, why = why }
+end
+
+-- What a Save As preview froze: the content, the comparison it records, and
+-- whether it keeps or loses inherited entries. A confirm whose fresh plan
+-- differs is refused (#44), as Save's is.
+function Loadout.SaveAsFingerprint(p)
+    return Serialize({ m = p.modules, a = p.after, u = p.unavailable, l = p.lossy or false,
+                       n = p.added or 0 })
 end
 
 -- Create the new entry from a Save As plan, and make it this character's
