@@ -399,6 +399,16 @@ end
 -- Load
 ------------------------------------------------------------
 
+local function Copy(v) return ASS.Catalog.Copy(v) end
+
+-- This character's one loaded-loadout record (docs/DESIGN.md data model),
+-- written by Load, Save and Save As. `unavailable` only goes with `after`.
+local function Record(e, modules, after, unavailable, result)
+    ASS.char.loaded = ASS.char.loaded or {}
+    ASS.char.loaded.loadout = { id = e.id, version = e.version, baseline = Copy(modules),
+                                after = after, unavailable = after and (unavailable or {}) or nil, result = result }
+end
+
 -- Apply the plan the player confirmed. `shown` is that plan; `abandon` is
 -- the player's answer to "Abandon the incomplete load of X?".
 function Loadout.Load(entry, shown, abandon)
@@ -421,18 +431,16 @@ function Loadout.Load(entry, shown, abandon)
     -- character couldn't use). A failed load replaces the whole record, so an
     -- older `after` never outlives a newer failed load.
     local function record(result, complete)
-        local rec = { id = entry.id, version = entry.version,
-                      baseline = ASS.Catalog.Copy(entry.modules), result = result }
-        local after = complete and Loadout.Capture()
+        local after = complete and Loadout.Capture() or nil
+        local unavailable
         if after then
             -- Keys are compared only against Character keys: under Account
             -- bindings this character's own keys aren't what we read.
             if not G().CharacterBindings() then after.bindings = nil end
-            rec.after, rec.unavailable = after, {}
-            for _, s in ipairs(plan.skips) do rec.unavailable[s.slot] = s.reason end
+            unavailable = {}
+            for _, s in ipairs(plan.skips) do unavailable[s.slot] = s.reason end
         end
-        ASS.char.loaded = ASS.char.loaded or {}
-        ASS.char.loaded.loadout = rec
+        Record(entry, entry.modules, after, unavailable, result)
     end
     if plan.noop then
         abandonPinned()
@@ -459,8 +467,6 @@ end
 ------------------------------------------------------------
 -- Save and Save As: preserve intent (#28, docs/DESIGN.md "Preserve intent")
 ------------------------------------------------------------
-
-local function Copy(v) return ASS.Catalog.Copy(v) end
 
 -- Two key lists hold the same keys (order and nil vs {} don't matter).
 local function SameKeys(a, b)
@@ -498,31 +504,38 @@ local function Unsupported(a) return a ~= nil and a.kind == "unsupported" end
 -- The merge (pure). `rec` is the loaded record (baseline B, after A,
 -- unavailable), `current` a fresh Capture() (C). Per slot:
 --   C unreadable or ambiguous            -> B, and A stays the comparison
---   A unreadable (when it was taken)     -> B
+--   A unreadable, slot skipped at load   -> B, and A stays the comparison
 --   C same as A (unchanged since then)   -> B: the inherited intent
 --   C empty, slot unavailable at load    -> B (an emptied skipped destination)
 --   anything else                        -> C (a deliberate change)
 -- `drop`: unavailable slots stop being covered instead (nil never erases
--- another character's slot). Modules this build doesn't capture are kept
--- from B as they are. Returns nil plus a reason on a macro or key clash.
+-- another character's slot). Modules, slots and commands this build doesn't
+-- capture are kept from B as they are (A35). Returns nil plus a reason on a
+-- macro or key clash.
 function Loadout.Merge(rec, current, characterBindings, drop)
     local Game = G()
     local B, A = rec.baseline or {}, rec.after or {}
     local bAct, aAct, cAct = B.actions or {}, A.actions or {}, current.actions or {}
     local was = rec.unavailable or {}
+    local first, last = Game.SLOTS.first, Game.SLOTS.last
     local out = Copy(B)
     local actions, src, adv, advSrc = {}, {}, {}, {}
-    local kept, dropped, unavailable, changed = {}, {}, {}, {}
-    for slot = Game.SLOTS.first, Game.SLOTS.last do
+    local kept, dropped, unavailable, changed, gone = {}, {}, {}, {}, {}
+    for slot, b in pairs(bAct) do
+        if type(slot) ~= "number" or slot < first or slot > last then actions[slot], src[slot] = Copy(b), "B" end
+    end
+    for slot = first, last do
         local b, a, c = bAct[slot], aAct[slot], cAct[slot]
         local keepB, keepA, why = false, false, nil
         if Unsupported(c) then keepB, keepA, why = true, true, "couldn't read this slot"
-        elseif Unsupported(a) then keepB, why = true, "couldn't be compared since the load"
+        -- An unreadable A only hides an edit where the load skipped the slot;
+        -- where the load placed B, a readable C is what is there now.
+        elseif Unsupported(a) and was[slot] then keepB, keepA = true, true
         elseif SaveSame(c, a, current, A) then keepB = true
         elseif c == nil and was[slot] then keepB = true
         end
         if keepB and drop and was[slot] and b ~= nil then
-            dropped[#dropped + 1] = { slot = slot, want = b, reason = was[slot] }
+            dropped[#dropped + 1], gone[slot] = { slot = slot, want = b, reason = was[slot] }, true
         elseif keepB then
             actions[slot], src[slot] = Copy(b), "B"
             if b ~= nil and was[slot] then
@@ -535,12 +548,15 @@ function Loadout.Merge(rec, current, characterBindings, drop)
             actions[slot], src[slot] = Copy(c), "C"
         end
         if keepA then adv[slot], advSrc[slot] = Copy(a), "A" else adv[slot], advSrc[slot] = Copy(c), "C" end
-        if Serialize(actions[slot]) ~= Serialize(b) then changed[#changed + 1] = slot end
     end
 
     -- Character macros follow the slots that use them; one name, one body.
+    local slots = {}
+    for slot in pairs(actions) do if type(slot) == "number" then slots[#slots + 1] = slot end end
+    for slot = first, last do if actions[slot] == nil then slots[#slots + 1] = slot end end
+    table.sort(slots)
     local macros, advMacros = {}, {}
-    for slot = Game.SLOTS.first, Game.SLOTS.last do
+    for _, slot in ipairs(slots) do
         local act = actions[slot]
         if act and act.kind == "macro" and act.scope == "char" then
             local def = CharMacro(src[slot] == "B" and B or current, act.name)
@@ -557,6 +573,17 @@ function Loadout.Merge(rec, current, characterBindings, drop)
         if x and x.kind == "macro" and x.scope == "char" then
             advMacros[x.name] = Copy(CharMacro(advSrc[slot] == "A" and A or current, x.name))
         end
+    end
+
+    -- What the preview lists as changed: the slot's action, or the body or
+    -- icon of the character macro it uses. Dropped slots are listed apart.
+    for slot = first, last do
+        local x, b = actions[slot], bAct[slot]
+        local diff = Serialize(x) ~= Serialize(b)
+        if not diff and src[slot] == "C" and x and x.kind == "macro" and x.scope == "char" then
+            diff = Serialize(macros[x.name]) ~= Serialize(CharMacro(B, x.name))
+        end
+        if diff and not gone[slot] then changed[#changed + 1] = slot end
     end
 
     -- Keys: compared only against Character keys taken at a load (or a fresh
@@ -579,6 +606,11 @@ function Loadout.Merge(rec, current, characterBindings, drop)
         end
     else
         bindings, advB = {}, Copy(cB)
+        local known, cmds = {}, {}
+        for _, cmd in ipairs(Game.COMMANDS) do known[cmd] = true end
+        for cmd, keys in pairs(bB or {}) do
+            if not known[cmd] then bindings[cmd] = Copy(keys) end
+        end
         for _, cmd in ipairs(Game.COMMANDS) do
             if SameKeys(cB[cmd], aB[cmd]) then
                 bindings[cmd] = Copy(bB and bB[cmd])
@@ -587,8 +619,10 @@ function Loadout.Merge(rec, current, characterBindings, drop)
                 if not SameKeys(cB[cmd], bB and bB[cmd]) then keysChanged[#keysChanged + 1] = cmd end
             end
         end
+        for cmd in pairs(bindings) do cmds[#cmds + 1] = cmd end
+        table.sort(cmds)
         local owner = {}
-        for _, cmd in ipairs(Game.COMMANDS) do
+        for _, cmd in ipairs(cmds) do
             for _, k in ipairs(bindings[cmd] or {}) do
                 if owner[k] and owner[k] ~= cmd then
                     return nil, ("Key %s would be bound twice in the saved loadout; check your key bindings, then save."):format(k)
@@ -598,7 +632,13 @@ function Loadout.Merge(rec, current, characterBindings, drop)
         end
     end
 
-    out.actions, out.macros, out.bindings = actions, macros, bindings
+    -- A module B doesn't have stays absent when nothing fills it, so an
+    -- unchanged entry is a noop whatever its shape.
+    local function orNil(t, had)
+        if had == nil and t ~= nil and next(t) == nil then return nil end
+        return t
+    end
+    out.actions, out.macros, out.bindings = orNil(actions, B.actions), orNil(macros, B.macros), orNil(bindings, B.bindings)
     return {
         modules = out,
         noop = Serialize(out) == Serialize(B),
@@ -614,12 +654,6 @@ local function Provenance()
     return { sourceChar = tostring(name) .. "-" .. tostring(realm), build = select(2, GetBuildInfo()) }
 end
 Loadout.Provenance = Provenance
-
-local function Record(e, modules, after, unavailable)
-    ASS.char.loaded = ASS.char.loaded or {}
-    ASS.char.loaded.loadout = { id = e.id, version = e.version, baseline = Copy(modules),
-                                after = after, unavailable = unavailable or {} }
-end
 
 -- Save over the loaded entry: the merge, previewed. Only the entry this
 -- character has loaded, only at the version it loaded (A39).
@@ -659,22 +693,26 @@ function Loadout.Save(shown)
 end
 
 -- What Save As would store. With a usable loaded record: the merge, so the
--- fork keeps inherited content (A09). Without one: a fresh capture, and
--- `lossy` when a loaded record exists but can't be compared against.
+-- fork keeps inherited content (A09). Without one, or when the merge refuses
+-- (a macro or key clash, given as `why`): a fresh capture, and `lossy` when a
+-- loaded record exists but can't be merged with.
 function Loadout.PlanSaveAs()
     local blocked = Loadout.Blocked()
     if blocked then return nil, blocked end
     local current, cerr = Loadout.Capture()
     if not current then return nil, cerr end
     local rec = ASS.char and ASS.char.loaded and ASS.char.loaded.loadout
+    local why
     if rec and rec.after then
         local m, merr = Loadout.Merge(rec, current, G().CharacterBindings(), false)
-        if not m then return nil, merr end
-        return { modules = m.modules, after = m.advanced, unavailable = m.unavailable, kept = m.kept, notes = m.notes }
+        if m then
+            return { modules = m.modules, after = m.advanced, unavailable = m.unavailable, kept = m.kept, notes = m.notes }
+        end
+        why = merr
     end
     local after = Copy(current)
     if not G().CharacterBindings() then after.bindings = nil end
-    return { modules = current, after = after, unavailable = {}, kept = {}, notes = {}, lossy = rec ~= nil }
+    return { modules = current, after = after, unavailable = {}, kept = {}, notes = {}, lossy = rec ~= nil, why = why }
 end
 
 -- Create the new entry from a Save As plan, and make it this character's
@@ -767,6 +805,10 @@ function Loadout.Restore(which, shown)
         if not snap then return nil, "Couldn't read the current setup for the backup; nothing was changed." end
         ASS.Backups.PushRing(snap, ASS.Backups.Get(which))
         result = Execute(plan, snap)
+        -- The bars no longer hold what the last load left: Save must not read
+        -- the restore as edits, so the comparison goes (load again to save).
+        local rec = ASS.char.loaded and ASS.char.loaded.loadout
+        if rec then rec.after, rec.unavailable = nil, nil end
     end
     result.unavailable, result.kept = plan.unavailable, plan.kept
     result.keysBlocked = plan.keysBlocked

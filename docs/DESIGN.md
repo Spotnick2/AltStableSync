@@ -345,7 +345,7 @@ captures again (C) and merges per slot against the baseline B and `after` A:
 | C | Saved |
 |---|---|
 | unreadable or ambiguous | B; A stays the comparison |
-| A was unreadable | B |
+| A was unreadable, at a slot the load skipped | B; A stays the comparison |
 | same as A (action, plus a character macro's body and icon) | B |
 | empty, and the slot was unavailable at load | B |
 | anything else | C, with its captured policy |
@@ -355,9 +355,12 @@ captures again (C) and merges per slot against the baseline B and `after` A:
   loaded keys are kept and the preview says why.
 - **Two slots needing different bodies under one macro name, or one key on two commands, refuse
   the Save.** There is no renaming.
-- **Modules this build doesn't capture are kept from B as they are** (A35).
-- **No usable comparison** means a failed load, a failed post-load capture, or a record from an older
-  build. Save is then refused, and Save As warns before a plain capture, without guessing a count.
+- **Modules, slots and commands this build doesn't capture are kept from B as they are** (A35).
+- **No usable comparison** means a failed load, a failed post-load capture, a Restore since the
+  load, or a record from an older build. Save is then refused, and Save As warns before a plain
+  capture, without guessing a count. Save As does the same when the merge refuses on a clash.
+- **The preview lists** each changed slot (a character macro's body or icon counts), each changed
+  key, the entries kept, and with `save drop` the entries left out.
 - **The preview is frozen:** the confirm re-captures and refuses on any difference. A Save then
   advances the record (baseline = saved, A = this capture, keeping the old A where C was unreadable),
   and the `unavailable` set carries forward.

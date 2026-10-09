@@ -1176,13 +1176,19 @@ do
     local curK = { actions = {}, bindings = { ACTIONBUTTON1 = { "X" }, ACTIONBUTTON2 = { "Q" } } }
     out, why = L.Merge(recK, curK, true)
     eq("key clash: refused", out, nil)
-    -- Pure merge: a slot that was unreadable when the comparison was taken
-    -- keeps B even once it reads as something.
+    -- Pure merge: a slot that was unreadable when the comparison was taken.
+    -- Where the load skipped it, B is kept and A stays the comparison; where
+    -- the load placed B, a readable C is what is there now.
     local recU = { baseline = { actions = { [1] = { kind = "spell", id = 7, name = "X", policy = "highest" } } },
-                   after = { actions = { [1] = { kind = "unsupported", what = "unreadable" } } } }
+                   after = { actions = { [1] = { kind = "unsupported", what = "unreadable" } } },
+                   unavailable = { [1] = "not learned" } }
     local curU = { actions = { [1] = { kind = "spell", id = 8, name = "Y", policy = "highest" } }, bindings = {} }
     out = L.Merge(recU, curU, true)
-    eq("unreadable at load: B kept", out and out.modules.actions[1].id, 7)
+    eq("unreadable at a skipped slot: B kept", out and out.modules.actions[1].id, 7)
+    eq("unreadable at a skipped slot: A stays", out and out.advanced.actions[1].kind, "unsupported")
+    recU.unavailable = {}
+    out = L.Merge(recU, curU, true)
+    eq("unreadable at a placed slot: C saved", out and out.modules.actions[1].id, 8)
     check("key clash: says so", tostring(why):find("bound twice", 1, true) ~= nil, why)
 end
 
@@ -1308,6 +1314,72 @@ do
     A._shown = nil
     A.Commands.saveas("Old copy")
     check("old record: Save As warns", A._shown ~= nil)
+end
+
+-- Code review on #41.
+do
+    -- Slots, commands and macros outside this build's set survive a Save.
+    local far = { kind = "macro", name = "Far", scope = "char", body = "/x" }
+    local recF = { baseline = { actions = { [1] = { kind = "spell", id = 7 }, [13] = far },
+                                macros = { Far = { body = "/x", icon = 1 } },
+                                bindings = { ACTIONBUTTON1 = { "1" }, MULTIACTIONBAR1BUTTON1 = { "F" } } },
+                   after = { actions = { [1] = { kind = "spell", id = 7 } }, bindings = { ACTIONBUTTON1 = { "1" } } } }
+    local curF = { actions = { [1] = { kind = "spell", id = 9 } }, macros = {}, bindings = { ACTIONBUTTON1 = { "1" } } }
+    local out = L.Merge(recF, curF, true)
+    eq("outside slots: slot 13 kept", out and out.modules.actions[13] and out.modules.actions[13].name, "Far")
+    eq("outside slots: its macro kept", out and out.modules.macros.Far and out.modules.macros.Far.body, "/x")
+    eq("outside commands: kept", out and out.modules.bindings.MULTIACTIONBAR1BUTTON1[1], "F")
+    eq("outside commands: in-range change still saved", out and out.modules.actions[1].id, 9)
+    -- An entry without some modules is still a noop when nothing changed.
+    local recN = { baseline = { actions = { [1] = { kind = "spell", id = 7 } } },
+                   after = { actions = { [1] = { kind = "spell", id = 7 } } } }
+    out = L.Merge(recN, { actions = { [1] = { kind = "spell", id = 7 } }, macros = {}, bindings = { ACTIONBUTTON1 = {} } }, true)
+    check("missing modules: noop", out and out.noop)
+
+    -- An icon-only macro edit is listed as a changed slot.
+    loadedAlt()
+    for _, mm in ipairs(G.char) do if mm.name == "Shield" then mm.icon = 999 end end
+    local m = L.PlanSave()
+    eq("icon edit: one slot listed", m and #m.changed, 1)
+
+    -- A restore since the load removes the comparison.
+    loadedAlt()
+    L.Restore(1, L.PlanRestore(1))
+    local m2, why = L.PlanSave()
+    check("restore: Save refused", m2 == nil and tostring(why):find("No usable comparison", 1, true) ~= nil, why)
+
+    -- Save As falls back to a warned plain capture when the merge refuses.
+    loadedAlt()
+    local merge = L.Merge
+    L.Merge = function() return nil, "Macro clash here." end
+    A._shown = nil
+    A.Commands.saveas("Clash")
+    L.Merge = merge
+    eq("saveas clash: warns with the reason", A._shown and A._shown.lines[1], "Macro clash here.")
+    A._shown.onConfirm()
+    local made
+    for _, e in ipairs(A.Catalog.List("loadout", "PRIEST", "general")) do if e.name == "Clash" then made = e end end
+    check("saveas clash: saved on confirm", made ~= nil)
+
+    -- Save As plans once.
+    loadedAlt()
+    local cap, n = L.Capture, 0
+    L.Capture = function(...) n = n + 1 return cap(...) end
+    A.Commands.saveas("Once")
+    L.Capture = cap
+    eq("saveas: one capture", n, 1)
+
+    -- The preview lists the changed keys; a dropped slot is listed once.
+    loadedAlt()
+    eq("load record: result kept", rec().result ~= nil, true)
+    G.keys["3"] = "ACTIONBUTTON3"
+    A._shown = nil
+    A.Commands.save("drop")
+    local text = table.concat(A._shown.lines, "\n")
+    check("preview: key listed", text:find("ACTIONBUTTON3: 3", 1, true) ~= nil, text)
+    local _, n8 = text:gsub("slot 8:", "")
+    eq("preview: dropped slot listed once", n8, 1)
+    G.keys["3"] = nil
 end
 
 -- Commands: the preview is frozen; no record means Save As; fresh Save As sets the record.

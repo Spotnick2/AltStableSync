@@ -72,10 +72,10 @@ local COPY = {
 local function Copy(err) return COPY[err] or tostring(err) end
 
 local function DescribeAction(a)
-    if not a then return "empty" end
+    if type(a) ~= "table" then return "empty" end
     if a.kind == "spell" then
         local name = C_Spell.GetSpellName and C_Spell.GetSpellName(a.id)
-        return tostring(name or ("spell " .. a.id))
+        return tostring(name or a.name or ("spell " .. tostring(a.id)))
     end
     if a.kind == "item" then return "item " .. tostring(a.id) end
     if a.kind == "macro" then return "macro " .. tostring(a.name) end
@@ -161,19 +161,11 @@ local function Report(kind, result, err)
     Print(msg)
 end
 
--- A wanted action, for a preview line.
-local function Want(w)
-    if type(w) ~= "table" then return "empty" end
-    if w.kind == "spell" then return tostring(w.name or ("spell " .. tostring(w.id))) end
-    if w.kind == "item" then return "item " .. tostring(w.id) end
-    if w.kind == "macro" then return "macro " .. tostring(w.name) end
-    return tostring(w.what or w.kind)
-end
-
 local function Count(t) local n = 0; for _ in pairs(t or {}) do n = n + 1 end; return n end
 
-local function SaveAs(arg)
-    local p, err = ASS.Loadout.PlanSaveAs()
+local function SaveAs(arg, p)
+    local err
+    if not p then p, err = ASS.Loadout.PlanSaveAs() end
     if not p then Print("Not saved: " .. tostring(err)) return end
     local e, cerr = ASS.Loadout.SaveAs(p, arg)
     if not e then Print("Not saved: " .. Copy(cerr)) return end
@@ -188,16 +180,16 @@ local function SaveAs(arg)
 end
 
 -- Save As keeps what the loaded setup had and this character can't use
--- (A09). Only when the last load left nothing to compare against does it
--- become a plain capture, and then it says so first, whatever the count.
+-- (A09). Only when the last load left nothing to compare against, or the
+-- merge refuses, does it become a plain capture, and then it says so first.
 function Commands.saveas(arg)
     local p, err = ASS.Loadout.PlanSaveAs()
     if not p then Print("Not saved: " .. tostring(err)) return end
-    if not p.lossy then return SaveAs(arg) end
+    if not p.lossy then return SaveAs(arg, p) end
     ASS.Preview.Show({
         title = "Save As " .. tostring(arg) .. "?",
         lines = {
-            "No usable comparison with the loaded setup (its load didn't finish, or it was loaded by an older version).",
+            p.why or "No usable comparison with the loaded setup (its load didn't finish, it was restored over, or it was loaded by an older version).",
             "Save As captures this character as it is now, and may leave out entries it inherited.",
         },
         confirm = "Save As",
@@ -222,16 +214,20 @@ function Commands.save(arg)
     end
     local lines = { ("%s and %s change in %q."):format(Plural(#m.changed, "slot"), Plural(#m.keysChanged, "key"), name) }
     for _, slot in ipairs(m.changed) do
-        lines[#lines + 1] = ("  slot %d: %s"):format(slot, Want(m.modules.actions[slot]))
+        lines[#lines + 1] = ("  slot %d: %s"):format(slot, DescribeAction(m.modules.actions[slot]))
+    end
+    for _, cmd in ipairs(m.keysChanged) do
+        local keys = m.modules.bindings and m.modules.bindings[cmd] or {}
+        lines[#lines + 1] = ("  %s: %s"):format(cmd, #keys > 0 and table.concat(keys, ", ") or "unbound")
     end
     if #m.kept > 0 then
         lines[#lines + 1] = ("Keeping %s this character can't use:"):format(Plural(#m.kept, "entry"):gsub("entrys", "entries"))
-        for _, k in ipairs(m.kept) do lines[#lines + 1] = ("  slot %d: %s (%s)"):format(k.slot, Want(k.want), k.reason) end
+        for _, k in ipairs(m.kept) do lines[#lines + 1] = ("  slot %d: %s (%s)"):format(k.slot, DescribeAction(k.want), k.reason) end
         if not drop then lines[#lines + 1] = "To leave the unusable ones out instead: /altsync save drop" end
     end
     if #m.dropped > 0 then
         lines[#lines + 1] = "Won't be kept (other characters' slots are left alone):"
-        for _, k in ipairs(m.dropped) do lines[#lines + 1] = ("  slot %d: %s (%s)"):format(k.slot, Want(k.want), k.reason) end
+        for _, k in ipairs(m.dropped) do lines[#lines + 1] = ("  slot %d: %s (%s)"):format(k.slot, DescribeAction(k.want), k.reason) end
     end
     for _, n in ipairs(m.notes) do lines[#lines + 1] = n end
     lines[#lines + 1] = "Other characters keep their current setup until they load this version."
