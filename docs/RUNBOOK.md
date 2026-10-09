@@ -63,8 +63,9 @@ Save As still works, but it warns that it captures the character as it is.
 
 ## Bars, stances and forms
 
-A loadout covers Action Bars 1–8 (both pages of Action Bar 1) and the four stance/form pages, hidden
-bars included (measured on 70291, #5). Stance and form pages are written by slot whatever form the
+A loadout's actions cover Action Bars 1–8 (both pages of Action Bar 1) and the four stance/form pages,
+hidden bars included (measured on 70291, #5). Its **keys** still cover Action Bar 1's buttons only
+(`ACTIONBUTTON1–12`); keys for the other bars come with #7. Stance and form pages are written by slot whatever form the
 character is in; changing form never saves or loads anything. The preview names them "Stance/form
 page 1–4" until a character with forms measures which is which (`/syncprobe bars <label>` in each
 form).

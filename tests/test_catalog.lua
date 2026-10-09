@@ -150,6 +150,17 @@ do
     eq("A44: undo descends from the bad save", e.ancestors[1], v1)
     eq("A44: not repeatable", select(2, C.UndoLastSave(e.id, e.version)), "no-undo")
 
+    -- #5: loadout content without a valid cover is never stored or promoted.
+    eq("#5: create without cover", select(2, C.Create("loadout", { class = "PRIEST", category = "holy",
+        name = "NoCover" }, { actions = {} })), "bad-modules")
+    eq("#5: replace without cover", select(2, C.Replace(e.id, { actions = {} }, e.version)), "bad-modules")
+    C.Replace(e.id, mods("v2"), e.version)
+    e.previous.modules.cover = nil                          -- a hand edit
+    local vNow = e.version
+    eq("#5: undo of a cover-less previous refused", select(2, C.UndoLastSave(e.id, e.version)), "bad-modules")
+    eq("#5: entry unchanged", e.version, vNow)
+    eq("#5: content unchanged", e.modules.actions[1].spell, "v2")
+
     -- Rename: validated and versioned.
     loadout("PRIEST", "discipline", "Raid", "x")
     local before = e.version
@@ -377,8 +388,16 @@ do
     sync(a, b)
     eq("conflict: repeated exchange, still one copy", liveConflicts(a), 1)
 
-    -- Resolve on A: keep theirs.
+    -- Resolve on A: keep theirs. A copy whose content lost its cover (a hand
+    -- edit) is refused first, and nothing changes (#5).
     use(a)
+    local cp = a.db.presets[copyOnA]
+    local cov = cp.modules.cover
+    cp.modules.cover = nil
+    local vRoot = root(a, id).version
+    eq("#5: resolve theirs, cover-less copy refused", select(2, C.Resolve(copyOnA, "theirs", vRoot)), "bad-modules")
+    eq("#5: resolve refused, root unchanged", root(a, id).version, vRoot)
+    cp.modules.cover = cov
     local r = C.Resolve(copyOnA, "theirs", root(a, id).version)
     check("resolve: ok", r ~= nil)
     eq("resolve: theirs content", root(a, id).modules.actions[1].spell, "B")

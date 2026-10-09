@@ -68,6 +68,7 @@ local COPY = {
     ["conflict-copy"] = "That is a conflict copy: settle it with /altsync resolve.",
     ["not-conflict"] = "That conflict was already settled.",
     ["rename-empty"] = "Give it a name: /altsync rename <id or name> <new name>.",
+    ["bad-modules"] = "Its saved data is damaged (no list of covered slots); nothing was changed.",
 }
 local function Copy(err) return COPY[err] or tostring(err) end
 
@@ -87,16 +88,15 @@ end
 -- the preview scrolls.
 local function BySlot(lines, items)
     table.sort(items, function(a, b) return a.slot < b.slot end)
-    local Game = ASS.Game
+    for _, it in ipairs(items) do it.bar, it.button = ASS.Game.SlotLabel(it.slot) end
     local i = 1
     while i <= #items do
-        local bar = Game.SlotLabel(items[i].slot)
         local j = i
-        while j < #items and (Game.SlotLabel(items[j + 1].slot)) == bar do j = j + 1 end
-        lines[#lines + 1] = ("  %s (%d):"):format(bar, j - i + 1)
+        while j < #items and items[j + 1].bar == items[i].bar do j = j + 1 end
+        lines[#lines + 1] = ("  %s (%d):"):format(items[i].bar, j - i + 1)
         for k = i, j do
-            local _, button = Game.SlotLabel(items[k].slot)
-            lines[#lines + 1] = (button and ("    button %d: "):format(button) or "    ") .. items[k].text
+            local b = items[k].button
+            lines[#lines + 1] = (b and ("    button %d: "):format(b) or "    ") .. items[k].text
         end
         i = j + 1
     end
@@ -210,13 +210,23 @@ end
 function Commands.saveas(arg)
     local p, err = ASS.Loadout.PlanSaveAs()
     if not p then Print("Not saved: " .. tostring(err)) return end
-    if not p.lossy then return SaveAs(arg, p) end
-    ASS.Preview.Show({
-        title = "Save As " .. tostring(arg) .. "?",
+    if not p.lossy and (p.added or 0) == 0 then return SaveAs(arg, p) end
+    local lines
+    if p.lossy then
         lines = {
             p.why or "No usable comparison with the loaded setup (its load didn't finish, it was restored over, or it was loaded by an older version).",
             "Save As captures this character as it is now, and may leave out entries it inherited.",
-        },
+        }
+    else
+        lines = {
+            ("Adds %s the loaded setup didn't cover yet (%d with an action), from this character's bars."):format(
+                Plural(p.added, "slot"), p.addedFull or 0),
+            "Everything the loaded setup has is kept, as it would be on Save.",
+        }
+    end
+    ASS.Preview.Show({
+        title = "Save As " .. tostring(arg) .. "?",
+        lines = lines,
         confirm = "Save As",
         onConfirm = function() SaveAs(arg) end,
     })

@@ -16,6 +16,7 @@ dofile("tests/wow_stubs.lua")
 dofile("tests/wow_game.lua")
 
 local G = WoW.game
+local FULL = { { 1, 120 }, { 145, 180 } }   -- every measured slot (#5)
 local A, L
 
 -- Spells: Flash Heal r1/r2, Lesser Heal r1/r2, Greater Heal (top), a future spell.
@@ -506,6 +507,7 @@ end
 -- Hand-made entries for the edge cases the review named
 ------------------------------------------------------------
 local function custom(modules)
+    modules.cover = modules.cover or FULL
     return assert(A.Catalog.Create("loadout", { class = "PRIEST", category = "general",
         name = "Custom " .. tostring(math.random(1, 1e9)) }, modules))
 end
@@ -1170,24 +1172,24 @@ do
     eq("macro body edit: saved", m.modules.macros.Shield.body, "/cast Renew")
     -- Pure merge: slot 1 keeps B's Heal, slot 2 takes C's different Heal.
     local mac = function(body) return { kind = "macro", name = "Heal", scope = "char", body = body } end
-    local recM = { baseline = { actions = { [1] = mac("/x"), [2] = mac("/x") }, macros = { Heal = { body = "/x" } } },
-                   after = { actions = { [1] = { kind = "item", id = 1 }, [2] = mac("/x") }, macros = { Heal = { body = "/x" } } },
+    local recM = { baseline = { cover = FULL, actions = { [1] = mac("/x"), [2] = mac("/x") }, macros = { Heal = { body = "/x" } } },
+                   after = { cover = FULL, actions = { [1] = { kind = "item", id = 1 }, [2] = mac("/x") }, macros = { Heal = { body = "/x" } } },
                    unavailable = { [1] = "slot holds something this slice can't put back" } }
     local cur = { actions = { [1] = { kind = "item", id = 1 }, [2] = mac("/y") }, macros = { Heal = { body = "/y" } }, bindings = {} }
     local out, why = L.Merge(recM, cur, true)
     eq("macro clash: refused", out, nil)
     check("macro clash: says so", tostring(why):find("differs", 1, true) ~= nil, why)
     -- Pure merge: a key that would end up on two commands is refused.
-    local recK = { baseline = { actions = {}, bindings = { ACTIONBUTTON1 = { "Q" } } },
-                   after = { actions = {}, bindings = { ACTIONBUTTON1 = { "X" }, ACTIONBUTTON2 = { "Y" } } } }
+    local recK = { baseline = { cover = FULL, actions = {}, bindings = { ACTIONBUTTON1 = { "Q" } } },
+                   after = { cover = FULL, actions = {}, bindings = { ACTIONBUTTON1 = { "X" }, ACTIONBUTTON2 = { "Y" } } } }
     local curK = { actions = {}, bindings = { ACTIONBUTTON1 = { "X" }, ACTIONBUTTON2 = { "Q" } } }
     out, why = L.Merge(recK, curK, true)
     eq("key clash: refused", out, nil)
     -- Pure merge: a slot that was unreadable when the comparison was taken.
     -- Where the load skipped it, B is kept and A stays the comparison; where
     -- the load placed B, a readable C is what is there now.
-    local recU = { baseline = { actions = { [1] = { kind = "spell", id = 7, name = "X", policy = "highest" } } },
-                   after = { actions = { [1] = { kind = "unsupported", what = "unreadable" } } },
+    local recU = { baseline = { cover = FULL, actions = { [1] = { kind = "spell", id = 7, name = "X", policy = "highest" } } },
+                   after = { cover = FULL, actions = { [1] = { kind = "unsupported", what = "unreadable" } } },
                    unavailable = { [1] = "not learned" } }
     local curU = { actions = { [1] = { kind = "spell", id = 8, name = "Y", policy = "highest" } }, bindings = {} }
     out = L.Merge(recU, curU, true)
@@ -1327,10 +1329,10 @@ end
 do
     -- Slots, commands and macros outside this build's set survive a Save.
     local far = { kind = "macro", name = "Far", scope = "char", body = "/x" }
-    local recF = { baseline = { actions = { [1] = { kind = "spell", id = 7 }, [130] = far },
+    local recF = { baseline = { cover = FULL, actions = { [1] = { kind = "spell", id = 7 }, [130] = far },
                                 macros = { Far = { body = "/x", icon = 1 } },
                                 bindings = { ACTIONBUTTON1 = { "1" }, MULTIACTIONBAR1BUTTON1 = { "F" } } },
-                   after = { actions = { [1] = { kind = "spell", id = 7 } }, bindings = { ACTIONBUTTON1 = { "1" } } } }
+                   after = { cover = FULL, actions = { [1] = { kind = "spell", id = 7 } }, bindings = { ACTIONBUTTON1 = { "1" } } } }
     local curF = { actions = { [1] = { kind = "spell", id = 9 } }, macros = {}, bindings = { ACTIONBUTTON1 = { "1" } } }
     local out = L.Merge(recF, curF, true)
     eq("outside slots: slot 130 kept", out and out.modules.actions[130] and out.modules.actions[130].name, "Far")
@@ -1396,8 +1398,8 @@ do
     -- using the same macro advances.
     local M = { kind = "macro", name = "M", scope = "char", body = "/m" }
     local fut = { kind = "spell", id = 7, name = "Future", policy = "highest" }
-    local rec1 = { baseline = { actions = { [1] = fut, [2] = M }, macros = { M = { body = "/m", icon = 1 } } },
-                   after = { actions = { [1] = M, [2] = M }, macros = { M = { body = "/m", icon = 1 } } },
+    local rec1 = { baseline = { cover = FULL, actions = { [1] = fut, [2] = M }, macros = { M = { body = "/m", icon = 1 } } },
+                   after = { cover = FULL, actions = { [1] = M, [2] = M }, macros = { M = { body = "/m", icon = 1 } } },
                    unavailable = { [1] = "not learned" } }
     local cur1 = { actions = { [1] = { kind = "unsupported", what = "unreadable" }, [2] = M },
                    macros = { M = { body = "/m", icon = 2 } }, bindings = {} }
@@ -1581,6 +1583,21 @@ do
     m = L.Capture()
     eq("#5: ladder across bars: low", m.actions[2].policy, "exact")
     eq("#5: ladder across bars: high", m.actions[40].policy, "highest")
+    -- Pages that take turns on Action Bar 1 never ladder with each other: a
+    -- warrior's stale rank under the stance page stays "highest".
+    G.actions[40] = nil
+    G.actions[73] = { kind = "spell", id = 2052 }
+    m = L.Capture()
+    eq("#5: rank under a stance page: not a ladder", m.actions[2].policy, "highest")
+    G.actions[73], G.actions[20] = nil, { kind = "spell", id = 2052 }
+    m = L.Capture()
+    eq("#5: rank on the other page: not a ladder", m.actions[2].policy, "highest")
+    -- A bar beside a stance page is on screen with it: that is a ladder.
+    G.actions[20] = nil
+    G.actions[73], G.actions[40] = { kind = "spell", id = 2050 }, { kind = "spell", id = 2052 }
+    m = L.Capture()
+    eq("#5: stance page beside a bar: ladder low", m.actions[73].policy, "exact")
+    eq("#5: stance page beside a bar: ladder high", m.actions[40].policy, "highest")
 end
 
 -- #5: an entry captured by a 1-12 build. Save adds the other bars once,
@@ -1606,6 +1623,9 @@ do
     local p = L.PlanSaveAs()
     eq("#5 old entry: Save As covers every bar", p and R(p.modules.cover), "1-120,145-180")
     eq("#5 old entry: Save As takes bar 5", p and p.modules.actions[40] and p.modules.actions[40].id, 4540)
+    A._shown = nil
+    A.Commands.saveas("Widened")
+    check("#5 old entry: Save As says it adds bars first", A._shown and A._shown.lines[1]:find("Adds", 1, true) ~= nil)
     check("#5 old entry: saved", L.Save(m) ~= nil)
     local e = A.Catalog.Get(entry.id)
     eq("#5 old entry: cover now every bar", R(e.modules.cover), "1-120,145-180")
@@ -1627,6 +1647,8 @@ do
     G.actions[10] = { kind = "spell", id = 2052 }           -- a real edit, so the Save happens
     local m = L.PlanSave()
     eq("#5 old comparison: inherited slot kept", m and m.modules.actions[30].id, 5512)
+    check("#5 old comparison: says to load again", m and m.notes[1] and m.notes[1]:find("load it again to save them", 1, true) ~= nil,
+          m and m.notes[1])
     check("#5 old comparison: saved", L.Save(m) ~= nil)
     check("#5 old comparison: still not covered by the comparison", not A.Cover.Has(rec().after.cover, 30))
     m = L.PlanSave()
@@ -1661,6 +1683,21 @@ local function unreadableThenReadable(viaSaveAs)
 end
 unreadableThenReadable(false)
 unreadableThenReadable(true)
+
+-- #5: a record without a valid cover is never guessed at.
+do
+    loadedAlt()
+    rec().baseline.cover = nil                              -- a hand edit
+    local m, why = L.PlanSave()
+    check("#5 damaged B: Save refused", m == nil and tostring(why):find("damaged", 1, true) ~= nil, why)
+    A._shown = nil
+    A.Commands.saveas("Fork3")
+    check("#5 damaged B: Save As warns with the reason", A._shown and A._shown.lines[1]:find("damaged", 1, true) ~= nil)
+    loadedAlt()
+    rec().after.cover = { { 5, 1 } }
+    m, why = L.PlanSave()
+    check("#5 malformed A: Save refused", m == nil and tostring(why):find("damaged", 1, true) ~= nil, why)
+end
 
 -- Commands: the preview is frozen; no record means Save As; fresh Save As sets the record.
 do

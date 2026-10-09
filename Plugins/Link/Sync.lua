@@ -84,6 +84,9 @@ function Sync.New(o)
     local function Incompatible(p, why)
         if why ~= "older-schema" and why ~= "newer-schema" then return false end
         p.schema = why
+        -- It can't read our requests: stop asking until it speaks our schema
+        -- (its next manifest queues what we still lack).
+        p.queue, p.queued, p.out = {}, {}, {}
         Once("schema:" .. p.guid .. ":" .. why, why == "older-schema"
             and ("Your other account (%s) runs an older AltStableSync: sync is paused until both are updated."):format(p.label)
             or ("Your other account (%s) runs a newer AltStableSync: update this one; sync is paused until then."):format(p.label))
@@ -279,7 +282,7 @@ function Sync.New(o)
         if asked and asked.version == rver then p.out[rid] = nil end
         local entry, why = Env.Decode(text)
         if not entry and Incompatible(p, why) then Pump(p) return end
-        p.schema = nil
+        if entry then p.schema = nil end       -- decoded at our schema: compatible
         if entry and (entry.id ~= rid or entry.version ~= rver) then entry, why = nil, "mismatch" end
         if not entry then
             -- Refused: don't ask for THAT version again this session.

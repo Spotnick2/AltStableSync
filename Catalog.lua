@@ -17,6 +17,7 @@
 -- Errors are short codes the UI turns into copy: unknown-id, deleted,
 -- conflict-copy, not-conflict, stale, name-empty, name-duplicate, bad-kind,
 -- bad-class, bad-category, bad-modules, bad-choice, no-undo, bad-entry.
+-- bad-modules also covers a loadout without a valid `cover` (#5).
 ------------------------------------------------------------
 
 AltStableSync = AltStableSync or {}
@@ -189,6 +190,12 @@ end
 -- A new entry. `keepKeys` is for keeping an entry that arrived from the other
 -- account: its class/category stay as they are, even keys this build doesn't
 -- know (a newer build's), exactly as the receive boundary accepted them.
+-- Content a loadout may hold: a table, with a valid cover (#5).
+local function GoodModules(kind, modules)
+    if type(modules) ~= "table" then return false end
+    return kind ~= "loadout" or ASS.Cover.Ok(modules)
+end
+
 local function NewEntry(kind, meta, modules, keepKeys)
     meta = meta or {}
     if kind ~= "ui" and kind ~= "loadout" then return nil, "bad-kind" end
@@ -203,7 +210,7 @@ local function NewEntry(kind, meta, modules, keepKeys)
             if not ASS.Categories.IsValid(class, category) then return nil, "bad-category" end
         end
     end
-    if type(modules) ~= "table" then return nil, "bad-modules" end
+    if not GoodModules(kind, modules) then return nil, "bad-modules" end
     local name, err = Catalog.ValidateName(kind, class, category, meta.name)
     if not name then return nil, err end
     local version, seq = Mint()
@@ -232,7 +239,7 @@ end
 function Catalog.Replace(id, modules, expectedVersion, provenance)
     local e, err = Editable(id, expectedVersion)
     if not e then return nil, err end
-    if type(modules) ~= "table" then return nil, "bad-modules" end
+    if not GoodModules(e.kind, modules) then return nil, "bad-modules" end
     local old = { modules = e.modules, updated = e.updated }
     Advance(e)
     e.previous = { of = e.version, modules = old.modules, updated = old.updated }
@@ -269,6 +276,7 @@ function Catalog.UndoLastSave(id, expectedVersion)
     if not e then return nil, err end
     local prev = e.previous
     if not prev or prev.of ~= e.version then return nil, "no-undo" end
+    if not GoodModules(e.kind, prev.modules) then return nil, "bad-modules" end
     Advance(e)
     e.modules = Copy(prev.modules)
     e.previous = nil
@@ -515,6 +523,7 @@ function Catalog.Resolve(copyId, choice, expectedRootVersion, newName)
         if choice == "theirs" then
             -- The chosen version whole: content, name and provenance. Only the
             -- root's identity and the new resolution version are ours.
+            if not GoodModules(root.kind, copy.modules) then return nil, "bad-modules" end
             Advance(root, both)
             root.modules = Copy(copy.modules)
             root.name = copy.conflict.name or root.name

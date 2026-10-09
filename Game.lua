@@ -24,12 +24,20 @@ ASS.Game = Game
 -- by slot id whatever form is active) and 145-180 (Action Bars 6-8). Never
 -- 121-144 (skyriding/possess/override pages) or 181+ (no button shows them).
 Game.SLOT_RANGES = { { 1, 120 }, { 145, 180 } }
-Game.SLOT_LIST, Game.IS_SLOT = {}, {}
-for _, r in ipairs(Game.SLOT_RANGES) do
-    for slot = r[1], r[2] do
-        Game.SLOT_LIST[#Game.SLOT_LIST + 1] = slot
-        Game.IS_SLOT[slot] = true
+Game.IS_SLOT = ASS.Cover.AddTo({}, Game.SLOT_RANGES)
+Game.SLOT_LIST = {}
+for slot in pairs(Game.IS_SLOT) do Game.SLOT_LIST[#Game.SLOT_LIST + 1] = slot end
+table.sort(Game.SLOT_LIST)
+
+-- Action Bar 1's two pages and the four stance/form pages take turns on the
+-- same twelve buttons; every other bar shows alongside whichever is up. The
+-- page index of a slot, or nil for a bar that is always beside it.
+local MAIN_PAGES = { 1, 13, 73, 85, 97, 109 }
+function Game.MainPage(slot)
+    for i, first in ipairs(MAIN_PAGES) do
+        if slot >= first and slot < first + 12 then return i end
     end
+    return nil
 end
 
 -- Bars as the game's settings name them, by first slot (measured button ->

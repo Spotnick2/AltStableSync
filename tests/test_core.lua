@@ -135,7 +135,7 @@ do
     check("cover: too large invalid", not C.Valid({ { 1, 5000 } }))
     check("cover: stray key invalid", not C.Valid({ { 1, 12 }, x = 1 }))
     check("cover: zero invalid", not C.Valid({ { 0, 12 } }))
-    eq("cover: Of a missing one", C.Of({})[1][2], 12)
+    check("cover: Ok needs one", not C.Ok({}) and not C.Ok({ cover = { { 2, 1 } } }) and C.Ok({ cover = { { 1, 12 } } }))
     eq("cover: from set", R(C.FromSet({ [1] = true, [2] = true, [3] = true, [7] = true })), "1-3,7-7")
     eq("cover: empty set", C.FromSet({}), nil)
     check("cover: has", C.Has({ { 1, 3 }, { 7, 9 } }, 8) and not C.Has({ { 1, 3 }, { 7, 9 } }, 5))

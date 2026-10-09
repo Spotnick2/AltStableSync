@@ -206,8 +206,13 @@ AltStableSyncLAS = <LibAccountSync store only>   -- declared ONLY by AltStableSy
   older build can never Save As from a record whose meaning it doesn't know.
 - **Schema 3 → 4** (#5): every loadout's `modules`, its `previous.modules` and each character's
   `loaded.loadout.baseline`/`after` get `cover = { {1, 12} }`: what the 1-12 builds captured. A slot
-  outside an entry's cover was never captured, which is not the same as captured empty. Entries
-  arriving by sync must carry a valid cover; a local entry without one reads as 1-12.
+  outside an entry's cover was never captured, which is not the same as captured empty. A cover is
+  never guessed: an entry arriving by sync without a valid one is rejected; locally, Create, Replace,
+  Undo and Resolve refuse content without one ("bad-modules"), and Save refuses a loaded record whose
+  baseline or comparison lacks one ("load it again"); Save As then warns before a plain capture.
+- **Coverage moves with the values.** Save outside the comparison's cover keeps B and says how many
+  such slots differ ("load it again to save them"); outside the entry's cover it takes a readable C,
+  so the first Save over a 1-12 entry adds the other bars, and an unreadable slot never gains cover.
 - **Categories** (`Categories.lua`): per class, a short list of stable keys with display text, plus
   `general` ("General / Leveling").
 
@@ -347,7 +352,9 @@ kind (`AltStableSyncChar.loaded`) with the applied/skipped result.
 bars update, so the bars alone can't show intent. A spell on the bars at **two or more ranks** is a
 ladder: the highest of them on the bars is "highest known", and the lower ones are "exact". A spell at
 **one rank** is "highest known", whatever the rank. Rank order is spellbook order, and the top known
-rank always ranks highest. A lone deliberate downrank is read as "highest known"; a macro
+rank always ranks highest. The ranks must be **on screen together** (#5): Action Bar 1's two pages and
+the four stance/form pages take turns on the same buttons, so a rank left under a stance page, or on
+the other page, never makes one on another page "exact"; Action Bars 2-8 show beside any of them. A lone deliberate downrank is read as "highest known"; a macro
 (`/cast Heal(Rank 2)`) keeps its text as written.
 
 On Save, a slot holding **the same rank** as after the load is unchanged, even when its policy reads

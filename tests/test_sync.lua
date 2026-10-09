@@ -221,9 +221,28 @@ do
     eq("updated peer: a manifest clears the pause", schemaOf(b, a.guid), nil)
     b.sync.Receive("MAN\n" .. old({ b = "aaa", c = 2, p = 1, n = 1, l = {} }), from)
     eq("old peer again: paused", schemaOf(b, a.guid), "older-schema")
+    -- A corrupt entry proves nothing: the pause stays.
+    b.sync.Receive("ENT\nloadout-x-1\nx:1\nASE1:00000000:zz", from)
+    eq("old peer: a corrupt entry keeps the pause", schemaOf(b, a.guid), "older-schema")
     run(S.INTERVAL + 15)                                    -- the peer now speaks schema 2
     eq("updated peer: entry fetched", b.db.presets[e.id] and b.db.presets[e.id].version, e.version)
     eq("updated peer: pause cleared", schemaOf(b, a.guid), nil)
+end
+
+-- A peer found incompatible mid-exchange gets no more requests: what was
+-- queued or outstanding for it is dropped until it speaks our schema.
+do
+    reset()
+    local a, b = account("Alpha", "aaaaaaaaaaaa"), account("Beta", "bbbbbbbbbbbb")
+    local e, f = save(a, "Raid", 2050), save(a, "Pvp", 2051)
+    local from = { guid = a.guid, name = "Alpha", realm = "Elegia" }
+    use(b)
+    b.sync.Receive("MAN\n" .. Env.Pack({ s = Env.SCHEMA, b = "pre", c = 1, p = 1, n = 1,
+                                         l = { [e.id] = e.version, [f.id] = f.version } }), from)
+    check("paused peer: two requests out", (b.sync.Outstanding(a.guid)) == 2)
+    b.sync.Receive("ENT\n" .. e.id .. "\n" .. e.version .. "\n" .. Env.Pack({ s = 1, e = C.Copy(a.db.presets[e.id]) }), from)
+    local o, q = b.sync.Outstanding(a.guid)
+    eq("paused peer: nothing outstanding or queued", o + q, 0)
 end
 
 ------------------------------------------------------------

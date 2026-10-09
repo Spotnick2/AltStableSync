@@ -59,12 +59,11 @@ function Cover.Valid(c)
     return true
 end
 
--- The cover of a modules table; an entry without a valid one is taken as the
--- 1-12 capture (only an entry that skipped the upgrade can lack it).
-function Cover.Of(modules)
-    local c = type(modules) == "table" and modules.cover
-    if Cover.Valid(c) then return c end
-    return Cover.LEGACY
+-- Does a loadout's modules table carry a valid cover? After the 3 -> 4
+-- upgrade every one does; a missing or malformed one (a hand edit) is never
+-- guessed at: the operation that needs it refuses.
+function Cover.Ok(modules)
+    return type(modules) == "table" and Cover.Valid(modules.cover)
 end
 
 function Cover.Has(c, slot)
@@ -97,7 +96,7 @@ function Cover.AddTo(set, c)
     return set
 end
 
-local function Legacy() return { { 1, 12 } } end
+local function Legacy() return { { Cover.LEGACY[1][1], Cover.LEGACY[1][2] } } end
 
 -- 3 -> 4: a loadout's modules without a cover were captured by a 1-12 build.
 local function StampCover(modules)
