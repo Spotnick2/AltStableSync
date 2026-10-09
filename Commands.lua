@@ -321,7 +321,7 @@ function Commands.conflicts()
     local list = Conflicts()
     if #list == 0 then Print("No conflicts.") return end
     for _, c in ipairs(list) do Print(("  %s: %s"):format(c.id, tostring(c.name))) end
-    Print("Settle each with /altsync resolve <id> theirs|mine")
+    Print("Settle each with /altsync resolve <id> theirs or mine")
 end
 
 -- `resolve <id|name> theirs|mine`. For a deletion made on the other account,
@@ -330,7 +330,7 @@ function Commands.resolve(arg)
     local target, choice = tostring(arg or ""):match("^%s*(.-)%s+(%S+)%s*$")
     choice = choice and choice:lower()
     if not target or (choice ~= "theirs" and choice ~= "mine") then
-        Print("Usage: /altsync resolve <id|name> theirs|mine  (see /altsync conflicts)") return
+        Print("Usage: /altsync resolve <id or name> theirs or mine  (see /altsync conflicts)") return
     end
     local copy, why = FindEntry(target)
     if not copy then for _, l in ipairs(why) do Print(l) end return end

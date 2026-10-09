@@ -147,4 +147,21 @@ for _, sub in ipairs({ "tests", "docs", "Tools", "CLAUDE.md", "README.md" }) do
           pkg:find("\n  %- " .. (lasKey .. "/" .. sub):gsub("%p", "%%%0") .. "\r?\n") ~= nil)
 end
 
+-- Chat treats "|" as an escape: "<id|name>" printed as "<id", a line break,
+-- "ame>" in game. A string literal may use "|" only for a colour code ("|c",
+-- "|r"), a literal pipe ("||") or a " | " separator.
+for _, path in ipairs({ "Core.lua", "Catalog.lua", "Commands.lua", "Envelope.lua",
+                        "Plugins/Link/Link.lua", "Plugins/Link/Sync.lua" }) do
+    local src = read(path) or ""
+    local bad
+    for line in (src .. "\n"):gmatch("([^\n]*)\n") do
+        local code = line:gsub("%-%-.*$", "")
+        for lit in code:gmatch('"([^"]*)"') do
+            local s = lit:gsub("||", "")
+            if s:find("|[^cr ]") then bad = bad or lit end
+        end
+    end
+    check(path .. ": no chat escape by accident (" .. tostring(bad) .. ")", bad == nil)
+end
+
 finish("test_packaging")
