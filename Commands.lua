@@ -2,6 +2,7 @@
 -- Commands.lua - /altsync commands for the #4 slice (until #9's panel)
 --
 --   /altsync saveas <name>   Save As: a new loadout in this class's "general"
+--   /altsync save [drop]     Save over the loaded loadout (#28), previewed
 --   /altsync list            this class's loadouts, every category, with ids
 --   /altsync load <id|name>  preview, then load (writes only on confirm)
 --   /altsync backups         this character's snapshots
@@ -11,7 +12,6 @@
 --   /altsync status          (and /altsync link, from AltStableSyncLink)
 -- An entry is named by its id, or by its name when exactly one entry has it:
 -- sync can bring two entries with one name (docs/DESIGN.md "Catalog sync").
--- `save` (over an existing entry) stays disabled until #28 (docs/DESIGN.md).
 ------------------------------------------------------------
 
 AltStableSync = AltStableSync or {}
@@ -161,41 +161,90 @@ local function Report(kind, result, err)
     Print(msg)
 end
 
-local function SaveAs(arg)
-    local blocked = ASS.Loadout.Blocked()
-    if blocked then Print(blocked) return end
-    local modules, cerr = ASS.Loadout.Capture()
-    if not modules then Print("Not saved: " .. tostring(cerr)) return end
-    local name, realm = UnitFullName("player")
-    local e, err = ASS.Catalog.Create("loadout", { class = PlayerClass(), category = "general", name = arg,
-        provenance = { sourceChar = tostring(name) .. "-" .. tostring(realm), build = select(2, GetBuildInfo()) } }, modules)
-    if not e then Print("Not saved: " .. Copy(err)) return end
-    local n, c = 0, 0
-    for _ in pairs(modules.actions) do n = n + 1 end
-    for _ in pairs(modules.macros) do c = c + 1 end
-    Changed(("Saved %q (%d slots, bindings, %d character macros)."):format(e.name, n, c))
+-- A wanted action, for a preview line.
+local function Want(w)
+    if type(w) ~= "table" then return "empty" end
+    if w.kind == "spell" then return tostring(w.name or ("spell " .. tostring(w.id))) end
+    if w.kind == "item" then return "item " .. tostring(w.id) end
+    if w.kind == "macro" then return "macro " .. tostring(w.name) end
+    return tostring(w.what or w.kind)
 end
 
--- Until #28, Save As is a fresh capture: when the last load here left entries
--- unapplied, say first that they won't be kept (docs/DESIGN.md, Preserve intent).
+local function Count(t) local n = 0; for _ in pairs(t or {}) do n = n + 1 end; return n end
+
+local function SaveAs(arg)
+    local p, err = ASS.Loadout.PlanSaveAs()
+    if not p then Print("Not saved: " .. tostring(err)) return end
+    local e, cerr = ASS.Loadout.SaveAs(p, arg)
+    if not e then Print("Not saved: " .. Copy(cerr)) return end
+    local msg = ("Saved %q (%d slots, bindings, %d character macros)."):format(e.name,
+        Count(p.modules.actions), Count(p.modules.macros))
+    if #p.kept > 0 then
+        msg = msg .. (" Kept %s from the loaded setup that this character can't use."):format(
+            Plural(#p.kept, "entry"):gsub("entrys", "entries"))
+    end
+    Changed(msg)
+    for _, n in ipairs(p.notes) do Print(n) end
+end
+
+-- Save As keeps what the loaded setup had and this character can't use
+-- (A09). Only when the last load left nothing to compare against does it
+-- become a plain capture, and then it says so first, whatever the count.
 function Commands.saveas(arg)
-    local loaded = ASS.char and ASS.char.loaded and ASS.char.loaded.loadout
-    local lost = loaded and loaded.result and #(loaded.result.skips or {}) or 0
-    if lost == 0 then return SaveAs(arg) end
+    local p, err = ASS.Loadout.PlanSaveAs()
+    if not p then Print("Not saved: " .. tostring(err)) return end
+    if not p.lossy then return SaveAs(arg) end
     ASS.Preview.Show({
         title = "Save As " .. tostring(arg) .. "?",
         lines = {
-            ("%s from the loaded setup %s available on this character and won't be kept."):format(
-                Plural(lost, "entry"):gsub("entrys", "entries"), lost == 1 and "isn't" or "aren't"),
-            "Save As captures this character's bars, keys and character macros as they are now.",
+            "No usable comparison with the loaded setup (its load didn't finish, or it was loaded by an older version).",
+            "Save As captures this character as it is now, and may leave out entries it inherited.",
         },
         confirm = "Save As",
         onConfirm = function() SaveAs(arg) end,
     })
 end
 
-function Commands.save()
-    Print("Save over an existing loadout is disabled until #28 lands; use /altsync saveas <name>.")
+-- Save over the loaded loadout, keeping what this character can't use or
+-- see (docs/DESIGN.md "Preserve intent on Save"). `drop`: those entries stop
+-- being part of the loadout instead.
+function Commands.save(arg)
+    arg = Trim(arg or ""):lower()
+    if arg ~= "" and arg ~= "drop" then Print("Usage: /altsync save [drop]") return end
+    local drop = arg == "drop"
+    local m, err = ASS.Loadout.PlanSave(drop)
+    if not m then Print("Not saved: " .. tostring(err)) return end
+    local name = tostring(m.entry.name)
+    if m.noop then
+        Print(("Already saved: %q matches this character."):format(name))
+        for _, n in ipairs(m.notes) do Print(n) end
+        return
+    end
+    local lines = { ("%s and %s change in %q."):format(Plural(#m.changed, "slot"), Plural(#m.keysChanged, "key"), name) }
+    for _, slot in ipairs(m.changed) do
+        lines[#lines + 1] = ("  slot %d: %s"):format(slot, Want(m.modules.actions[slot]))
+    end
+    if #m.kept > 0 then
+        lines[#lines + 1] = ("Keeping %s this character can't use:"):format(Plural(#m.kept, "entry"):gsub("entrys", "entries"))
+        for _, k in ipairs(m.kept) do lines[#lines + 1] = ("  slot %d: %s (%s)"):format(k.slot, Want(k.want), k.reason) end
+        if not drop then lines[#lines + 1] = "To leave the unusable ones out instead: /altsync save drop" end
+    end
+    if #m.dropped > 0 then
+        lines[#lines + 1] = "Won't be kept (other characters' slots are left alone):"
+        for _, k in ipairs(m.dropped) do lines[#lines + 1] = ("  slot %d: %s (%s)"):format(k.slot, Want(k.want), k.reason) end
+    end
+    for _, n in ipairs(m.notes) do lines[#lines + 1] = n end
+    lines[#lines + 1] = "Other characters keep their current setup until they load this version."
+    ASS.Preview.Show({
+        title = "Update " .. name .. "?",
+        lines = lines,
+        confirm = "Save",
+        onConfirm = function()
+            local r, serr = ASS.Loadout.Save(m)
+            if r then Changed(("Saved %q."):format(tostring(r.name)))
+            else Print("Not saved: " .. Copy(serr)) end
+        end,
+    })
 end
 
 -- Every live conflict copy, in one pass: this class's loadouts (listed and

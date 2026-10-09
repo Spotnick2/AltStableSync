@@ -21,10 +21,12 @@ local ADDON_NAME = "AltStableSync"
 
 -- The schema this build reads and writes, for both the DB and the per-character
 -- table. A NEWER schema came from a newer AltStableSync: refuse it and touch
--- nothing (AGENTS.md safety rule 8). The one upgrade this build knows is the
--- empty schema-1 DB the scaffold wrote (docs/DESIGN.md "Data model"); there
--- is no migration framework.
-local SCHEMA = 2
+-- nothing (AGENTS.md safety rule 8). The upgrades this build knows: the
+-- empty schema-1 DB the scaffold wrote, and 2 -> 3, which only re-stamps
+-- (3 added the optional `after` and `unavailable` to the per-character
+-- `loaded` record, #28; a schema-2 record has neither and is never given an
+-- invented one). There is no migration framework.
+local SCHEMA = 3
 ASS.SCHEMA = SCHEMA
 
 -- The client build docs/forever-api-notes.md was measured on. A different
@@ -85,7 +87,7 @@ local function Validate(db, char)
             return "AltStableSyncDB.backups is a " .. type(db.backups) .. ", not a table"
         end
         dbAction = "upgrade1"
-    elseif db.schema ~= SCHEMA then
+    elseif db.schema ~= SCHEMA and db.schema ~= 2 then
         return WrongSchema("saved data", db.schema)
     else
         for _, field in ipairs(DB_TABLES) do
@@ -93,7 +95,7 @@ local function Validate(db, char)
                 return "AltStableSyncDB." .. field .. " is a " .. type(db[field]) .. ", not a table"
             end
         end
-        dbAction = "ok"
+        dbAction = db.schema == 2 and "upgrade2" or "ok"
     end
 
     -- The per-character table: missing or empty is a fresh start (the
@@ -107,10 +109,12 @@ local function Validate(db, char)
         return "AltStableSyncChar is a " .. type(char) .. ", not a table"
     elseif char.schema == nil then
         return "AltStableSyncChar has data but no schema"
-    elseif char.schema ~= SCHEMA then
+    elseif char.schema ~= SCHEMA and char.schema ~= 2 then
         return WrongSchema("character data", char.schema)
+    elseif char.loaded ~= nil and type(char.loaded) ~= "table" then
+        return "AltStableSyncChar.loaded is a " .. type(char.loaded) .. ", not a table"
     else
-        charAction = "ok"
+        charAction = char.schema == 2 and "upgrade2" or "ok"
     end
     return nil, dbAction, charAction
 end
@@ -148,7 +152,9 @@ local function InitSavedVariables()
     for _, field in ipairs(DB_TABLES) do db[field] = db[field] or {} end
 
     AltStableSyncChar = AltStableSyncChar or {}
-    if charAction == "fresh" then AltStableSyncChar.schema = SCHEMA end
+    -- 2 -> 3 only re-stamps: a schema-2 `loaded` record stays as it was, with no
+    -- `after`, which Save treats as "no usable comparison".
+    if charAction == "fresh" or charAction == "upgrade2" then AltStableSyncChar.schema = SCHEMA end
 
     ASS.db = db
     ASS.char = AltStableSyncChar
@@ -201,7 +207,7 @@ local function SlashHandler(msg)
     elseif ASS.Commands and type(ASS.Commands[cmd]) == "function" then
         ASS.Commands[cmd](rest)
     else
-        Print("commands: /altsync status | saveas <name> | list | load <id or name> | backups | restore [n or op]" .. " | rename <id or name> <new name> | delete <id or name> | conflicts | resolve <id or name> theirs or mine | link")
+        Print("commands: /altsync status | saveas <name> | save [drop] | list | load <id or name> | backups | restore [n or op]" .. " | rename <id or name> <new name> | delete <id or name> | conflicts | resolve <id or name> theirs or mine | link")
     end
 end
 ASS.SlashHandler = SlashHandler

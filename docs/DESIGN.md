@@ -137,7 +137,7 @@ bus.
 
 ```lua
 AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
-  schema = 2,                       -- #27 upgrades 1 -> 2; an unknown or newer schema is refused untouched
+  schema = 3,                       -- #27 upgraded 1 -> 2, #28 2 -> 3; an unknown or newer schema is refused untouched
   presets = {
     [id] = {
       id = "loadout-a1b2c3d4e5f6-12",          -- kind-writer-seq: never collides across accounts or copies
@@ -169,11 +169,14 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
 }
 
 AltStableSyncChar = {               -- per character
-  schema = 2,                       -- same number as the DB; an unknown or newer one is refused untouched
+  schema = 3,                       -- same number as the DB; an unknown or newer one is refused untouched
   lastSelected = { ui = id, loadout = { category = "discipline", id = id } },
-  loaded = {                        -- ONE baseline per kind: the last Load/Apply, for #28
+  loaded = {                        -- ONE baseline per kind: the last Load/Apply, or a Save/Save As (#28)
     ui = { id, version, baseline = <modules as loaded>, result = {...} },
-    loadout = { id, version, baseline = <modules as loaded>,
+    loadout = { id, version, baseline = <modules as loaded or saved>,
+                after = <a capture right after a COMPLETED load, or as of the last Save> | nil,
+                        -- after.bindings only when taken under Character bindings
+                unavailable = { [slot] = reason },   -- baseline entries this character couldn't use
                 result = { changed, created, keys, skips = { {slot, reason} }, failed, at } | { noop, skips } },
   },
   bindingsUnsaved = true | nil,     -- keys set in memory, not yet saved: the next Load/Restore saves
@@ -196,6 +199,10 @@ AltStableSyncLAS = <LibAccountSync store only>   -- declared ONLY by AltStableSy
   schema 2; a populated table without a schema, or one with an unknown or newer schema, is refused
   untouched, together with its DB. (Measured on disk: the scaffold build only ever wrote
   `AltStableSyncChar = {}`.)
+- **Schema 2 → 3** (#28) only re-stamps both tables. A schema-2 `loaded` record keeps its shape and
+  is never given an invented `after`: Save treats it as "no usable comparison". A mixed DB 3 /
+  character 2 upgrades the character; a newer schema in either table refuses both untouched, so an
+  older build can never Save As from a record whose meaning it doesn't know.
 - **Categories** (`Categories.lua`): per class, a short list of stable keys with display text, plus
   `general` ("General / Leveling").
 
@@ -327,8 +334,33 @@ kind (`AltStableSyncChar.loaded`) with the applied/skipped result.
 | Same family on a low alt, policy "highest known" | Keep "highest known"; don't freeze the low ID |
 | Deliberate downrank | Keep the exact rank |
 | Inherited addon absent, or field unreadable | Keep the prior payload |
-| Empty or ambiguous slot after a skipped load | Keep, unless an explicit clear was chosen in review |
-| Explicit clear chosen | Store the clear; later previews show the deletion |
+| Empty or ambiguous slot after a skipped load | Keep, unless the review chose `save drop` |
+| `save drop` chosen | The entries this character couldn't use stop being part of the entry; other characters' slots are left alone |
+| *(deferred)* Explicit clear | Storing "clear this slot", so later previews show a deletion, is **deferred past launch** (#28). Nil never erases another character's slot |
+
+**How Save tells "unchanged" from "changed"** (#28). A completed load records `after`, a capture of
+the slots, keys and character macros right after it, and `unavailable`, the slots it skipped. Save
+captures again (C) and merges per slot against the baseline B and `after` A:
+
+| C | Saved |
+|---|---|
+| unreadable or ambiguous | B; A stays the comparison |
+| A was unreadable | B |
+| same as A (action, plus a character macro's body and icon) | B |
+| empty, and the slot was unavailable at load | B |
+| anything else | C, with its captured policy |
+
+- **Keys** are compared only against keys taken under Character bindings: at a load, or at a fresh
+  Save As. A Save never sets that comparison. Under Account bindings, or with no comparison, the
+  loaded keys are kept and the preview says why.
+- **Two slots needing different bodies under one macro name, or one key on two commands, refuse
+  the Save.** There is no renaming.
+- **Modules this build doesn't capture are kept from B as they are** (A35).
+- **No usable comparison** means a failed load, a failed post-load capture, or a record from an older
+  build. Save is then refused, and Save As warns before a plain capture, without guessing a count.
+- **The preview is frozen:** the confirm re-captures and refuses on any difference. A Save then
+  advances the record (baseline = saved, A = this capture, keeping the old A where C was unreadable),
+  and the `unavailable` set carries forward.
 
 **Which entry Save may replace:** only the entry this character currently has loaded
 (`AltStableSyncChar.loaded[kind]`), and only while that entry's current version is still the
@@ -341,10 +373,8 @@ only Save As. A no-op Load ("Already matches") still records the baseline, so th
 can Load-then-Save without a write. A Save whose baseline is stale is refused, with Save As or a
 refreshed Load offered instead (A39).
 
-Save As from a loaded entry copies its inherited unavailable content (after #28). A fresh capture
-with no baseline can't invent spells it never saw. **Until #28 lands, Save is disabled entirely and
-Save As is a fresh capture.** Its preview warns: "N entries from the loaded setup aren't available
-on this character and won't be kept."
+Save As from a loaded entry uses the same merge, so the fork keeps the inherited unavailable
+content (A09). A fresh capture with no baseline can't invent spells it never saw.
 
 **Undo my last Save** (A44): `previous` holds the content from before this account's last Save of
 the entry, with `of` = the version that Save produced. It is offered only while the entry's

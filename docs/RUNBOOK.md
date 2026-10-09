@@ -53,12 +53,13 @@ compared. A `/reload`, a stub test or the HTML mockup is never that proof.
 Load an entry on a low-level alt: the preview lists unlearned spells as skipped and leaves those
 destinations untouched.
 
-**Until #28 lands, Save is disabled**, and Save As is a fresh capture. It does **not** keep the
-entries the alt couldn't load, and its preview says how many will be dropped. So don't Save As from
-a low alt to "fork" a high-level loadout yet; fork from the character that has the spells.
+`/altsync save` (over the entry this character loaded) and `/altsync saveas` both keep the
+inherited entries the alt couldn't load (A07–A11 in `docs/ACCEPTANCE.md`). The Save preview lists
+them. `/altsync save drop` leaves them out of the entry instead; other characters' slots are never
+cleared by it.
 
-Once #28 lands, Save (over the entry this character loaded) and Save As both keep the inherited
-entries the alt couldn't load (A07–A11 in `docs/ACCEPTANCE.md`).
+Save needs a **completed** load to compare against. After an interrupted load, load again first;
+Save As still works, but it warns that it captures the character as it is.
 
 ## Druid forms
 

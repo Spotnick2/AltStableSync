@@ -1067,25 +1067,275 @@ do
     check("saveas: no Link addon, no note", said:find("Saved", 1, true) and not said:find("Link is off", 1, true), said)
 end
 
--- Codex 3: Save As after a load that skipped entries warns first.
+------------------------------------------------------------
+-- Preserve intent on Save (#28): A07-A11, A35, A39 and the plan's cases
+------------------------------------------------------------
+
+-- A low alt that loaded "Everyday": slots 6/7 (unsupported wants) and 8
+-- (Greater Heal, not learned; food stays) were skipped.
+local function loadedAlt(opts)
+    boot(); ready(); save(); alt(opts)
+    local r = L.Load(entry, L.Plan(entry))
+    assert(r and not r.failed, "loadedAlt: load failed")
+    return A.char.loaded.loadout
+end
+local function rec() return A.char.loaded.loadout end
+local function saveNow(drop)
+    local m, err = L.PlanSave(drop)
+    if not m then return nil, err end
+    return L.Save(m)
+end
+
+do
+    local r0 = loadedAlt()
+    check("record: comparison taken after the load", r0.after ~= nil and r0.after.actions ~= nil)
+    eq("record: unavailable from the skips", r0.unavailable[8], "not learned")
+    check("record: unsupported wants unavailable too", r0.unavailable[6] ~= nil and r0.unavailable[7] ~= nil)
+    local m = L.PlanSave()
+    check("A08: nothing changed -> already saved", m and m.noop, m and "not noop")
+    local calls = #G.calls
+
+    -- A deliberate change in slot 10; everything else stays as loaded.
+    G.actions[10] = { kind = "spell", id = 2052 }
+    m = L.PlanSave()
+    eq("change: one slot", m and #m.changed, 1)
+    eq("change: kept the three unusable entries", m and #m.kept, 3)
+    local r, mm = L.Save(m)
+    check("save: written", r ~= nil, tostring(mm))
+    local e = A.Catalog.Get(entry.id)
+    eq("A08: future spell kept", e.modules.actions[8].name, "Greater Heal")
+    eq("A08: not the food", e.modules.actions[8].kind, "spell")
+    eq("A10: policy still highest", e.modules.actions[1].policy, "highest")
+    eq("A10: the main's rank, not the alt's", e.modules.actions[1].id, 9472)
+    eq("A11: exact downrank kept", e.modules.actions[2].policy, "exact")
+    eq("change: slot 10 saved", e.modules.actions[10].id, 2052)
+    eq("save: unsupported want kept", e.modules.actions[6].kind, "unsupported")
+    eq("save: the character macro definition kept", e.modules.macros.Shield.body, "/cast Power Word: Shield")
+    eq("save: wrote no game state", #G.calls, calls)
+    eq("advance: record at the new version", rec().version, e.version)
+    eq("advance: unavailable carried", rec().unavailable[8], "not learned")
+    check("advance: second save is a no-op", L.PlanSave().noop)
+
+    -- The skipped destination emptied (the food moved away): still kept.
+    G.actions[8] = nil
+    check("A07: emptied skipped slot -> still the spell", L.PlanSave().noop)
+    -- Replaced deliberately with something supported: that is saved.
+    G.actions[8] = { kind = "spell", id = 2052 }
+    m = L.PlanSave()
+    eq("replaced skipped slot: saved", m.modules.actions[8].id, 2052)
+    G.actions[8] = { kind = "item", id = 4540 }
+
+    -- A slot the load filled, cleared by the player: no longer covered.
+    G.actions[3] = nil
+    m = L.PlanSave()
+    eq("cleared applied slot: not covered", m.modules.actions[3], nil)
+    G.actions[3] = { kind = "item", id = 5512 }
+
+    -- Keys: an unchanged key keeps B, a rebound key takes C.
+    G.keys["3"] = "ACTIONBUTTON3"
+    m = L.PlanSave()
+    eq("keys: rebound saved", m.modules.bindings.ACTIONBUTTON3[1], "3")
+    eq("keys: unchanged kept", table.concat(m.modules.bindings.ACTIONBUTTON2, ","), "2,SHIFT-2")
+    G.keys["3"] = nil
+end
+
+-- r1-1/r3-1: an unreadable slot keeps B, and the comparison stays the old one.
+do
+    loadedAlt()
+    G.actions[1] = { kind = "flyout", id = 2 }              -- reads as unsupported
+    G.actions[10] = { kind = "spell", id = 2052 }
+    local r = saveNow()
+    check("unreadable: saved", r ~= nil)
+    eq("unreadable: B kept", A.Catalog.Get(entry.id).modules.actions[1].id, 9472)
+    eq("unreadable: old comparison kept", rec().after.actions[1].kind, "spell")
+    G.actions[1] = { kind = "spell", id = 2061 }             -- readable again, as loaded
+    check("unreadable then readable: still B (no-op)", L.PlanSave().noop)
+end
+
+-- Macros: an icon-only or body edit is a change; a clash is refused.
+do
+    loadedAlt()
+    for _, mm in ipairs(G.char) do if mm.name == "Shield" then mm.icon = 999 end end
+    local m = L.PlanSave()
+    eq("macro icon edit: saved", m.modules.macros.Shield.icon, 999)
+    for _, mm in ipairs(G.char) do if mm.name == "Shield" then mm.body = "/cast Renew" end end
+    m = L.PlanSave()
+    eq("macro body edit: saved", m.modules.macros.Shield.body, "/cast Renew")
+    -- Pure merge: slot 1 keeps B's Heal, slot 2 takes C's different Heal.
+    local mac = function(body) return { kind = "macro", name = "Heal", scope = "char", body = body } end
+    local recM = { baseline = { actions = { [1] = mac("/x"), [2] = mac("/x") }, macros = { Heal = { body = "/x" } } },
+                   after = { actions = { [1] = { kind = "item", id = 1 }, [2] = mac("/x") }, macros = { Heal = { body = "/x" } } },
+                   unavailable = { [1] = "slot holds something this slice can't put back" } }
+    local cur = { actions = { [1] = { kind = "item", id = 1 }, [2] = mac("/y") }, macros = { Heal = { body = "/y" } }, bindings = {} }
+    local out, why = L.Merge(recM, cur, true)
+    eq("macro clash: refused", out, nil)
+    check("macro clash: says so", tostring(why):find("differs", 1, true) ~= nil, why)
+    -- Pure merge: a key that would end up on two commands is refused.
+    local recK = { baseline = { actions = {}, bindings = { ACTIONBUTTON1 = { "Q" } } },
+                   after = { actions = {}, bindings = { ACTIONBUTTON1 = { "X" }, ACTIONBUTTON2 = { "Y" } } } }
+    local curK = { actions = {}, bindings = { ACTIONBUTTON1 = { "X" }, ACTIONBUTTON2 = { "Q" } } }
+    out, why = L.Merge(recK, curK, true)
+    eq("key clash: refused", out, nil)
+    -- Pure merge: a slot that was unreadable when the comparison was taken
+    -- keeps B even once it reads as something.
+    local recU = { baseline = { actions = { [1] = { kind = "spell", id = 7, name = "X", policy = "highest" } } },
+                   after = { actions = { [1] = { kind = "unsupported", what = "unreadable" } } } }
+    local curU = { actions = { [1] = { kind = "spell", id = 8, name = "Y", policy = "highest" } }, bindings = {} }
+    out = L.Merge(recU, curU, true)
+    eq("unreadable at load: B kept", out and out.modules.actions[1].id, 7)
+    check("key clash: says so", tostring(why):find("bound twice", 1, true) ~= nil, why)
+end
+
+-- A39 and sync: a newer catalog version refuses Save; Save As forks what was loaded.
+do
+    loadedAlt()
+    G.actions[10] = { kind = "spell", id = 2052 }
+    local before = rec().version
+    A.Catalog.Upsert({ id = entry.id, version = "ffffffffffff:1", parent = entry.version,
+                       ancestors = { entry.version }, kind = "loadout", class = "PRIEST", category = "general",
+                       name = "Everyday", modules = { actions = {} } }, "Other")
+    eq("sync never touches the record", rec().version, before)
+    local m, why = L.PlanSave()
+    eq("A39: stale refused", m, nil)
+    check("A39: says load again or Save As", tostring(why):find("changed since you loaded", 1, true) ~= nil, why)
+    eq("A39: catalog untouched", A.Catalog.Get(entry.id).version, "ffffffffffff:1")
+    A.Commands.saveas("Fork")
+    local fork
+    for _, e in ipairs(A.Catalog.List("loadout", "PRIEST", "general")) do if e.name == "Fork" then fork = e end end
+    check("A09: fork made", fork ~= nil)
+    eq("A09: fork keeps the future spell from the loaded baseline", fork and fork.modules.actions[8].name, "Greater Heal")
+    eq("A09: and its policy", fork and fork.modules.actions[1].policy, "highest")
+    eq("A09: the record moves to the fork", rec().id, fork and fork.id)
+end
+
+-- A35: a module this build doesn't capture survives Save.
+do
+    boot(); ready()
+    local mods = A.Catalog.Copy(captured); mods.addons = { Bartender = { x = 1 } }
+    entry = A.Catalog.Create("loadout", { class = "PRIEST", category = "general", name = "WithAddon" }, mods)
+    alt()
+    L.Load(entry, L.Plan(entry))
+    G.actions[10] = { kind = "spell", id = 2052 }
+    check("A35: saved", saveNow() ~= nil)
+    eq("A35: payload kept", A.Catalog.Get(entry.id).modules.addons.Bartender.x, 1)
+end
+
+-- save drop: the unusable entries stop being covered; works after a Save too.
+do
+    loadedAlt()
+    G.actions[10] = { kind = "spell", id = 2052 }
+    check("drop: first a normal save", saveNow() ~= nil)
+    G.actions[11] = { kind = "spell", id = 2052 }
+    local m = L.PlanSave(true)
+    eq("drop: lists the three", #m.dropped, 3)
+    check("drop: saved", L.Save(m) ~= nil)
+    local e = A.Catalog.Get(entry.id)
+    eq("drop: slot 8 not covered", e.modules.actions[8], nil)
+    eq("drop: applied slots stay", e.modules.actions[1].id, 9472)
+    eq("drop: nothing unavailable now", next(rec().unavailable), nil)
+end
+
+-- Binding sets.
+do
+    -- (a) A Character comparison survives a Save made under Account bindings.
+    loadedAlt()
+    G.bindingSet = 1
+    G.keys["4"] = "ACTIONBUTTON4"                           -- an Account-set key (one key table in the stub)
+    G.actions[10] = { kind = "spell", id = 2052 }
+    local m = L.PlanSave()
+    eq("account: the Account key not taken", m.modules.bindings.ACTIONBUTTON4 and #m.modules.bindings.ACTIONBUTTON4, 0)
+    check("account: keys not saved, said so", m.notes[1] and m.notes[1]:find("Account", 1, true) ~= nil)
+    check("account: saved", L.Save(m) ~= nil)
+    check("account: comparison kept", rec().after.bindings ~= nil)
+    G.bindingSet = 2
+    G.keys["3"] = "ACTIONBUTTON3"
+    check("account -> character: key saved", saveNow() ~= nil)
+    eq("account -> character: key in the entry", A.Catalog.Get(entry.id).modules.bindings.ACTIONBUTTON3[1], "3")
+    -- A load under Account bindings records no key comparison (an entry with
+    -- no keys loads there).
+    boot(); ready()
+    local nokeys = A.Catalog.Copy(captured); nokeys.bindings = {}
+    entry = A.Catalog.Create("loadout", { class = "PRIEST", category = "general", name = "NoKeys" }, nokeys)
+    alt({ bindingSet = 1 })
+    local lr = L.Load(entry, L.Plan(entry))
+    check("account load: completed", lr and not lr.failed, lr and tostring(lr.failed))
+    eq("account load: no key comparison", rec().after and rec().after.bindings, nil)
+    -- (b) Never had a Character comparison: keys kept, said so; never set by a Save.
+    boot(); ready(); main()
+    G.bindingSet = 1
+    A.Commands.saveas("Fresh")
+    eq("fresh under account: no key comparison", rec().after.bindings, nil)
+    G.bindingSet = 2
+    G.keys["9"] = "ACTIONBUTTON9"
+    m = L.PlanSave()
+    check("no comparison: no-op", m and m.noop)
+    check("no comparison: says to load first", m.notes[1] and m.notes[1]:find("load this loadout", 1, true) ~= nil)
+    G.actions[11] = { kind = "spell", id = 9472 }
+    check("no comparison: an action save works", saveNow() ~= nil)
+    eq("no comparison: still none after a Save", rec().after.bindings, nil)
+    eq("no comparison: key not saved", #(A.Catalog.Get(rec().id).modules.bindings.ACTIONBUTTON9 or {}), 0)
+end
+
+-- No usable comparison: a failed load, a failed post-load capture, an old record.
 do
     boot(); ready(); save(); alt()
-    L.Load(entry, L.Plan(entry))
+    G.combatAfter = 1
+    local r = L.Load(entry, L.Plan(entry))
+    G.combat, G.combatAfter = false, nil
+    check("failed load: failed", r and r.failed)
+    eq("failed load: no comparison", rec().after, nil)
+    local m, why = L.PlanSave()
+    check("failed load: Save refused", m == nil and tostring(why):find("No usable comparison", 1, true) ~= nil, why)
     local n = #A.Catalog.List("loadout", "PRIEST", "general")
     A._shown = nil
     A.Commands.saveas("Alt copy")
-    check("saveas warning: preview shown", A._shown ~= nil)
-    check("saveas warning: names the lost entries", A._shown and A._shown.lines[1]:find("won't be kept") ~= nil,
-          A._shown and A._shown.lines[1])
-    eq("saveas warning: confirm label", A._shown and A._shown.confirm, "Save As")
-    eq("saveas warning: nothing saved before confirming", #A.Catalog.List("loadout", "PRIEST", "general"), n)
+    check("failed load: Save As warns", A._shown and A._shown.lines[2]:find("may leave out", 1, true) ~= nil)
+    eq("failed load: nothing saved before confirming", #A.Catalog.List("loadout", "PRIEST", "general"), n)
     A._shown.onConfirm()
-    eq("saveas warning: saved on confirm", #A.Catalog.List("loadout", "PRIEST", "general"), n + 1)
-    -- With nothing skipped, Save As saves directly.
-    boot(); ready(); save()
+    eq("failed load: saved on confirm", #A.Catalog.List("loadout", "PRIEST", "general"), n + 1)
+
+    boot(); ready(); save(); alt()
+    local cap = L.Capture
+    L.Capture = function() return nil, "x" end
+    L.Load(entry, L.Plan(entry))
+    L.Capture = cap
+    eq("capture failed after load: no comparison", rec().after, nil)
+    check("capture failed after load: Save refused", L.PlanSave() == nil)
+
+    loadedAlt()
+    rec().after = nil                                       -- what an older build leaves
+    check("old record: Save refused", L.PlanSave() == nil)
     A._shown = nil
-    A.Commands.saveas("Direct")
-    eq("saveas: no warning when nothing was skipped", A._shown, nil)
+    A.Commands.saveas("Old copy")
+    check("old record: Save As warns", A._shown ~= nil)
+end
+
+-- Commands: the preview is frozen; no record means Save As; fresh Save As sets the record.
+do
+    boot(); ready(); main()
+    A.Commands.save()
+    check("no record: Save points to Save As", table.concat(WoW.chat(), " "):find("saveas", 1, true) ~= nil)
+    A.Commands.saveas("Mine")
+    eq("fresh Save As: record set", A.Catalog.Get(rec().id).name, "Mine")
+    check("fresh Save As: comparison set", rec().after ~= nil)
+    loadedAlt()
+    G.actions[10] = { kind = "spell", id = 2052 }
+    A._shown = nil
+    A.Commands.save()
+    check("save: previewed", A._shown and A._shown.confirm == "Save")
+    check("save: preview lists the kept entries", table.concat(A._shown.lines, "\n"):find("Greater Heal (not learned)", 1, true) ~= nil)
+    check("save: preview offers the drop", table.concat(A._shown.lines, "\n"):find("/altsync save drop", 1, true) ~= nil)
+    local v = A.Catalog.Get(entry.id).version
+    G.actions[11] = { kind = "spell", id = 2052 }          -- changed after the preview
+    WoW.chatLines = {}
+    A._shown.onConfirm()
+    eq("frozen preview: refused", A.Catalog.Get(entry.id).version, v)
+    check("frozen preview: says so", table.concat(WoW.chat(), " "):find("changed since the preview", 1, true) ~= nil)
+    A.Commands.save()
+    A._shown.onConfirm()
+    check("save: confirmed", A.Catalog.Get(entry.id).version ~= v)
+    A.Commands.save("nonsense")
+    check("save: usage", table.concat(WoW.chat(), " "):find("Usage: /altsync save", 1, true) ~= nil)
 end
 
 ------------------------------------------------------------
