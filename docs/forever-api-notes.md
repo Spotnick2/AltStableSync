@@ -128,6 +128,7 @@ Event counts: UPDATE_BINDINGS ×5, UPDATE_MACROS ×6, ACTIONBAR_SLOT_CHANGED ×2
 - Sizes: CBOR 22,335 bytes, then Deflate 2,023, then Base64 2,700. Encoding took 0.7 ms.
 - The decode round trip is **deep-equal**, and integer keys survive as numbers.
 - **Consequence for #17/#18:** the envelope is small. A whole profile fits well under LibAccountSync's 16 KB.
+- **Measured with real loadouts on 70291 (#5, 2026-10-09):** the largest of 5 saved entries, covering every bar, encodes to **1,508 bytes** on the wire (envelope plus id and version).
 
 ## Build 1.60.1.70291 (2026-10-08) - client update, re-checked by hand
 
