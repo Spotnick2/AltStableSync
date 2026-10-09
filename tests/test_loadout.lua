@@ -1033,6 +1033,25 @@ do
     check("copy: duplicate name explained", said:find("already has a loadout with that name") ~= nil, said)
 end
 
+-- Rename takes an id or a one-word name (rehearsal: "rename Sync2 SyncA").
+do
+    boot(); ready(); save()
+    local e = A.Catalog.List("loadout", "PRIEST", "general")[1]
+    A._shown = nil
+    A.Commands.rename(e.name .. " Holiday")
+    eq("rename by name: preview shown", A._shown and A._shown.confirm, "Rename")
+    A._shown.onConfirm()
+    eq("rename by name: renamed", A.Catalog.Get(e.id).name, "Holiday")
+    A._shown = nil
+    A.Commands.rename(e.id .. " By Id")
+    A._shown.onConfirm()
+    eq("rename by id: renamed", A.Catalog.Get(e.id).name, "By Id")
+    WoW.chatLines = {}; A._shown = nil
+    A.Commands.rename("Nope Other")
+    eq("rename unknown: no preview", A._shown, nil)
+    check("rename unknown: says so", table.concat(WoW.chat(), " "):find("No loadout named") ~= nil)
+end
+
 -- Codex 3: Save As after a load that skipped entries warns first.
 do
     boot(); ready(); save(); alt()

@@ -278,10 +278,14 @@ end
 ------------------------------------------------------------
 
 function Commands.rename(arg)
-    local id, name = tostring(arg or ""):match("^%s*(%S+)%s+(.-)%s*$")
-    local e = id and ASS.Catalog.Get(id)
+    local key, name = tostring(arg or ""):match("^%s*(%S+)%s+(.-)%s*$")
+    if not key then Print("Usage: /altsync rename <id or one-word name> <new name>  (see /altsync list)") return end
+    -- An id, or a one-word name (a name with spaces needs the id).
+    local e = ASS.Catalog.Get(key)
     if not e or e.deleted or e.kind ~= "loadout" or e.class ~= PlayerClass() then
-        Print("Usage: /altsync rename <id> <new name>  (ids are in /altsync list)") return
+        local why
+        e, why = FindEntry(key)
+        if not e then for _, l in ipairs(why) do Print(l) end return end
     end
     if e.conflict then Print(Copy("conflict-copy")) return end
     local trimmed, nerr = ASS.Catalog.ValidateName(e.kind, e.class, e.category, name, e.id)
@@ -293,7 +297,7 @@ function Commands.rename(arg)
         lines = { ("%q becomes %q. Nothing on any character changes."):format(tostring(e.name), name) },
         confirm = "Rename",
         onConfirm = function()
-            local r, err = ASS.Catalog.Rename(id, name, version)
+            local r, err = ASS.Catalog.Rename(e.id, name, version)
             Print(r and ("Renamed to %q."):format(r.name)
                 or ("Not renamed: " .. Copy(err == "name-empty" and "rename-empty" or err)))
         end,
