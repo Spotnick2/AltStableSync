@@ -50,13 +50,14 @@ compared. A `/reload`, a stub test or the HTML mockup is never that proof.
 
 ## Saving from a lower-level character
 
-Load an entry on a low-level alt: the preview lists unlearned spells as skipped and leaves those
-destinations untouched.
+Load an entry on a low-level alt: the bars end up looking like the loadout. A slot whose spell or
+item the alt doesn't have yet is emptied (the preview lists each one with its reason), and so is a
+slot the loadout leaves empty. `/altsync restore 1` puts the bars back as they were.
 
 `/altsync save` (over the entry this character loaded) and `/altsync saveas` both keep the
 inherited entries the alt couldn't load (A07–A11 in `docs/ACCEPTANCE.md`). The Save preview lists
-them. `/altsync save drop` leaves them out of the entry instead; other characters' slots are never
-cleared by it.
+them. `/altsync save drop` leaves them out of the entry instead: those slots are then saved as
+empty, so a later Load empties them on every character (the preview says so).
 
 Save needs a **completed** load to compare against. After an interrupted load, load again first;
 Save As still works, but it warns that it captures the character as it is.

@@ -138,13 +138,15 @@ local function Resolve(want, modules, book)
     if want.kind == "spell" then
         if want.policy == "exact" then
             if Game.SpellKnown(want.id, book) then return { kind = "spell", id = want.id } end
-            return nil, "rank not known"
+            return nil, book.complete and "rank not known" or "spellbook unreadable"
         end
         local id = want.name and book.top[want.name]
         if id then return { kind = "spell", id = id } end
-        return nil, "not learned"
+        return nil, book.complete and "not learned" or "spellbook unreadable"
     elseif want.kind == "item" then
-        if Game.ItemCount(want.id) > 0 then return { kind = "item", id = want.id } end
+        local n = Game.ItemCountRead(want.id)
+        if n == nil then return nil, "items unreadable" end
+        if n > 0 then return { kind = "item", id = want.id } end
         return nil, "not in bags"
     elseif want.kind == "macro" then
         local matches = Game.MacrosNamed(want.name)
@@ -172,17 +174,30 @@ local function Resolve(want, modules, book)
     return nil, "not supported yet"
 end
 
--- plan = { kind = "load"|"restore", blocked, actions = {{slot, target, current}},
+-- plan = { kind = "load"|"restore", blocked, actions = {{slot, target, current, why}},
 --          creates = {{name, body, icon}}, keys = {[key] = {to = cmd|false, from}},
---          keysBlocked, skips = {{slot, reason}}, unavailable, noop, fingerprint }
+--          keysBlocked, skips = {{slot, reason}}, waiting = {{slot, reason}} (load),
+--          unavailable (restore), noop, fingerprint }
+-- An action with no target empties its slot; `why` is the loadout's reason
+-- when it held something this character can't use (#46). `skips` are left
+-- untouched; `waiting` are already empty and stay so until the character
+-- can use what the loadout has there.
 local function Finish(plan)
     plan.noop = #plan.actions == 0 and #plan.creates == 0 and next(plan.keys) == nil and not plan.resave
     plan.fingerprint = Serialize({ v = plan.version, w = plan.which, a = plan.actions, c = plan.creates,
                                    k = plan.keys, kb = plan.keysBlocked or false, s = plan.skips,
-                                   r = plan.resave or false,
+                                   wt = plan.waiting or {}, r = plan.resave or false,
                                    u = plan.unavailable or {}, b = plan.blocked or false })
     return plan
 end
+
+-- What this character verifiably can't use: Load empties the slot (#46).
+-- Every other reason (a failed read, a damaged or unsupported entry, an
+-- unknown reason) leaves the slot as it is.
+local EMPTIES = { ["not learned"] = true, ["rank not known"] = true, ["not in bags"] = true,
+                  ["account macro missing"] = true, ["macro name conflict"] = true,
+                  ["macro slots full"] = true }
+Loadout.EMPTIES = EMPTIES
 
 local KEYS_BLOCKED = "Enable character-specific keybindings in WoW settings, then try again."
 
@@ -232,7 +247,7 @@ end
 function Loadout.Plan(entry)
     local Game = G()
     local plan = { kind = "load", entryId = entry.id, version = entry.version, name = entry.name,
-                   actions = {}, creates = {}, keys = {}, skips = {} }
+                   actions = {}, creates = {}, keys = {}, skips = {}, waiting = {} }
     if entry.kind ~= "loadout" then plan.blocked = "Not a loadout." return Finish(plan) end
     if entry.class ~= PlayerClass() then
         plan.blocked = "This loadout is for another class." return Finish(plan)
@@ -257,26 +272,38 @@ function Loadout.Plan(entry)
     for _, slot in ipairs(outside) do
         plan.skips[#plan.skips + 1] = { slot = slot, reason = "not supported on this build" }
     end
+    -- Every covered slot ends up as the loadout has it (#46): placed where
+    -- this character can, empty where the loadout is empty or holds what this
+    -- character verifiably can't use. Uncovered slots were never captured:
+    -- untouched. So is anything the backup couldn't put back.
     for _, slot in ipairs(Game.SLOT_LIST) do
-        local want = modules.actions and modules.actions[slot]
-        if want then
-            local target, why, create = Resolve(want, modules, book)
+        if ASS.Cover.Has(modules.cover, slot) then
+            local want = modules.actions and modules.actions[slot]
             local current = Game.ActionAt(slot)
-            if target and not Game.Restorable(current) then
-                target, why = nil, "slot holds something this slice can't put back"
-            end
-            if target and not Game.SameAction(current, target) and create and not creating[target.name] then
-                if charCount + #plan.creates >= Game.MAX_CHAR_MACROS then
+            local target, why, create
+            if want then target, why, create = Resolve(want, modules, book) end
+            local same = Game.SameAction(current, target)
+            if target and not same and create and not creating[target.name] and Game.Restorable(current) then
+                if charCount == nil then
+                    target, why = nil, "macros unreadable"
+                elseif charCount + #plan.creates >= Game.MAX_CHAR_MACROS then
                     target, why = nil, "macro slots full"
                 else
                     creating[target.name] = true
                     plan.creates[#plan.creates + 1] = { name = target.name, body = target.body, icon = target.icon }
                 end
+                same = Game.SameAction(current, target)
             end
-            if not target then
+            if want and not target and not EMPTIES[why] then
                 plan.skips[#plan.skips + 1] = { slot = slot, reason = why }
-            elseif not Game.SameAction(current, target) then
-                plan.actions[#plan.actions + 1] = { slot = slot, target = target, current = current }
+            elseif same then
+                if want and not target then plan.waiting[#plan.waiting + 1] = { slot = slot, reason = why, want = want } end
+            elseif not Game.Restorable(current) then
+                plan.skips[#plan.skips + 1] = { slot = slot, reason = "slot holds something this slice can't put back" }
+            else
+                local unusable = want ~= nil and target == nil
+                plan.actions[#plan.actions + 1] = { slot = slot, target = target, current = current,
+                                                    why = unusable and why or nil, want = unusable and want or nil }
             end
         end
     end
@@ -480,8 +507,14 @@ function Loadout.Load(entry, shown, abandon)
             -- Keys are compared only against Character keys: under Account
             -- bindings this character's own keys aren't what we read.
             if not G().CharacterBindings() then after.bindings = nil end
+            -- Every slot where the load couldn't place the loadout's action:
+            -- left as it was, already empty, or emptied (#46).
             unavailable = {}
             for _, s in ipairs(plan.skips) do unavailable[s.slot] = s.reason end
+            for _, s in ipairs(plan.waiting) do unavailable[s.slot] = s.reason end
+            for _, op in ipairs(plan.actions) do
+                if op.why then unavailable[op.slot] = op.why end
+            end
         end
         Record(entry, entry.modules, after, unavailable, result)
     end
@@ -578,9 +611,8 @@ end
 --   C empty, slot unavailable at load    -> B (an emptied skipped destination)
 --   anything else                        -> C (a deliberate change)
 -- `drop`: unavailable slots hold nothing in the entry instead; they stay in
--- its cover as "empty", which a Load never applies (an empty slot is not an
--- instruction to erase), and which keeps this character's own content there
--- from being taken on a later Save. Modules, slots and commands this build doesn't
+-- its cover as "empty", so a later Load empties them on every character
+-- (#46), and this character's own content there isn't taken on a later Save. Modules, slots and commands this build doesn't
 -- capture are kept from B as they are (A35). Returns nil plus a reason on a
 -- macro or key clash.
 function Loadout.Merge(rec, current, characterBindings, drop)
@@ -757,6 +789,7 @@ function Loadout.Merge(rec, current, characterBindings, drop)
     end
     return {
         added = added, addedFull = addedFull,
+        before = bAct,                  -- B's actions, for the preview's "was -> now"
         modules = out,
         noop = Serialize(out) == Serialize(B),
         kept = kept, dropped = dropped, notes = notes,

@@ -74,25 +74,39 @@ end
 -- Macros
 ------------------------------------------------------------
 
--- Every macro: { index, name, icon, body, scope = "account" | "char" }, or nil
--- when the list can't be read (unreadable is never "no macros").
-function Game.Macros()
+Game.MAX_CHAR_MACROS = (Constants and Constants.MacroConsts and Constants.MacroConsts.MAX_CHARACTER_MACROS) or 30
+local MAX_ACCOUNT_MACROS = (Constants and Constants.MacroConsts and Constants.MacroConsts.MAX_ACCOUNT_MACROS) or 120
+
+local function Count(n, max)
+    return type(n) == "number" and n >= 0 and n <= max and n == math.floor(n)
+end
+
+-- Every macro and the two counts: { list = {{ index, name, icon, body,
+-- scope = "account" | "char" }}, nAccount, nChar }, or nil when anything
+-- can't be read: a failed call, a count out of range, or a counted index
+-- with no name (unreadable is never "no macros", #46).
+function Game.MacroInventory()
     local out = {}
     local ok, nAccount, nChar = pcall(GetNumMacros)
-    if not ok then return nil end
+    if not ok or not Count(nAccount, MAX_ACCOUNT_MACROS) or not Count(nChar, Game.MAX_CHAR_MACROS) then return nil end
     local function read(i, scope)
         local okI, name, icon, body = pcall(GetMacroInfo, i)
-        if not okI then return false end
-        if name then out[#out + 1] = { index = i, name = name, icon = icon, body = body, scope = scope } end
+        if not okI or type(name) ~= "string" then return false end
+        out[#out + 1] = { index = i, name = name, icon = icon, body = body, scope = scope }
         return true
     end
-    for i = 1, nAccount or 0 do
+    for i = 1, nAccount do
         if not read(i, "account") then return nil end
     end
-    for i = CHAR_FIRST, CHAR_FIRST + (nChar or 0) - 1 do
+    for i = CHAR_FIRST, CHAR_FIRST + nChar - 1 do
         if not read(i, "char") then return nil end
     end
-    return out
+    return { list = out, nAccount = nAccount, nChar = nChar }
+end
+
+function Game.Macros()
+    local inv = Game.MacroInventory()
+    return inv and inv.list
 end
 
 -- The macros named `name`, or nil when the macro list can't be read.
@@ -106,12 +120,11 @@ function Game.MacrosNamed(name)
     return out
 end
 
+-- This character's macro count, or nil when it can't be read.
 function Game.CharMacroCount()
-    local ok, _, nChar = pcall(GetNumMacros)
-    return ok and nChar or 0
+    local inv = Game.MacroInventory()
+    return inv and inv.nChar
 end
-
-Game.MAX_CHAR_MACROS = (Constants and Constants.MacroConsts and Constants.MacroConsts.MAX_CHARACTER_MACROS) or 30
 
 ------------------------------------------------------------
 -- Spells
@@ -122,27 +135,37 @@ local BANK = (Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Playe
 -- The player's learned castable spells: { [id] = { name, low, order } }
 -- (`order`: the book index; ranks are ascending book items), and by name
 -- the top known rank (the same-name Spell entry that is not low rank).
+-- `complete` is false when any read failed: then a spell missing from it is
+-- not proof that it isn't learned (#46), and one whose rank read failed is
+-- known but never taken as a top rank.
 function Game.Spellbook()
-    local byId, top = {}, {}
+    local byId, top, complete = {}, {}, true
     local T = Enum and Enum.SpellBookItemType
     local okN, n = pcall(C_SpellBook.GetNumSpellBookSkillLines)
-    for line = 1, (okN and n or 0) do
+    if not okN or type(n) ~= "number" then n, complete = 0, false end
+    for line = 1, n do
         local okL, li = pcall(C_SpellBook.GetSpellBookSkillLineInfo, line)
-        if okL and type(li) == "table" and li.itemIndexOffset and li.numSpellBookItems then
+        if okL and type(li) == "table" and type(li.itemIndexOffset) == "number" and type(li.numSpellBookItems) == "number" then
             for i = li.itemIndexOffset + 1, li.itemIndexOffset + li.numSpellBookItems do
                 local okI, info = pcall(C_SpellBook.GetSpellBookItemInfo, i, BANK)
-                if okI and type(info) == "table" and info.spellID and info.name and not info.isPassive
+                if not okI or type(info) ~= "table" then
+                    complete = false
+                elseif info.spellID and info.name and not info.isPassive
                     and (not T or info.itemType == T.Spell) then
                     local okR, low = pcall(C_SpellBook.IsSpellBookItemLowRank, i, BANK)
-                    low = okR and low == true
+                    local rankRead = okR and type(low) == "boolean"
+                    if not rankRead then complete = false end
+                    low = rankRead and low
                     -- `order`: ranks are separate, ascending book items (measured).
                     byId[info.spellID] = { name = info.name, low = low, order = i }
-                    if not low then top[info.name] = info.spellID end
+                    if rankRead and not low then top[info.name] = info.spellID end
                 end
             end
+        else
+            complete = false
         end
     end
-    return { byId = byId, top = top }
+    return { byId = byId, top = top, complete = complete }
 end
 
 -- Known = in the spellbook scan (measured, 70245), low ranks included.
@@ -157,8 +180,14 @@ end
 ------------------------------------------------------------
 
 function Game.ItemCount(id)
+    return Game.ItemCountRead(id) or 0
+end
+
+-- The bag count, or nil when it can't be read (never "none", #46).
+function Game.ItemCountRead(id)
     local ok, n = pcall(C_Item.GetItemCount, id)
-    return ok and type(n) == "number" and n or 0
+    if ok and type(n) == "number" and n >= 0 then return n end
+    return nil
 end
 
 -- The slot's content, normalised:

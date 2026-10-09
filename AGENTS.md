@@ -57,8 +57,11 @@ over months. The full model is in `docs/DESIGN.md`; the short form:
 2. **Preview before write**, in our own prompt frame. **Never a StaticPopup** (it taints
    Blizzard's dialog pool; Quit then fails with `ADDON_ACTION_FORBIDDEN`, measured 70205).
 3. **Load/Apply is adaptive; snapshot restore is exact.** Never conflate them.
-4. **No clear-before-import.** Per-slot writes, verified by reading back; unresolvable entries stay
-   in the saved entry and their destinations are left untouched. The player retries explicitly.
+4. **No clear-before-import.** Per-slot writes, verified by reading back. Inside the entry's cover a
+   Load makes each slot match the entry (#46): placed where the character can, emptied where the
+   entry is empty or holds what the character **verifiably** can't use. Unresolvable entries stay in
+   the saved entry. A failed read, a damaged entry, an uncovered slot, or content the backup can't
+   put back is left untouched. The player retries explicitly.
 5. **Account macros are never edited, created or deleted.** Reuse only on name + normalised body +
    scope match; otherwise create a character macro. **No macro is ever deleted** unless the player
    explicitly asks. Macro mutations first, reindex, then place.

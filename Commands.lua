@@ -106,11 +106,23 @@ end
 function Commands.Describe(plan)
     local lines = {}
     if plan.blocked then return { plan.blocked } end
+    -- Slots that stay empty until this character can use what the loadout
+    -- has there (#46): listed, never counted as changes.
+    local function Waiting(out)
+        if #(plan.waiting or {}) == 0 then return end
+        out[#out + 1] = "Stays empty until this character can use it:"
+        local items = {}
+        for _, w in ipairs(plan.waiting) do
+            items[#items + 1] = { slot = w.slot, text = ("%s: %s"):format(DescribeAction(w.want), tostring(w.reason)) }
+        end
+        BySlot(out, items)
+    end
     if plan.noop and not plan.keysBlocked and #(plan.unavailable or {}) == 0 and #plan.skips == 0 then
         local out = { "Already matches the selected settings." }
         if plan.kind == "restore" and #(plan.kept or {}) > 0 then
             out[#out + 1] = ("Kept: %s that load created (not deleted)."):format(Plural(#plan.kept, "macro"))
         end
+        Waiting(out)
         return out
     end
     local nKeys = 0
@@ -126,7 +138,9 @@ function Commands.Describe(plan)
     end
     local items = {}
     for _, op in ipairs(plan.actions) do
-        items[#items + 1] = { slot = op.slot, text = ("%s -> %s"):format(DescribeAction(op.current), DescribeAction(op.target)) }
+        local text = ("%s -> %s"):format(DescribeAction(op.current), DescribeAction(op.target))
+        if op.why then text = ("%s (%s: %s)"):format(text, DescribeAction(op.want), op.why) end
+        items[#items + 1] = { slot = op.slot, text = text }
     end
     BySlot(lines, items)
     local keys = {}
@@ -144,21 +158,30 @@ function Commands.Describe(plan)
         lines[#lines + 1] = "Not changed:"
         BySlot(lines, items)
     end
+    Waiting(lines)
     if plan.kind == "restore" and #(plan.kept or {}) > 0 then
         lines[#lines + 1] = ("Kept: %s that load created (not deleted)."):format(Plural(#plan.kept, "macro"))
     end
     lines[#lines + 1] = plan.kind == "restore" and "Restore exact captured values. A backup is taken first."
-        or "Backup first. Verify every write. Unresolved slots stay untouched."
+        or "Backup first. Verify every write. Slots this character can't use yet are emptied."
     return lines
 end
 
-local function Report(kind, result, err)
+-- `plan`: the confirmed plan, for what the result doesn't carry (#46: the
+-- emptied and waiting slots; the saved result's shape stays as it is).
+local function Report(kind, result, err, plan)
     if not result then
         Print((kind == "load" and "Not loaded: " or "Not restored: ") .. Copy(err))
         return
     end
+    local waiting = plan and #(plan.waiting or {}) or 0
     if result.noop and not result.partial and #(result.skips or {}) > 0 then
         Print(("Nothing applied: %d left unchanged (see the preview's list)."):format(#result.skips))
+        return
+    end
+    if result.noop and not result.partial and waiting > 0 then
+        Print(("Already matches the loadout; %s stay%s empty until this character can use %s.")
+            :format(Plural(waiting, "slot"), waiting == 1 and "s" or "", waiting == 1 and "it" or "them"))
         return
     end
     if result.noop and not result.partial then
@@ -179,8 +202,13 @@ local function Report(kind, result, err)
             :format(result.failed, tostring(result.at), result.changed, result.keys, next_))
         return
     end
-    local msg = ("%s: %d slots, %d keys%s."):format(kind == "load" and "Loaded" or "Restored",
-        result.changed, result.keys, result.created > 0 and (", " .. result.created .. " macros created") or "")
+    local emptied = 0
+    if kind == "load" and plan then
+        for _, op in ipairs(plan.actions) do if op.target == nil then emptied = emptied + 1 end end
+    end
+    local msg = ("%s: %d slots%s, %d keys%s."):format(kind == "load" and "Loaded" or "Restored",
+        result.changed, emptied > 0 and (" (" .. emptied .. " emptied)") or "",
+        result.keys, result.created > 0 and (", " .. result.created .. " macros created") or "")
     if skipped > 0 then msg = msg .. " " .. skipped .. " left unchanged (see the preview's list)." end
     if result.partial then msg = msg .. " Partial: some entries couldn't be restored exactly; the backup is kept." end
     Print(msg)
@@ -259,9 +287,14 @@ function Commands.save(arg)
         lines[#lines + 1] = ("Adds %s this loadout didn't cover yet (%d with an action, counted above)."):format(
             Plural(m.added, "slot"), m.addedFull or 0)
     end
+    -- Each changed slot as "was -> now", so filling a slot the loadout keeps
+    -- for a spell this character doesn't have yet shows what it replaces.
     local items = {}
     for _, slot in ipairs(m.changed) do
-        items[#items + 1] = { slot = slot, text = DescribeAction(m.modules.actions[slot]) }
+        local was, now = (m.before or {})[slot], m.modules.actions[slot]
+        local text = ("%s -> %s"):format(DescribeAction(was), DescribeAction(now))
+        if DescribeAction(was) == DescribeAction(now) then text = DescribeAction(now) .. " (macro text or icon changed)" end
+        items[#items + 1] = { slot = slot, text = text }
     end
     BySlot(lines, items)
     for _, cmd in ipairs(m.keysChanged) do
@@ -276,7 +309,7 @@ function Commands.save(arg)
         if not drop then lines[#lines + 1] = "To leave the unusable ones out instead: /altsync save drop" end
     end
     if #m.dropped > 0 then
-        lines[#lines + 1] = "Won't be kept (other characters' slots are left alone):"
+        lines[#lines + 1] = "Won't be kept (a later Load empties these slots on every character):"
         items = {}
         for _, k in ipairs(m.dropped) do items[#items + 1] = { slot = k.slot, text = ("%s (%s)"):format(DescribeAction(k.want), k.reason) } end
         BySlot(lines, items)
@@ -366,7 +399,10 @@ function Commands.load(arg)
         title = "Load " .. tostring(entry.name) .. "?",
         lines = lines,
         confirm = confirm,
-        onConfirm = function() Report("load", ASS.Loadout.Load(entry, plan, pinned ~= nil)) end,
+        onConfirm = function()
+            local r, err = ASS.Loadout.Load(entry, plan, pinned ~= nil)
+            Report("load", r, err, plan)
+        end,
     })
 end
 

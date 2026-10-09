@@ -161,9 +161,11 @@ do
     local plan = L.Plan(entry)
     eq("plan: not blocked", plan.blocked, nil)
     eq("plan: wrote nothing", #G.calls, 0)
-    local why = {}
+    local why, emptied = {}, {}
     for _, s in ipairs(plan.skips) do why[s.slot] = s.reason end
-    eq("A07: future spell skipped", why[8], "not learned")
+    for _, op in ipairs(plan.actions) do if op.target == nil then emptied[op.slot] = op.why or "empty" end end
+    eq("A07: food emptied where the future spell goes (#46)", emptied[8], "not learned")
+    eq("A07: not listed as left unchanged", why[8], nil)
     eq("plan: flyout skipped", why[6], "not supported yet")
     eq("plan: ambiguous macro skipped", why[7], "not supported yet")
     eq("plan: one macro to create", #plan.creates, 1)
@@ -177,7 +179,7 @@ do
     eq("load: item placed", G.actions[3].id, 5512)
     eq("load: char macro created and placed", G.actions[4].kind == "macro" and G.actions[4].ref.name, "Shield")
     eq("load: account macro reused", G.actions[5].ref.name, "Acct")
-    eq("A07: food untouched where the future spell goes", G.actions[8].id, 4540)
+    eq("A07: food emptied where the future spell goes (#46)", G.actions[8], nil)
     eq("load: slot 6 kept (unsupported in entry)", G.actions[6].id, 2050)
     eq("A21: key swap", G.keys["1"] .. "," .. G.keys["2"], "ACTIONBUTTON1,ACTIONBUTTON2")
     eq("load: displaced unrelated key", G.keys["SHIFT-2"], "ACTIONBUTTON2")
@@ -266,8 +268,8 @@ do
     alt({ macros = { { name = "Shield", body = "/different", char = true }, { name = "Acct", body = "/say hi" } } })
     local plan = L.Plan(entry)
     local why = {}
-    for _, s in ipairs(plan.skips) do why[s.slot] = s.reason end
-    eq("conflict: skipped", why[4], "macro name conflict")
+    for _, s in ipairs(plan.waiting) do why[s.slot] = s.reason end
+    eq("conflict: stays empty, with the reason", why[4], "macro name conflict")
     eq("conflict: nothing to create", #plan.creates, 0)
     L.Load(entry, plan)
     eq("conflict: still one Shield", #A.Game.MacrosNamed("Shield"), 1)
@@ -290,7 +292,7 @@ do
     alt({ macros = full })
     plan = L.Plan(entry)
     why = {}
-    for _, s in ipairs(plan.skips) do why[s.slot] = s.reason end
+    for _, s in ipairs(plan.waiting) do why[s.slot] = s.reason end
     eq("A18: macro slots full", why[4], "macro slots full")
     G.calls = {}
     L.Load(entry, plan)
@@ -301,8 +303,8 @@ do
     alt({ macros = { { name = "Zed", body = "/z", char = true } } })
     plan = L.Plan(entry)
     why = {}
-    for _, s in ipairs(plan.skips) do why[s.slot] = s.reason end
-    eq("account macro missing: skipped", why[5], "account macro missing")
+    for _, s in ipairs(plan.waiting) do why[s.slot] = s.reason end
+    eq("account macro missing: stays empty, with the reason", why[5], "account macro missing")
 
     -- A20: account bindings -> the load is blocked with the instruction (#7:
     -- block and explain; never a partial load reported as done).
@@ -665,15 +667,23 @@ do
     check("partial op: still pinned", A.Backups.Operation() ~= nil)
 end
 
--- A load where everything was skipped says so instead of "already matches".
+-- A load where everything was left alone says so instead of "already
+-- matches"; one where the only differences stay empty says that (#46).
 do
     boot(); ready()
     local e = custom({ actions = { [1] = { kind = "spell", id = 2060, name = "Greater Heal", policy = "highest" } } })
-    alt()
+    alt({ actions = { [1] = { flyout = 7 } } })
     WoW.chatLines = {}
-    A.Commands.Report("load", L.Load(e, L.Plan(e)))
+    local p = L.Plan(e)
+    A.Commands.Report("load", L.Load(e, p), nil, p)
     local said = table.concat(WoW.chat(), "\n")
     check("skipped only: honest message", said:find("Nothing applied") ~= nil, said)
+    alt({ actions = {} })
+    WoW.chatLines = {}
+    p = L.Plan(e)
+    A.Commands.Report("load", L.Load(e, p), nil, p)
+    said = table.concat(WoW.chat(), "\n")
+    check("waiting only: says it stays empty", said:find("1 slot stays empty", 1, true) ~= nil, said)
 end
 
 ------------------------------------------------------------
@@ -1125,7 +1135,11 @@ do
     eq("advance: unavailable carried", rec().unavailable[8], "not learned")
     check("advance: second save is a no-op", L.PlanSave().noop)
 
-    -- The skipped destination emptied (the food moved away): still kept.
+    -- The skipped destination emptied (the food moved away): still kept. A
+    -- load since #46 empties it itself; a record from before #46, or a slot
+    -- left alone on a failed read, still holds the food in the comparison.
+    G.actions[8] = { kind = "item", id = 4540 }
+    rec().after.actions[8] = { kind = "item", id = 4540 }
     G.actions[8] = nil
     check("A07: emptied skipped slot -> still the spell", L.PlanSave().noop)
     -- Replaced deliberately with something supported: that is saved.
@@ -1422,6 +1436,9 @@ do
     -- The confirm refuses when the comparison it would commit changed, even
     -- if the saved modules didn't.
     loadedAlt()
+    -- A record from before #46: the load left the food in the skipped slot.
+    G.actions[8] = { kind = "item", id = 4540 }
+    rec().after.actions[8] = { kind = "item", id = 4540 }
     G.actions[10] = { kind = "spell", id = 2052 }
     local m = L.PlanSave()
     local v = A.Catalog.Get(entry.id).version
@@ -1646,7 +1663,7 @@ do
     A._shown = nil
     A.Commands.save()
     check("#5 old entry: preview says so", A._shown and table.concat(A._shown.lines, "\n"):find("didn't cover yet (1 with an action, counted above)", 1, true) ~= nil)
-    check("#5 old entry: grouped under the bar", A._shown and table.concat(A._shown.lines, "\n"):find("  Action Bar 5 (1):\n    button 4: item 4540", 1, true) ~= nil,
+    check("#5 old entry: grouped under the bar", A._shown and table.concat(A._shown.lines, "\n"):find("  Action Bar 5 (1):\n    button 4: empty -> item 4540", 1, true) ~= nil,
           A._shown and table.concat(A._shown.lines, " | "))
     local p = L.PlanSaveAs()
     eq("#5 old entry: Save As covers every bar", p and R(p.modules.cover), "1-120,145-180")
@@ -1783,6 +1800,266 @@ do
     G.combat = false
     A.Commands.load("Everyday")
     eq("preview: changes -> Load", A._shown and A._shown.confirm, "Load")
+end
+
+------------------------------------------------------------
+-- #46: Load makes the covered slots match the loadout. Placed where this
+-- character can; emptied where the loadout is empty or holds what this
+-- character verifiably can't use; everything else left alone.
+------------------------------------------------------------
+local GH = { kind = "spell", id = 2060, name = "Greater Heal", policy = "highest" }
+local FH = { kind = "spell", id = 2061, name = "Flash Heal", policy = "highest" }
+local function byReason(list)
+    local t = {}
+    for _, x in ipairs(list or {}) do t[x.slot] = x.reason or x.why or "op" end
+    return t
+end
+local function ops(plan)
+    local t = {}
+    for _, op in ipairs(plan.actions) do t[op.slot] = op end
+    return t
+end
+do
+    -- The warlock case: the loadout's slot 3 holds a spell this character
+    -- hasn't learned; the character has its own Flash Heal there, which the
+    -- loadout puts on slot 40. One copy is left, and the bar matches.
+    boot(); ready()
+    local e = custom({ actions = { [3] = GH, [40] = FH } })
+    alt({ actions = { [3] = { spell = 2061 }, [8] = { item = 4540 } } })
+    local before = state()
+    local plan = L.Plan(e)
+    local o = ops(plan)
+    eq("#46: unusable slot emptied", o[3] and o[3].target, nil)
+    eq("#46: with the loadout's reason", o[3] and o[3].why, "not learned")
+    eq("#46: loadout-empty slot in the cover emptied", o[8] and o[8].target == nil and o[8].why, nil)
+    check("#46: loadout-empty slot op exists", o[8] ~= nil)
+    eq("#46: not listed as left unchanged", byReason(plan.skips)[3], nil)
+    local text = table.concat(A.Commands.Describe(plan), "\n")
+    check("#46: preview names what goes and why", text:find("button 3: Flash Heal -> empty (Greater Heal: not learned)", 1, true) ~= nil, text)
+    check("#46: preview footer", text:find("can't use yet are emptied", 1, true) ~= nil, text)
+    WoW.chatLines = {}
+    A.Commands.Report("load", L.Load(e, plan), nil, plan)
+    local said = table.concat(WoW.chat(), "\n")
+    check("#46: result counts the emptied slots", said:find("(2 emptied)", 1, true) ~= nil, said)
+    eq("#46: slot 3 empty", G.actions[3], nil)
+    eq("#46: Flash Heal only where the loadout has it", G.actions[40] and G.actions[40].id, 2061)
+    eq("#46: food slot emptied", G.actions[8], nil)
+    eq("#46: recorded as unavailable", rec().unavailable[3], "not learned")
+    eq("#46: an emptied loadout-empty slot isn't unavailable", rec().unavailable[8], nil)
+    -- Again: nothing to write, and it says what stays empty.
+    local again = L.Plan(e)
+    check("#46: second load is a no-op", again.noop)
+    eq("#46: the slot waits", byReason(again.waiting)[3], "not learned")
+    local atext = table.concat(A.Commands.Describe(again), "\n")
+    check("#46: no-op preview lists the waiting slot", atext:find("Stays empty until this character can use it", 1, true) ~= nil, atext)
+    WoW.chatLines = {}
+    A.Commands.Report("load", L.Load(e, again), nil, again)
+    said = table.concat(WoW.chat(), "\n")
+    check("#46: no-op says it stays empty", said:find("Already matches the loadout; 1 slot stays empty", 1, true) ~= nil, said)
+    -- Save keeps the inherited spell (A08) and is a no-op.
+    local m = L.PlanSave()
+    check("#46 A08: save is a no-op", m and m.noop, m and #m.changed)
+    -- Restore puts back exactly what the load emptied.
+    L.Restore(1, L.PlanRestore(1))
+    eq("#46: restored exactly", state(), before)
+end
+
+do
+    -- What isn't touched: a slot outside the cover (never captured), even
+    -- with stray data; content the backup can't put back; a failed read.
+    boot(); ready()
+    local e = custom({ cover = { { 1, 12 } }, actions = { [3] = GH, [30] = FH } })
+    alt({ actions = { [3] = { flyout = 7 }, [30] = { item = 4540 }, [5] = { item = 4540 } } })
+    local plan = L.Plan(e)
+    local o = ops(plan)
+    eq("#46: outside the cover untouched", o[30], nil)
+    eq("#46: outside the cover not listed", byReason(plan.skips)[30], nil)
+    eq("#46: unrestorable content left", byReason(plan.skips)[3], "slot holds something this slice can't put back")
+    check("#46: loadout-empty covered slot emptied", o[5] ~= nil and o[5].target == nil)
+    L.Load(e, plan)
+    eq("#46: slot 30 keeps its item", G.actions[30] and G.actions[30].id, 4540)
+    eq("#46: the flyout stays", G.actions[3] and G.actions[3].kind, "flyout")
+end
+
+do
+    -- Absence must be verified: a failed read never empties a slot.
+    local function untouched(label, breakFn, restoreFn, want, reason)
+        boot(); ready()
+        local e = custom({ actions = { [3] = want } })
+        alt({ actions = { [3] = { item = 4540 } } })
+        breakFn()
+        local plan = L.Plan(e)
+        restoreFn()
+        eq(label .. ": left alone", byReason(plan.skips)[3], reason)
+        eq(label .. ": no op", ops(plan)[3], nil)
+    end
+    local realLow = C_SpellBook.IsSpellBookItemLowRank
+    untouched("#46 spellbook rank read fails", function()
+        C_SpellBook.IsSpellBookItemLowRank = function() error("read failed") end
+    end, function() C_SpellBook.IsSpellBookItemLowRank = realLow end, GH, "spellbook unreadable")
+    untouched("#46 rank read not a boolean", function()
+        C_SpellBook.IsSpellBookItemLowRank = function() return nil end
+    end, function() C_SpellBook.IsSpellBookItemLowRank = realLow end, GH, "spellbook unreadable")
+    local realInfo = C_SpellBook.GetSpellBookItemInfo
+    untouched("#46 spellbook item read fails", function()
+        -- Only the wanted rank's item fails (a whole failed book blocks on readiness).
+        C_SpellBook.GetSpellBookItemInfo = function(i, ...) if i == 3 then error("read failed") end return realInfo(i, ...) end
+    end, function() C_SpellBook.GetSpellBookItemInfo = realInfo end,
+        { kind = "spell", id = 2052, name = "Lesser Heal", policy = "exact" }, "spellbook unreadable")
+    local realCount = C_Item.GetItemCount
+    untouched("#46 item count fails", function()
+        C_Item.GetItemCount = function() error("read failed") end
+    end, function() C_Item.GetItemCount = realCount end, { kind = "item", id = 9999 }, "items unreadable")
+    local realNum = GetNumMacros
+    untouched("#46 macro count invalid", function()
+        GetNumMacros = function() return nil, 1 end
+    end, function() GetNumMacros = realNum end,
+        { kind = "macro", name = "Gone", scope = "account", body = "/x" }, "macros unreadable")
+    local realMI = GetMacroInfo
+    untouched("#46 counted macro without a name", function()
+        GetMacroInfo = function(i) if i == 1 then return nil end return realMI(i) end
+    end, function() GetMacroInfo = realMI end,
+        { kind = "macro", name = "Gone", scope = "account", body = "/x" }, "macros unreadable")
+    -- A failed rank read never makes a spell the top rank.
+    boot(); ready(); alt()
+    C_SpellBook.IsSpellBookItemLowRank = function() error("read failed") end
+    local book = A.Game.Spellbook()
+    C_SpellBook.IsSpellBookItemLowRank = realLow
+    eq("#46: unverified rank is not a top rank", book.top["Lesser Heal"], nil)
+    check("#46: but the spell is known", book.byId[2050] ~= nil)
+    eq("#46: book marked incomplete", book.complete, false)
+    boot(); ready(); alt()
+    eq("#46: a clean book is complete", A.Game.Spellbook().complete, true)
+    -- Entry limitations are left alone too.
+    boot(); ready()
+    local e = custom({ actions = { [3] = { kind = "macro", name = "NoDef", scope = "char", body = "/x" },
+                                   [4] = { kind = "unsupported", what = "flyout" } } })
+    alt({ actions = { [3] = { item = 4540 }, [4] = { item = 4540 } } })
+    local plan = L.Plan(e)
+    eq("#46: missing definition left alone", byReason(plan.skips)[3], "macro definition missing")
+    eq("#46: unsupported entry left alone", byReason(plan.skips)[4], "not supported yet")
+end
+
+do
+    -- Macro capacity: an unreadable count never creates, and creations
+    -- reserved by earlier slots fill the last free slot.
+    boot(); ready()
+    local mk = function(n) return { kind = "macro", name = n, scope = "char", body = "/" .. n } end
+    local e = custom({ actions = { [1] = mk("NewA"), [2] = mk("NewB"), [3] = mk("NewA") },
+                       macros = { NewA = { body = "/NewA" }, NewB = { body = "/NewB" } } })
+    local mac = { { name = "Acct", body = "/say hi" } }
+    for i = 1, 29 do mac[#mac + 1] = { name = ("M%02d"):format(i), body = "/m" .. i, char = true } end
+    alt({ macros = mac, actions = { [2] = { item = 4540 } } })
+    local plan = L.Plan(e)
+    eq("#46: one free macro slot: one create", #plan.creates, 1)
+    eq("#46: the repeated macro reuses its creation", ops(plan)[3] and ops(plan)[3].target and ops(plan)[3].target.name, "NewA")
+    eq("#46: no room left: emptied with the reason", ops(plan)[2] and ops(plan)[2].why, "macro slots full")
+    -- The capacity read fails (here: only the first count read): nothing is
+    -- created and the slot is left alone.
+    alt({ actions = { [1] = { item = 4540 } } })
+    local realNum, first = GetNumMacros, true
+    GetNumMacros = function() if first then first = false; return nil end return realNum() end
+    plan = L.Plan(e)
+    GetNumMacros = realNum
+    eq("#46: unreadable capacity: nothing created", #plan.creates, 0)
+    eq("#46: unreadable capacity: left alone", byReason(plan.skips)[1], "macros unreadable")
+end
+
+do
+    -- A mixed preview: emptied, waiting and left-alone slots each in their
+    -- own place, the waiting ones never counted as changes.
+    boot(); ready()
+    local e = custom({ actions = { [3] = GH, [4] = GH, [5] = GH } })
+    alt({ actions = { [3] = { item = 4540 }, [5] = { flyout = 7 } } })
+    local plan = L.Plan(e)
+    local text = table.concat(A.Commands.Describe(plan), "\n")
+    check("#46 mixed: one change", text:find("Actions: 1 slot change.", 1, true) ~= nil, text)
+    check("#46 mixed: waiting listed", text:find("Stays empty until this character can use it:\n  Action Bar 1 (1):\n    button 4: Greater Heal: not learned", 1, true) ~= nil, text)
+    check("#46 mixed: left alone listed", text:find("button 5: left unchanged: slot holds", 1, true) ~= nil, text)
+end
+
+do
+    -- Stale confirmation: a waiting slot's reason changes after the preview.
+    boot(); ready()
+    local e = custom({ actions = { [4] = { kind = "macro", name = "Shield", scope = "char", body = "/cast Power Word: Shield" } },
+                       macros = { Shield = { body = "/cast Power Word: Shield" } } })
+    local mac = { { name = "Acct", body = "/say hi" }, { name = "Shield", body = "/different", char = true } }
+    for i = 1, 29 do mac[#mac + 1] = { name = ("M%02d"):format(i), body = "/m" .. i, char = true } end
+    alt({ macros = mac, actions = {} })
+    local plan = L.Plan(e)
+    eq("#46 stale: waits on the conflict", byReason(plan.waiting)[4], "macro name conflict")
+    for _, m in ipairs(G.char) do if m.name == "Shield" then m.name = "Zzz" end end
+    G.sortMacros()
+    eq("#46 stale: now waits on capacity", byReason(L.Plan(e).waiting)[4], "macro slots full")
+    G.calls = {}
+    local had = A.char.loaded and A.char.loaded.loadout
+    local r, err = L.Load(e, plan)
+    check("#46 stale: refused", r == nil and tostring(err):find("changed", 1, true) ~= nil, tostring(err))
+    eq("#46 stale: wrote nothing", #G.calls, 0)
+    eq("#46 stale: record untouched", A.char.loaded and A.char.loaded.loadout, had)
+end
+
+do
+    -- Filling a gap the loadout keeps for a future spell is a deliberate
+    -- change: Save takes it, and the preview says what it replaces.
+    boot(); ready()
+    local e = custom({ actions = { [3] = GH } })
+    alt({ actions = {} })
+    L.Load(e, L.Plan(e))
+    G.actions[3] = { kind = "item", id = 4540 }
+    A._shown = nil
+    A.Commands.save("")
+    local text = A._shown and table.concat(A._shown.lines, "\n") or ""
+    check("#46: save preview shows was -> now", text:find("button 3: Greater Heal -> item 4540", 1, true) ~= nil, text)
+    A._shown.onConfirm()
+    eq("#46: the filled gap is saved", A.Catalog.Get(e.id).modules.actions[3].id, 4540)
+end
+
+do
+    -- save drop: a dropped action is a covered empty slot, so a later Load
+    -- empties it on another character; Restore puts it back.
+    boot(); ready()
+    local e = custom({ actions = { [3] = GH, [1] = FH } })
+    alt({ actions = {} })
+    L.Load(e, L.Plan(e))
+    G.actions[2] = { kind = "item", id = 4540 }             -- a real edit, so the Save happens
+    A._shown = nil
+    A.Commands.save("drop")
+    local text = A._shown and table.concat(A._shown.lines, "\n") or ""
+    check("#46: drop preview says a later Load empties it", text:find("a later Load empties these slots", 1, true) ~= nil, text)
+    A._shown.onConfirm()
+    eq("#46: dropped from the entry", A.Catalog.Get(e.id).modules.actions[3], nil)
+    check("#46: still covered", A.Cover.Has(A.Catalog.Get(e.id).modules.cover, 3))
+    main(); ready()
+    G.actions[3] = { kind = "spell", id = 2061 }
+    local before = state()
+    local live = A.Catalog.Get(e.id)
+    local plan = L.Plan(live)
+    L.Load(live, plan)
+    eq("#46: the main's slot 3 emptied", G.actions[3], nil)
+    L.Restore(1, L.PlanRestore(1))
+    eq("#46: restore puts it back", state(), before)
+end
+
+do
+    -- Interrupted while emptying: truthful failure, pinned backup, exact undo.
+    boot(); ready()
+    local e = custom({ actions = { [3] = GH } })
+    alt({ actions = { [3] = { item = 4540 }, [4] = { spell = 2061 } } })
+    local before = state()
+    G.combatAfter = 1
+    local p = L.Plan(e)
+    local r = L.Load(e, p)
+    G.combat = false
+    check("#46 interrupted: failed", r and r.failed ~= nil)
+    check("#46 interrupted: pinned", A.Backups.Operation() ~= nil)
+    eq("#46 interrupted: cursor clean", G.cursor, nil)
+    WoW.chatLines = {}
+    A.Commands.Report("load", r, nil, p)
+    local said = table.concat(WoW.chat(), "\n")
+    check("#46 interrupted: no emptied count claimed", said:find("emptied", 1, true) == nil, said)
+    L.Restore("op", L.PlanRestore("op"))
+    eq("#46 interrupted: restored exactly", state(), before)
 end
 
 finish("test_loadout")
