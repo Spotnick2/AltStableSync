@@ -66,9 +66,14 @@ local function main()
     }
 end
 
+-- Every supported slot (#5) plus two excluded sentinels, so "restored
+-- exactly" and "never touched" cover the whole surface.
 local function state()
     local parts = {}
-    for slot = 1, 12 do
+    local slots = {}
+    for _, slot in ipairs(A.Game.SLOT_LIST) do slots[#slots + 1] = slot end
+    slots[#slots + 1], slots[#slots + 2] = 130, 185
+    for _, slot in ipairs(slots) do
         local a = G.actions[slot]
         if a then
             parts[#parts + 1] = slot .. "=" .. a.kind .. ":" .. tostring(a.kind == "macro" and a.ref.name or a.id)
@@ -1201,7 +1206,7 @@ do
     local before = rec().version
     A.Catalog.Upsert({ id = entry.id, version = "ffffffffffff:1", parent = entry.version,
                        ancestors = { entry.version }, kind = "loadout", class = "PRIEST", category = "general",
-                       name = "Everyday", modules = { actions = {} } }, "Other")
+                       name = "Everyday", modules = { actions = {}, cover = { { 1, 12 } } } }, "Other")
     eq("sync never touches the record", rec().version, before)
     local m, why = L.PlanSave()
     eq("A39: stale refused", m, nil)
@@ -1322,19 +1327,20 @@ end
 do
     -- Slots, commands and macros outside this build's set survive a Save.
     local far = { kind = "macro", name = "Far", scope = "char", body = "/x" }
-    local recF = { baseline = { actions = { [1] = { kind = "spell", id = 7 }, [13] = far },
+    local recF = { baseline = { actions = { [1] = { kind = "spell", id = 7 }, [130] = far },
                                 macros = { Far = { body = "/x", icon = 1 } },
                                 bindings = { ACTIONBUTTON1 = { "1" }, MULTIACTIONBAR1BUTTON1 = { "F" } } },
                    after = { actions = { [1] = { kind = "spell", id = 7 } }, bindings = { ACTIONBUTTON1 = { "1" } } } }
     local curF = { actions = { [1] = { kind = "spell", id = 9 } }, macros = {}, bindings = { ACTIONBUTTON1 = { "1" } } }
     local out = L.Merge(recF, curF, true)
-    eq("outside slots: slot 13 kept", out and out.modules.actions[13] and out.modules.actions[13].name, "Far")
+    eq("outside slots: slot 130 kept", out and out.modules.actions[130] and out.modules.actions[130].name, "Far")
     eq("outside slots: its macro kept", out and out.modules.macros.Far and out.modules.macros.Far.body, "/x")
     eq("outside commands: kept", out and out.modules.bindings.MULTIACTIONBAR1BUTTON1[1], "F")
     eq("outside commands: in-range change still saved", out and out.modules.actions[1].id, 9)
     -- An entry without some modules is still a noop when nothing changed.
-    local recN = { baseline = { actions = { [1] = { kind = "spell", id = 7 } } },
-                   after = { actions = { [1] = { kind = "spell", id = 7 } } } }
+    local full = { { 1, 120 }, { 145, 180 } }
+    local recN = { baseline = { actions = { [1] = { kind = "spell", id = 7 } }, cover = full },
+                   after = { actions = { [1] = { kind = "spell", id = 7 } }, cover = full } }
     out = L.Merge(recN, { actions = { [1] = { kind = "spell", id = 7 } }, macros = {}, bindings = { ACTIONBUTTON1 = {} } }, true)
     check("missing modules: noop", out and out.noop)
 
@@ -1379,7 +1385,7 @@ do
     A.Commands.save("drop")
     local text = table.concat(A._shown.lines, "\n")
     check("preview: key listed", text:find("ACTIONBUTTON3: 3", 1, true) ~= nil, text)
-    local _, n8 = text:gsub("slot 8:", "")
+    local _, n8 = text:gsub("button 8:", "")
     eq("preview: dropped slot listed once", n8, 1)
     G.keys["3"] = nil
 end
@@ -1522,6 +1528,139 @@ do
     m = L.PlanSave()
     eq("#42: rung via a changed slot: exact", m and m.modules.actions[10].policy, "exact")
 end
+
+-- #5: every bar (measured on 70291: 1-120 and 145-180).
+local function R(c)
+    local t = {}
+    for _, r in ipairs(c or {}) do t[#t + 1] = r[1] .. "-" .. r[2] end
+    return table.concat(t, ",")
+end
+do
+    -- Capture covers the measured slots and nothing else.
+    boot(); ready(); main()
+    G.actions[30] = { kind = "item", id = 5512 }            -- Action Bar 4
+    G.actions[80] = { kind = "spell", id = 9472 }           -- a stance/form page
+    G.actions[150] = { kind = "item", id = 5512 }           -- Action Bar 6
+    G.actions[130] = { kind = "item", id = 5512 }           -- skyriding/possess page: excluded
+    G.actions[185] = { kind = "item", id = 5512 }           -- above 180: excluded
+    local m = L.Capture()
+    eq("#5: cover", R(m.cover), "1-120,145-180")
+    check("#5: other bars captured", m.actions[30] and m.actions[80] and m.actions[150])
+    check("#5: excluded slots not captured", m.actions[130] == nil and m.actions[185] == nil)
+    eq("#5: labels", table.concat({ A.Game.SlotLabel(80) }, " "), "Stance/form page 1 8")
+    eq("#5: labels, bar 2", table.concat({ A.Game.SlotLabel(61) }, " "), "Action Bar 2 1")
+
+    -- Load across bars; excluded slots are never written; restore is exact.
+    entry = A.Catalog.Create("loadout", { class = "PRIEST", category = "general", name = "Bars" }, m)
+    alt()
+    G.actions[130] = { kind = "item", id = 4540 }
+    G.actions[185] = { kind = "item", id = 4540 }
+    local before = state()
+    local r = L.Load(entry, L.Plan(entry))
+    check("#5: loaded", r and not r.failed, r and tostring(r.failed))
+    eq("#5: bar 4 written", G.actions[30] and G.actions[30].id, 5512)
+    eq("#5: form page written (the alt's top Flash Heal)", G.actions[80] and G.actions[80].id, 2061)
+    eq("#5: bar 6 written", G.actions[150] and G.actions[150].id, 5512)
+    eq("#5: excluded 130 untouched", G.actions[130].id, 4540)
+    eq("#5: excluded 185 untouched", G.actions[185].id, 4540)
+    L.Restore(1, L.PlanRestore(1))
+    eq("#5: restored exactly across bars", state(), before)
+
+    -- A backup slot outside the set is reported, never written.
+    A.Backups.Get(1).actions[130] = false
+    local rp = L.PlanRestore(1)
+    local why
+    for _, u in ipairs(rp.unavailable) do if u.slot == 130 then why = u.reason end end
+    eq("#5: restore outside the set: reported", why, "not supported on this build")
+    eq("#5: restore outside the set: untouched", G.actions[130].id, 4540)
+
+    -- A rank ladder split across two bars (#42).
+    boot(); ready(); main()
+    G.actions[12] = nil
+    G.actions[40] = { kind = "spell", id = 2052 }
+    m = L.Capture()
+    eq("#5: ladder across bars: low", m.actions[2].policy, "exact")
+    eq("#5: ladder across bars: high", m.actions[40].policy, "highest")
+end
+
+-- #5: an entry captured by a 1-12 build. Save adds the other bars once,
+-- then is a no-op; Save As does the same.
+do
+    boot(); ready(); main()
+    local old = L.Capture()
+    for slot in pairs(old.actions) do if slot > 12 then old.actions[slot] = nil end end
+    old.cover = { { 1, 12 } }
+    entry = A.Catalog.Create("loadout", { class = "PRIEST", category = "general", name = "Old" }, old)
+    alt()
+    G.actions[40] = { kind = "item", id = 4540 }            -- the alt's own bar 5
+    L.Load(entry, L.Plan(entry))
+    local m = L.PlanSave()
+    check("#5 old entry: not a no-op", m and not m.noop)
+    eq("#5 old entry: slots added", m and m.added, #A.Game.SLOT_LIST - 12)
+    eq("#5 old entry: with an action", m and m.addedFull, 1)
+    A._shown = nil
+    A.Commands.save()
+    check("#5 old entry: preview says so", A._shown and table.concat(A._shown.lines, "\n"):find("didn't cover yet (1 with an action)", 1, true) ~= nil)
+    check("#5 old entry: grouped under the bar", A._shown and table.concat(A._shown.lines, "\n"):find("  Action Bar 5 (1):\n    button 4: item 4540", 1, true) ~= nil,
+          A._shown and table.concat(A._shown.lines, " | "))
+    local p = L.PlanSaveAs()
+    eq("#5 old entry: Save As covers every bar", p and R(p.modules.cover), "1-120,145-180")
+    eq("#5 old entry: Save As takes bar 5", p and p.modules.actions[40] and p.modules.actions[40].id, 4540)
+    check("#5 old entry: saved", L.Save(m) ~= nil)
+    local e = A.Catalog.Get(entry.id)
+    eq("#5 old entry: cover now every bar", R(e.modules.cover), "1-120,145-180")
+    eq("#5 old entry: bar 5 saved", e.modules.actions[40].id, 4540)
+    check("#5 old entry: second Save is a no-op", L.PlanSave().noop)
+end
+
+-- #5: a comparison taken by a 1-12 build (A covers 1-12) never turns into
+-- "observed": an inherited slot outside it is kept on every Save.
+do
+    boot(); ready(); main()
+    G.actions[30] = { kind = "item", id = 5512 }
+    entry = A.Catalog.Create("loadout", { class = "PRIEST", category = "general", name = "Wide" }, L.Capture())
+    alt()
+    L.Load(entry, L.Plan(entry))
+    rec().after.cover = { { 1, 12 } }                       -- what the 1-12 build's load recorded
+    for slot in pairs(rec().after.actions) do if slot > 12 then rec().after.actions[slot] = nil end end
+    G.actions[30] = { kind = "item", id = 4540 }            -- different from the entry
+    G.actions[10] = { kind = "spell", id = 2052 }           -- a real edit, so the Save happens
+    local m = L.PlanSave()
+    eq("#5 old comparison: inherited slot kept", m and m.modules.actions[30].id, 5512)
+    check("#5 old comparison: saved", L.Save(m) ~= nil)
+    check("#5 old comparison: still not covered by the comparison", not A.Cover.Has(rec().after.cover, 30))
+    m = L.PlanSave()
+    eq("#5 old comparison: second Save keeps it", m and m.modules.actions[30].id, 5512)
+end
+
+-- #5: a newly covered slot that can't be read at the first Save stays
+-- uncovered, is captured once it reads, and the next Save is a no-op.
+local function unreadableThenReadable(viaSaveAs)
+    boot(); ready(); main()
+    local old = L.Capture()
+    for slot in pairs(old.actions) do if slot > 12 then old.actions[slot] = nil end end
+    old.cover = { { 1, 12 } }
+    entry = A.Catalog.Create("loadout", { class = "PRIEST", category = "general", name = "Old2" }, old)
+    alt()
+    L.Load(entry, L.Plan(entry))
+    G.actions[50] = { kind = "flyout", id = 2 }             -- unreadable at the first Save
+    local tag = viaSaveAs and "#5 unreadable (Save As): " or "#5 unreadable: "
+    if viaSaveAs then
+        local p = L.PlanSaveAs()
+        check(tag .. "forked", L.SaveAs(p, "Fork2") ~= nil)
+    else
+        check(tag .. "first Save", saveNow() ~= nil)
+    end
+    local e = A.Catalog.Get(rec().id)
+    check(tag .. "not covered yet", not A.Cover.Has(e.modules.cover, 50))
+    G.actions[50] = { kind = "item", id = 4540 }
+    check(tag .. "second Save", saveNow() ~= nil)
+    e = A.Catalog.Get(rec().id)
+    eq(tag .. "captured", e.modules.actions[50] and e.modules.actions[50].id, 4540)
+    check(tag .. "third Save is a no-op", L.PlanSave().noop)
+end
+unreadableThenReadable(false)
+unreadableThenReadable(true)
 
 -- Commands: the preview is frozen; no record means Save As; fresh Save As sets the record.
 do

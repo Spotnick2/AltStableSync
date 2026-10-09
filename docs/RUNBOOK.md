@@ -61,11 +61,20 @@ cleared by it.
 Save needs a **completed** load to compare against. After an interrupted load, load again first;
 Save As still works, but it warns that it captures the character as it is.
 
-## Druid forms
+## Bars, stances and forms
 
-Bars swap pages when a druid changes form. Until probe #29 has mapped which underlying slots each
-form uses (active and inactive), druid form pages are reported as unavailable rather than guessed.
-Changing form never saves or loads anything.
+A loadout covers Action Bars 1–8 (both pages of Action Bar 1) and the four stance/form pages, hidden
+bars included (measured on 70291, #5). Stance and form pages are written by slot whatever form the
+character is in; changing form never saves or loads anything. The preview names them "Stance/form
+page 1–4" until a character with forms measures which is which (`/syncprobe bars <label>` in each
+form).
+
+A loadout saved before this version covers Action Bar 1 only. The first `/altsync save` over it
+after a load adds the other bars ("Adds N slots this loadout didn't cover yet"); the next one is
+"Already saved".
+
+**Update both accounts together.** This version speaks sync schema 2. While one account is still on
+the old version, sync pauses both ways and `/altsync link` on the updated one says "sync paused".
 
 ## Nov 4 launch — day-one checklist (draft; finalised by #13)
 

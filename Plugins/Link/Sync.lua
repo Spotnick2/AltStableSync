@@ -78,6 +78,18 @@ function Sync.New(o)
         report(text)
     end
 
+    -- A peer on another wire schema (#5) is paused, not refused: nothing it
+    -- sends is cached as handled, so once it updates, the same versions are
+    -- fetched. Its first message at our schema clears the pause.
+    local function Incompatible(p, why)
+        if why ~= "older-schema" and why ~= "newer-schema" then return false end
+        p.schema = why
+        Once("schema:" .. p.guid .. ":" .. why, why == "older-schema"
+            and ("Your other account (%s) runs an older AltStableSync: sync is paused until both are updated."):format(p.label)
+            or ("Your other account (%s) runs a newer AltStableSync: update this one; sync is paused until then."):format(p.label))
+        return true
+    end
+
     local function Peer(guid, label)
         local p = peers[guid]
         if not p then
@@ -266,6 +278,8 @@ function Sync.New(o)
         -- version (late, after a timeout) leaves the newer request alone.
         if asked and asked.version == rver then p.out[rid] = nil end
         local entry, why = Env.Decode(text)
+        if not entry and Incompatible(p, why) then Pump(p) return end
+        p.schema = nil
         if entry and (entry.id ~= rid or entry.version ~= rver) then entry, why = nil, "mismatch" end
         if not entry then
             -- Refused: don't ask for THAT version again this session.
@@ -302,8 +316,9 @@ function Sync.New(o)
         end
         p.heard = true
         if kind == "ENT" then return OnEntry(p, body) end
-        local m = Env.Unpack(body)
-        if not m then return end
+        local m, why = Env.Unpack(body)
+        if not m then Incompatible(p, why) return end
+        p.schema = nil
         if kind == "MAN" then return OnManifest(p, m, tonumber(sid)) end
         if kind == "REQ" then return OnRequest(p, m) end
     end
@@ -358,12 +373,14 @@ function Sync.New(o)
     ------------------------------------------------------------
 
     -- The listed peers: { label, guid, heard = it has spoken (runs the Link
-    -- addon), complete = we hold its whole manifest }.
+    -- addon), complete = we hold its whole manifest, schema = "older-schema" |
+    -- "newer-schema" while it runs an incompatible AltStableSync }.
     function self.Peers()
         local out = {}
         for _, p in pairs(peers) do
             if p.listed then
-                out[#out + 1] = { label = p.label, guid = p.guid, heard = p.heard, complete = p.manifest ~= nil }
+                out[#out + 1] = { label = p.label, guid = p.guid, heard = p.heard, complete = p.manifest ~= nil,
+                                  schema = p.schema }
             end
         end
         table.sort(out, function(a, b) return a.label < b.label end)

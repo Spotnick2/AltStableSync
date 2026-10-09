@@ -32,7 +32,7 @@ local function boot()
 end
 
 local A, C = boot()
-local function mods(tag) return { actions = { [1] = { spell = tag } }, bindings = {}, macros = {} } end
+local function mods(tag) return { actions = { [1] = { spell = tag } }, bindings = {}, macros = {}, cover = { { 1, 12 } } } end
 local function loadout(class, category, name, tag)
     return C.Create("loadout", { class = class, category = category, name = name,
                                  provenance = { sourceChar = "Karuzo-Elegia", build = "70245" } }, mods(tag))
@@ -308,11 +308,17 @@ do
     bad("name a table", with("name", {}))
     bad("modules a string", with("modules", "x"))
     bad("empty version", with("version", ""))
-    local lo = { id = "loadout-peer-1", version = "peer:2", kind = "loadout", name = "Everyday", modules = {} }
+    local lo = { id = "loadout-peer-1", version = "peer:2", kind = "loadout", name = "Everyday",
+                 modules = { cover = { { 1, 12 } } } }
     local function lwith(k, v) local x = C.Copy(lo); x[k] = v; return x end
     bad("loadout without class or category", C.Copy(lo))
     bad("loadout without category", lwith("class", "PRIEST"))
     bad("loadout with empty class", (function() local x = lwith("class", ""); x.category = "holy"; return x end)())
+    -- A loadout without a valid cover (#5): every schema-2 sender stamps one.
+    local nocover = lwith("class", "PRIEST"); nocover.category = "holy"; nocover.modules = {}
+    bad("loadout without a cover", nocover)
+    local badcover = lwith("class", "PRIEST"); badcover.category = "holy"; badcover.modules = { cover = { { 12, 1 } } }
+    bad("loadout with a malformed cover", badcover)
     -- A category key this build doesn't know (a newer build's) is accepted.
     local newer = lwith("class", "PRIEST"); newer.category = "newcategory"
     eq("loadout with a newer category key: accepted", C.Upsert(newer, "Kaleid"), "replace")

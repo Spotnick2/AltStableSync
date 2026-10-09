@@ -22,12 +22,87 @@ local ADDON_NAME = "AltStableSync"
 -- The schema this build reads and writes, for both the DB and the per-character
 -- table. A NEWER schema came from a newer AltStableSync: refuse it and touch
 -- nothing (AGENTS.md safety rule 8). The upgrades this build knows: the
--- empty schema-1 DB the scaffold wrote, and 2 -> 3, which only re-stamps
--- (3 added the optional `after` and `unavailable` to the per-character
--- `loaded` record, #28; a schema-2 record has neither and is never given an
--- invented one). There is no migration framework.
-local SCHEMA = 3
+-- empty schema-1 DB the scaffold wrote; 2 -> 3 (3 added the optional `after`
+-- and `unavailable` to the per-character `loaded` record, #28; a schema-2
+-- record has neither and is never given an invented one); and 3 -> 4 (#5),
+-- which stamps `cover = { {1, 12} }` on every loadout's modules, previous
+-- modules and loaded record: what the 1-12 builds captured. There is no
+-- migration framework.
+local SCHEMA = 4
 ASS.SCHEMA = SCHEMA
+
+------------------------------------------------------------
+-- Action-slot coverage (#5)
+------------------------------------------------------------
+
+-- Which action slots a capture covered: sorted, non-overlapping ranges
+-- { {first, last}, ... }. A slot outside an entry's cover was never captured
+-- (an older build), which is not the same as captured empty.
+local Cover = {}
+ASS.Cover = Cover
+Cover.LEGACY = { { 1, 12 } }        -- what every build before #5 captured
+Cover.MAX = 1000                    -- no action slot id is anywhere near this
+
+function Cover.Valid(c)
+    if type(c) ~= "table" or #c == 0 then return false end
+    local prev = 0
+    for i = 1, #c do
+        local r = c[i]
+        if type(r) ~= "table" or type(r[1]) ~= "number" or type(r[2]) ~= "number" then return false end
+        if r[1] ~= math.floor(r[1]) or r[2] ~= math.floor(r[2]) then return false end
+        if r[1] <= prev or r[2] < r[1] or r[2] > Cover.MAX then return false end
+        prev = r[2]
+    end
+    for k in pairs(c) do
+        if type(k) ~= "number" or k < 1 or k > #c then return false end
+    end
+    return true
+end
+
+-- The cover of a modules table; an entry without a valid one is taken as the
+-- 1-12 capture (only an entry that skipped the upgrade can lack it).
+function Cover.Of(modules)
+    local c = type(modules) == "table" and modules.cover
+    if Cover.Valid(c) then return c end
+    return Cover.LEGACY
+end
+
+function Cover.Has(c, slot)
+    for i = 1, #c do
+        if slot >= c[i][1] and slot <= c[i][2] then return true end
+    end
+    return false
+end
+
+-- { [slot] = true } -> ranges; nil for an empty set.
+function Cover.FromSet(set)
+    local slots = {}
+    for slot in pairs(set) do slots[#slots + 1] = slot end
+    if #slots == 0 then return nil end
+    table.sort(slots)
+    local out, first, last = {}, slots[1], slots[1]
+    for i = 2, #slots do
+        if slots[i] == last + 1 then last = slots[i]
+        else out[#out + 1] = { first, last }; first, last = slots[i], slots[i] end
+    end
+    out[#out + 1] = { first, last }
+    return out
+end
+
+-- Adds every slot of `c` to `set` (and returns it).
+function Cover.AddTo(set, c)
+    for i = 1, #c do
+        for slot = c[i][1], c[i][2] do set[slot] = true end
+    end
+    return set
+end
+
+local function Legacy() return { { 1, 12 } } end
+
+-- 3 -> 4: a loadout's modules without a cover were captured by a 1-12 build.
+local function StampCover(modules)
+    if type(modules) == "table" and modules.cover == nil then modules.cover = Legacy() end
+end
 
 -- The client build docs/forever-api-notes.md was measured on. A different
 -- build says so once at login (see the client-update skill).
@@ -61,7 +136,7 @@ local function WrongSchema(what, schema)
 end
 
 -- Why the loaded SavedVariables can't be used, or nil plus what to do when
--- they can ("fresh", "upgrade1", "ok"). Pure: it inspects and never assigns,
+-- they can ("fresh", "upgrade1", "upgrade", "ok"). Pure: it inspects and never assigns,
 -- so a refusal leaves every table exactly as loaded and the client writes them
 -- back unchanged. Both tables are judged before either is touched.
 local function Validate(db, char)
@@ -87,7 +162,7 @@ local function Validate(db, char)
             return "AltStableSyncDB.backups is a " .. type(db.backups) .. ", not a table"
         end
         dbAction = "upgrade1"
-    elseif db.schema ~= SCHEMA and db.schema ~= 2 then
+    elseif db.schema ~= SCHEMA and db.schema ~= 2 and db.schema ~= 3 then
         return WrongSchema("saved data", db.schema)
     else
         for _, field in ipairs(DB_TABLES) do
@@ -95,7 +170,7 @@ local function Validate(db, char)
                 return "AltStableSyncDB." .. field .. " is a " .. type(db[field]) .. ", not a table"
             end
         end
-        dbAction = db.schema == 2 and "upgrade2" or "ok"
+        dbAction = db.schema == SCHEMA and "ok" or "upgrade"
     end
 
     -- The per-character table: missing or empty is a fresh start (the
@@ -109,12 +184,12 @@ local function Validate(db, char)
         return "AltStableSyncChar is a " .. type(char) .. ", not a table"
     elseif char.schema == nil then
         return "AltStableSyncChar has data but no schema"
-    elseif char.schema ~= SCHEMA and char.schema ~= 2 then
+    elseif char.schema ~= SCHEMA and char.schema ~= 2 and char.schema ~= 3 then
         return WrongSchema("character data", char.schema)
     elseif char.loaded ~= nil and type(char.loaded) ~= "table" then
         return "AltStableSyncChar.loaded is a " .. type(char.loaded) .. ", not a table"
     else
-        charAction = char.schema == 2 and "upgrade2" or "ok"
+        charAction = char.schema == SCHEMA and "ok" or "upgrade"
     end
     return nil, dbAction, charAction
 end
@@ -147,14 +222,26 @@ local function InitSavedVariables()
     local db = AltStableSyncDB
     if dbAction == "upgrade1" then
         db.profiles = nil          -- empty by validation
+    elseif dbAction == "upgrade" and type(db.presets) == "table" then
+        for _, e in pairs(db.presets) do
+            if type(e) == "table" and e.kind == "loadout" then
+                StampCover(e.modules)
+                if type(e.previous) == "table" then StampCover(e.previous.modules) end
+            end
+        end
     end
     db.schema = SCHEMA
     for _, field in ipairs(DB_TABLES) do db[field] = db[field] or {} end
 
     AltStableSyncChar = AltStableSyncChar or {}
-    -- 2 -> 3 only re-stamps: a schema-2 `loaded` record stays as it was, with no
-    -- `after`, which Save treats as "no usable comparison".
-    if charAction == "fresh" or charAction == "upgrade2" then AltStableSyncChar.schema = SCHEMA end
+    -- A schema-2 `loaded` record stays without `after`, which Save treats as
+    -- "no usable comparison"; its baseline (and a schema-3 `after`) were
+    -- captured by a 1-12 build, so they get that cover.
+    if charAction == "upgrade" then
+        local rec = type(AltStableSyncChar.loaded) == "table" and AltStableSyncChar.loaded.loadout
+        if type(rec) == "table" then StampCover(rec.baseline); StampCover(rec.after) end
+    end
+    if charAction == "fresh" or charAction == "upgrade" then AltStableSyncChar.schema = SCHEMA end
 
     ASS.db = db
     ASS.char = AltStableSyncChar

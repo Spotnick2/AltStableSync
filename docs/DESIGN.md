@@ -137,7 +137,7 @@ bus.
 
 ```lua
 AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
-  schema = 3,                       -- #27 upgraded 1 -> 2, #28 2 -> 3; an unknown or newer schema is refused untouched
+  schema = 4,                       -- #27 1 -> 2, #28 2 -> 3, #5 3 -> 4; an unknown or newer schema is refused untouched
   presets = {
     [id] = {
       id = "loadout-a1b2c3d4e5f6-12",          -- kind-writer-seq: never collides across accounts or copies
@@ -150,7 +150,8 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
       ancestors = { "f00dbabe0000:9", ... },   -- the last 20 versions this one descends from (incl. parent)
       created = <time>, updated = <time>,      -- display metadata only, never ordering
       provenance = { sourceChar = "Name-Realm", build = "70245" },
-      modules = { actions = {...}, bindings = {...}, macros = {...} }   -- loadout
+      modules = { actions = {...}, bindings = {...}, macros = {...},    -- loadout
+                  cover = { {1, 120}, {145, 180} } }  -- the action slots captured (#5); 1-12 for older entries
              or { editmode = {...}, cvars = {...} },                    -- UI setup
       previous = { of = version, modules, updated },  -- LOCAL "undo my last Save": the content before the Save
                                                -- that produced version `of`; never sent, untouched by sync
@@ -169,7 +170,7 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
 }
 
 AltStableSyncChar = {               -- per character
-  schema = 3,                       -- same number as the DB; an unknown or newer one is refused untouched
+  schema = 4,                       -- same number as the DB; an unknown or newer one is refused untouched
   lastSelected = { ui = id, loadout = { category = "discipline", id = id } },
   loaded = {                        -- ONE baseline per kind: the last Load/Apply, or a Save/Save As (#28)
     ui = { id, version, baseline = <modules as loaded>, result = {...} },
@@ -203,6 +204,10 @@ AltStableSyncLAS = <LibAccountSync store only>   -- declared ONLY by AltStableSy
   is never given an invented `after`: Save treats it as "no usable comparison". A mixed DB 3 /
   character 2 upgrades the character; a newer schema in either table refuses both untouched, so an
   older build can never Save As from a record whose meaning it doesn't know.
+- **Schema 3 → 4** (#5): every loadout's `modules`, its `previous.modules` and each character's
+  `loaded.loadout.baseline`/`after` get `cover = { {1, 12} }`: what the 1-12 builds captured. A slot
+  outside an entry's cover was never captured, which is not the same as captured empty. Entries
+  arriving by sync must carry a valid cover; a local entry without one reads as 1-12.
 - **Categories** (`Categories.lua`): per class, a short list of stable keys with display text, plus
   `general` ("General / Leveling").
 
@@ -410,7 +415,7 @@ the previous content. It is not a history product.
 | Spell not learned | Keep it in the entry; leave the destination untouched; report it |
 | Different racial | Don't guess an equivalent; leave it unresolved, or use a named variant |
 | Alliance/Horde macro text | Keep the literal text; use named variants ("PvP - Horde") |
-| Druid forms | Capture the verified underlying form pages, including inactive ones (#29). A form switch is never an edit |
+| Druid forms, stances, stealth | The four stance/form pages (slots 73–120) are captured and written by slot id, active or not (measured, #5). A form switch is never an edit. Which form uses which page isn't measured yet, so previews say "Stance/form page N" |
 | Druid bars vs forms | Offer a separate whole UI setup ("My UI - Druid"); no form-layer editor |
 | F9 should disenchant | An Enchanting variant loadout; no profession rules engine |
 | Healer raid frames | Later: a raid-frame provider inside the loadout, excluded from the UI setup |
@@ -536,6 +541,10 @@ declared in exactly one TOC.
   outstanding per peer, and one completes when its entry arrives or after 30 seconds, when it goes
   back in the queue while still lacking. So an entry is never requested twice at once, and an id the
   peer never answers costs at most 3 requests per 30 seconds.
+- **Wire schema 2** (#5): every message kind carries `s = 2`. A 1-12 build sends and accepts only 1,
+  so sync between an updated and a not-yet-updated account **pauses** both ways: the updated side
+  says so once and its Link status shows "sync paused"; the old side shows entries as pending.
+  Update both accounts together.
 - **Wire format** (`Plugins/Link/Sync.lua`): `MAN\n<envelope>` (manifest batch
   `{ b = session, c = counter, p = part, n = parts, l = { [id] = version } }`), `REQ\n<envelope>`
   (`{ i = id }`, sent to one peer) and `ENT\n<id>\n<version>\n<envelope>` (one entry, sent to the
@@ -582,6 +591,7 @@ offline while A saved three times) a plain fast-forward rather than a conflict.
 | Local version is in incoming `ancestors`, or the id is unknown | **replace** (fast-forward). Local `previous` is untouched; it is local Save recovery only |
 | Anything else (both accounts saved from a common version, or the lag exceeded 20 saves) | **divergent**: keep the local entry; store the incoming one whole as conflict copy `<id>~<incoming version>`, named "<name> (from <char>)", with a one-line notice. If that conflict id already exists, live **or tombstoned**, ignore it |
 | Unknown or newer envelope schema | reject; local untouched |
+| Older envelope schema (a 1-12 build, #5) | reject, nothing imported or remembered as refused; that peer shows "sync paused" until it updates, then the same versions are fetched |
 
 - **Resolving a conflict settles both accounts.** The conflict copy offers **Keep this version** and
   **Keep mine**. Either one mints a new version of `<id>`: its content is the chosen version

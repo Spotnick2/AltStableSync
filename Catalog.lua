@@ -317,6 +317,11 @@ local function ValidIncoming(x)
         end
     end
     local contentless = x.deleted or (x.conflict and x.conflict.deletion)
+    -- Every schema-2 sender stamps a loadout's cover (#5).
+    if x.kind == "loadout" and not contentless and type(x.modules) == "table"
+        and not ASS.Cover.Valid(x.modules.cover) then
+        return false
+    end
     if not contentless and type(x.modules) ~= "table" then return false end
     return true
 end

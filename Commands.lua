@@ -82,6 +82,26 @@ local function DescribeAction(a)
     return tostring(a.what or a.kind)
 end
 
+-- Per-slot lines grouped under one heading per bar with its count (#5),
+-- ordered by slot. items = { { slot = n, text = "..." } }. Every line is kept:
+-- the preview scrolls.
+local function BySlot(lines, items)
+    table.sort(items, function(a, b) return a.slot < b.slot end)
+    local Game = ASS.Game
+    local i = 1
+    while i <= #items do
+        local bar = Game.SlotLabel(items[i].slot)
+        local j = i
+        while j < #items and (Game.SlotLabel(items[j + 1].slot)) == bar do j = j + 1 end
+        lines[#lines + 1] = ("  %s (%d):"):format(bar, j - i + 1)
+        for k = i, j do
+            local _, button = Game.SlotLabel(items[k].slot)
+            lines[#lines + 1] = (button and ("    button %d: "):format(button) or "    ") .. items[k].text
+        end
+        i = j + 1
+    end
+end
+
 -- The preview's lines for a plan (pure; tested).
 function Commands.Describe(plan)
     local lines = {}
@@ -104,20 +124,25 @@ function Commands.Describe(plan)
     else
         lines[#lines + 1] = ("Bindings (Destination: Character): %s change."):format(Plural(nKeys, "key"))
     end
+    local items = {}
     for _, op in ipairs(plan.actions) do
-        lines[#lines + 1] = ("  slot %d: %s -> %s"):format(op.slot, DescribeAction(op.current), DescribeAction(op.target))
+        items[#items + 1] = { slot = op.slot, text = ("%s -> %s"):format(DescribeAction(op.current), DescribeAction(op.target)) }
     end
+    BySlot(lines, items)
     local keys = {}
     for k, v in pairs(plan.keys) do keys[#keys + 1] = { k = k, v = v } end
     table.sort(keys, function(a, b) return a.k < b.k end)
     for _, kv in ipairs(keys) do
         lines[#lines + 1] = ("  %s: %s -> %s"):format(kv.k, kv.v.from or "unbound", kv.v.to or "unbound")
     end
-    for _, s in ipairs(plan.skips) do
-        lines[#lines + 1] = ("  slot %d left unchanged: %s"):format(s.slot, s.reason)
-    end
+    items = {}
+    for _, s in ipairs(plan.skips) do items[#items + 1] = { slot = s.slot, text = "left unchanged: " .. tostring(s.reason) } end
     for _, u in ipairs(plan.unavailable or {}) do
-        lines[#lines + 1] = ("  slot %d can't be restored exactly: %s"):format(u.slot, u.reason)
+        items[#items + 1] = { slot = u.slot, text = "can't be restored exactly: " .. tostring(u.reason) }
+    end
+    if #items > 0 then
+        lines[#lines + 1] = "Not changed:"
+        BySlot(lines, items)
     end
     if plan.kind == "restore" and #(plan.kept or {}) > 0 then
         lines[#lines + 1] = ("Kept: %s that load created (not deleted)."):format(Plural(#plan.kept, "macro"))
@@ -213,21 +238,31 @@ function Commands.save(arg)
         return
     end
     local lines = { ("%s and %s change in %q."):format(Plural(#m.changed, "slot"), Plural(#m.keysChanged, "key"), name) }
-    for _, slot in ipairs(m.changed) do
-        lines[#lines + 1] = ("  slot %d: %s"):format(slot, DescribeAction(m.modules.actions[slot]))
+    if (m.added or 0) > 0 then
+        lines[#lines + 1] = ("Adds %s this loadout didn't cover yet (%d with an action)."):format(
+            Plural(m.added, "slot"), m.addedFull or 0)
     end
+    local items = {}
+    for _, slot in ipairs(m.changed) do
+        items[#items + 1] = { slot = slot, text = DescribeAction(m.modules.actions[slot]) }
+    end
+    BySlot(lines, items)
     for _, cmd in ipairs(m.keysChanged) do
         local keys = m.modules.bindings and m.modules.bindings[cmd] or {}
         lines[#lines + 1] = ("  %s: %s"):format(cmd, #keys > 0 and table.concat(keys, ", ") or "unbound")
     end
     if #m.kept > 0 then
         lines[#lines + 1] = ("Keeping %s this character can't use:"):format(Plural(#m.kept, "entry"):gsub("entrys", "entries"))
-        for _, k in ipairs(m.kept) do lines[#lines + 1] = ("  slot %d: %s (%s)"):format(k.slot, DescribeAction(k.want), k.reason) end
+        items = {}
+        for _, k in ipairs(m.kept) do items[#items + 1] = { slot = k.slot, text = ("%s (%s)"):format(DescribeAction(k.want), k.reason) } end
+        BySlot(lines, items)
         if not drop then lines[#lines + 1] = "To leave the unusable ones out instead: /altsync save drop" end
     end
     if #m.dropped > 0 then
         lines[#lines + 1] = "Won't be kept (other characters' slots are left alone):"
-        for _, k in ipairs(m.dropped) do lines[#lines + 1] = ("  slot %d: %s (%s)"):format(k.slot, DescribeAction(k.want), k.reason) end
+        items = {}
+        for _, k in ipairs(m.dropped) do items[#items + 1] = { slot = k.slot, text = ("%s (%s)"):format(DescribeAction(k.want), k.reason) } end
+        BySlot(lines, items)
     end
     for _, n in ipairs(m.notes) do lines[#lines + 1] = n end
     lines[#lines + 1] = "Other characters keep their current setup until they load this version."
