@@ -348,8 +348,12 @@ rank always ranks highest. A lone deliberate downrank is read as "highest known"
 On Save, a slot holding **the same rank** as after the load is unchanged, even when its policy reads
 differently because other slots changed: it keeps the loaded policy, so a downrank inherited from the
 main stays exact and a stale caster rank never freezes into one. A rank change of a "highest known"
-spell is a rank update, not an edit. A ladder built on an alt by adding a rank to another slot
-therefore leaves the untouched lower rank as loaded; a plain Save As captures it.
+spell is a rank update, not an edit, when the loaded entry also says "highest known" (changing an
+entry's exact rank is an edit). A ladder built on an alt by adding a rank to another slot therefore
+leaves the untouched lower rank as loaded, and Save As from a loaded entry merges the same way. To
+record the rung, place the lower rank in a slot that held something else after the load: a changed
+slot is saved with its captured policy. Only a character with no usable loaded record, or a merge
+that refuses, gets a plain capture.
 
 **How Save tells "unchanged" from "changed"** (#28). A completed load records `after`, a capture of
 the slots, keys and character macros right after it, and `unavailable`, the slots it skipped. Save

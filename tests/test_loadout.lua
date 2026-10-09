@@ -1496,6 +1496,31 @@ do
     m = L.PlanSave()
     eq("#42: rung edit saved", m and m.modules.actions[12].id, 2050)
     eq("#42: rung edit exact", m and m.modules.actions[12].policy, "exact")
+
+    -- An entry's lone exact rank (the old rule made these), loaded: the
+    -- post-load capture reads it as highest. Changing its rank is an edit,
+    -- for Save and Save As.
+    boot(); ready(); main()
+    entry = custom({ actions = { [9] = { kind = "spell", id = 2050, name = "Lesser Heal", policy = "exact" } } })
+    alt()
+    local lr = L.Load(entry, L.Plan(entry))
+    check("#42: lone exact loaded", lr and not lr.failed)
+    eq("#42: post-load reads highest", rec().after.actions[9].policy, "highest")
+    G.actions[9] = { kind = "spell", id = 2052 }
+    m = L.PlanSave()
+    eq("#42: exact rank edited: saved", m and m.modules.actions[9].id, 2052)
+    eq("#42: exact rank edited: its policy", m and m.modules.actions[9].policy, "highest")
+    local p = L.PlanSaveAs()
+    eq("#42: exact rank edited: Save As too", p and p.modules.actions[9].id, 2052)
+
+    -- The documented way to record a rung built on an alt: the lower rank
+    -- in a slot that held something else after the load.
+    loadedAlt()
+    train()
+    G.actions[11] = { kind = "spell", id = 9473 }           -- r2 into slot 11
+    G.actions[10] = { kind = "spell", id = 2061 }           -- r1 into slot 10, which was empty
+    m = L.PlanSave()
+    eq("#42: rung via a changed slot: exact", m and m.modules.actions[10].policy, "exact")
 end
 
 -- Commands: the preview is frozen; no record means Save As; fresh Save As sets the record.

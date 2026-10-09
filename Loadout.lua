@@ -503,7 +503,7 @@ end
 -- Save's own "unchanged since the load?": action identity, plus a character
 -- macro's body and icon (an icon-only edit is a change). Game.SameAction is
 -- left as it is: it verifies writes.
-local function SaveSame(c, a, cMods, aMods)
+local function SaveSame(c, a, cMods, aMods, b)
     if c == nil or a == nil then return c == a end
     if c.kind ~= a.kind then return false end
     if c.kind == "macro" then
@@ -517,8 +517,10 @@ local function SaveSame(c, a, cMods, aMods)
     -- Spells (#42). The same rank is unchanged even when its policy flipped:
     -- a policy depends on the other slots, so an untouched slot keeps the
     -- loaded one. A rank update (a hunter bar after training, or the new rank
-    -- dragged in) is no change while both say "highest" for the same spell.
-    if c.kind == "spell" and c.policy == "highest" and a.policy == "highest" and c.name ~= nil and c.name == a.name then
+    -- dragged in) is no change while both say "highest" for the same spell,
+    -- and the loaded entry does too (an entry's exact rank, edited, is an edit).
+    if c.kind == "spell" and c.policy == "highest" and a.policy == "highest" and c.name ~= nil and c.name == a.name
+        and b and b.kind == "spell" and b.policy == "highest" then
         return true
     end
     return c.id == a.id
@@ -556,7 +558,7 @@ function Loadout.Merge(rec, current, characterBindings, drop)
         -- An unreadable A only hides an edit where the load skipped the slot;
         -- where the load placed B, a readable C is what is there now.
         elseif Unsupported(a) and was[slot] then keepB, keepA = true, true
-        elseif SaveSame(c, a, current, A) then keepB = true
+        elseif SaveSame(c, a, current, A, b) then keepB = true
         elseif c == nil and was[slot] then keepB = true
         end
         if keepB and drop and was[slot] and b ~= nil then
