@@ -65,6 +65,14 @@ function Link.Start()
     return true
 end
 
+-- A line for a command that just changed the catalog while sync is off
+-- (the setting persists across logins, so it is easy to forget), or nil.
+function Link.OffNote()
+    if Link.lib and not Link.lib.IsEnabled() then
+        return "Link is off: your other account won't see this until /altsync link on."
+    end
+end
+
 function Link.Tick()
     if Link.sync and Link.lib.IsEnabled() then Link.sync.Tick() end
 end

@@ -46,6 +46,14 @@ local function FindEntry(arg)
     return nil, lines
 end
 
+-- A catalog change succeeded: say so, and say if the other account won't
+-- hear of it because Link is off (#39). Nothing without the Link addon.
+local function Changed(msg)
+    Print(msg)
+    local note = ASS.Link and ASS.Link.OffNote and ASS.Link.OffNote()
+    if note then Print(note) end
+end
+
 local function Plural(n, word) return n .. " " .. word .. (n == 1 and "" or "s") end
 
 -- Catalog and Backups return short codes; this is the copy the player sees.
@@ -165,7 +173,7 @@ local function SaveAs(arg)
     local n, c = 0, 0
     for _ in pairs(modules.actions) do n = n + 1 end
     for _ in pairs(modules.macros) do c = c + 1 end
-    Print(("Saved %q (%d slots, bindings, %d character macros)."):format(e.name, n, c))
+    Changed(("Saved %q (%d slots, bindings, %d character macros)."):format(e.name, n, c))
 end
 
 -- Until #28, Save As is a fresh capture: when the last load here left entries
@@ -197,6 +205,24 @@ local function Conflicts()
         if e.conflict then out[#out + 1] = e end
     end
     return out
+end
+
+-- Conflicts on other classes' loadouts, which this character can't list or
+-- resolve: one line so they never hide behind "No conflicts" (#39).
+local function OtherClasses()
+    local mine, n, by = PlayerClass(), 0, {}
+    for _, e in ipairs(ASS.Catalog.Conflicts()) do
+        if e.kind == "loadout" and e.class ~= mine then
+            n = n + 1
+            by[tostring(e.class)] = (by[tostring(e.class)] or 0) + 1
+        end
+    end
+    if n == 0 then return nil end
+    local names = type(LOCALIZED_CLASS_NAMES_MALE) == "table" and LOCALIZED_CLASS_NAMES_MALE or {}
+    local parts = {}
+    for class, k in pairs(by) do parts[#parts + 1] = ("%s (%d)"):format(names[class] or class, k) end
+    table.sort(parts)
+    return ("%d more on other classes: %s. Resolve those on a character of that class."):format(n, table.concat(parts, ", "))
 end
 
 local function Marker(e, copies)
@@ -298,8 +324,8 @@ function Commands.rename(arg)
         confirm = "Rename",
         onConfirm = function()
             local r, err = ASS.Catalog.Rename(e.id, name, version)
-            Print(r and ("Renamed to %q."):format(r.name)
-                or ("Not renamed: " .. Copy(err == "name-empty" and "rename-empty" or err)))
+            if r then Changed(("Renamed to %q."):format(r.name))
+            else Print("Not renamed: " .. Copy(err == "name-empty" and "rename-empty" or err)) end
         end,
     })
 end
@@ -316,16 +342,21 @@ function Commands.delete(arg)
         confirm = "Delete",
         onConfirm = function()
             local r, err = ASS.Catalog.Delete(id, version)
-            Print(r and ("Deleted %q."):format(tostring(r.name)) or ("Not deleted: " .. Copy(err)))
+            if r then Changed(("Deleted %q."):format(tostring(r.name)))
+            else Print("Not deleted: " .. Copy(err)) end
         end,
     })
 end
 
 function Commands.conflicts()
-    local list = Conflicts()
-    if #list == 0 then Print("No conflicts.") return end
-    for _, c in ipairs(list) do Print(("  %s: %s"):format(c.id, tostring(c.name))) end
-    Print("Settle each with /altsync resolve <id> theirs or mine")
+    local list, others = Conflicts(), OtherClasses()
+    if #list == 0 then
+        Print(others and "No conflicts for this class." or "No conflicts.")
+    else
+        for _, c in ipairs(list) do Print(("  %s: %s"):format(c.id, tostring(c.name))) end
+        Print("Settle each with /altsync resolve <id> theirs or mine")
+    end
+    if others then Print(others) end
 end
 
 -- `resolve <id|name> theirs|mine`. For a deletion made on the other account,
@@ -376,7 +407,7 @@ function Commands.resolve(arg)
         confirm = "Resolve",
         onConfirm = function()
             local r, err = ASS.Catalog.Resolve(copyId, apiChoice, rootVersion)
-            Print(r and "Resolved." or ("Not resolved: " .. Copy(err)))
+            if r then Changed("Resolved.") else Print("Not resolved: " .. Copy(err)) end
         end,
     })
 end

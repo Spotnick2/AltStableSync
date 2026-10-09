@@ -152,6 +152,11 @@ function Catalog.ListAll(kind, class)
     return Collect(function(e) return e.kind == kind and (kind ~= "loadout" or e.class == class) end)
 end
 
+-- Every live conflict copy, of any kind and class.
+function Catalog.Conflicts()
+    return Collect(function(e) return type(e.conflict) == "table" end)
+end
+
 -- { [id] = version } for every entry, live, tombstoned or conflict copy: what
 -- the Link addon (#18) exchanges.
 function Catalog.Manifest()

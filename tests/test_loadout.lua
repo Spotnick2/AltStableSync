@@ -1052,6 +1052,21 @@ do
     check("rename unknown: says so", table.concat(WoW.chat(), " "):find("No loadout named") ~= nil)
 end
 
+-- #39: Save As carries the Link addon's off note (Link stubbed: test_sync covers Link itself).
+do
+    boot(); ready(); save()
+    WoW.chatLines = {}
+    A.Link = { OffNote = function() return "Link is off: test" end }
+    A.Commands.saveas("Noted")
+    local said = table.concat(WoW.chat(), " ")
+    check("saveas: off note after the result", (said:find("Link is off", 1, true) or 0) > (said:find("Saved", 1, true) or 1e9), said)
+    A.Link = nil
+    WoW.chatLines = {}
+    A.Commands.saveas("Plain")
+    said = table.concat(WoW.chat(), " ")
+    check("saveas: no Link addon, no note", said:find("Saved", 1, true) and not said:find("Link is off", 1, true), said)
+end
+
 -- Codex 3: Save As after a load that skipped entries warns first.
 do
     boot(); ready(); save(); alt()
