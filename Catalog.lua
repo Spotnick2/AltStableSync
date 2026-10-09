@@ -47,6 +47,15 @@ local function Copy(v, seen)
 end
 Catalog.Copy = Copy
 
+-- The Link addon (#18) listens for LOCAL writes, to tell the other account.
+-- Receipts (Upsert, and the retirements it causes) never fire this.
+local listeners = {}
+function Catalog.OnLocalWrite(fn) listeners[#listeners + 1] = fn end
+local function Wrote(e)
+    if e then for _, fn in ipairs(listeners) do pcall(fn) end end
+    return e
+end
+
 -- A new version token for this session's writer (Core.lua makes the token).
 local function Mint()
     ASS.seq = (ASS.seq or 0) + 1
@@ -89,6 +98,10 @@ end
 local function Trim(s)
     return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", ""))
 end
+Catalog.Trim = Trim
+
+-- The deterministic id of a conflict copy: root id + "~" + its version.
+local function CopyId(id, version) return id .. "~" .. version end
 
 local function SameList(e, kind, class, category)
     if e.kind ~= kind then return false end
@@ -112,15 +125,13 @@ end
 
 function Catalog.Get(id) return Presets()[id] end
 
--- Live entries of one list (kind, and for loadouts class + category), sorted
--- by name. Unresolved conflict copies are included (`entry.conflict` set);
--- tombstones and retired copies are not.
-function Catalog.List(kind, class, category)
+-- Live entries matching `keep`, sorted by name then id. Unresolved conflict
+-- copies are included (`entry.conflict` set); tombstones and retired copies
+-- are not.
+local function Collect(keep)
     local out = {}
     for _, e in pairs(Presets()) do
-        if type(e) == "table" and not e.deleted and SameList(e, kind, class, category) then
-            out[#out + 1] = e
-        end
+        if type(e) == "table" and not e.deleted and keep(e) then out[#out + 1] = e end
     end
     table.sort(out, function(a, b)
         local x, y = tostring(a.name):lower(), tostring(b.name):lower()
@@ -128,6 +139,17 @@ function Catalog.List(kind, class, category)
         return a.id < b.id
     end)
     return out
+end
+
+-- One list: kind, and for loadouts class + category.
+function Catalog.List(kind, class, category)
+    return Collect(function(e) return SameList(e, kind, class, category) end)
+end
+
+-- Every category of `kind` (and `class`), including keys this build doesn't
+-- know (a newer build's, received by sync).
+function Catalog.ListAll(kind, class)
+    return Collect(function(e) return e.kind == kind and (kind ~= "loadout" or e.class == class) end)
 end
 
 -- { [id] = version } for every entry, live, tombstoned or conflict copy: what
@@ -196,7 +218,8 @@ end
 -- Save As: a new entry. meta = { class, category, name, provenance }. The
 -- class and category must be ones this build offers.
 function Catalog.Create(kind, meta, modules)
-    return NewEntry(kind, meta, modules, false)
+    local e, err = NewEntry(kind, meta, modules, false)
+    return Wrote(e), err
 end
 
 -- Save over the entry: new content, a new version descending from the old
@@ -210,7 +233,7 @@ function Catalog.Replace(id, modules, expectedVersion, provenance)
     e.previous = { of = e.version, modules = old.modules, updated = old.updated }
     e.modules = Copy(modules)
     if provenance then e.provenance = Copy(provenance) end
-    return e
+    return Wrote(e)
 end
 
 function Catalog.Rename(id, name, expectedVersion)
@@ -220,7 +243,7 @@ function Catalog.Rename(id, name, expectedVersion)
     if not trimmed then return nil, nerr end
     Advance(e)
     e.name = trimmed
-    return e
+    return Wrote(e)
 end
 
 -- A versioned tombstone: the content goes, the identity and name stay, so a
@@ -230,7 +253,7 @@ function Catalog.Delete(id, expectedVersion)
     if not e then return nil, err end
     Advance(e)
     e.deleted, e.modules, e.previous = true, nil, nil
-    return e
+    return Wrote(e)
 end
 
 -- Undo my last Save: only while that Save is still the current version, so
@@ -244,7 +267,7 @@ function Catalog.UndoLastSave(id, expectedVersion)
     Advance(e)
     e.modules = Copy(prev.modules)
     e.previous = nil
-    return e
+    return Wrote(e)
 end
 
 -- Forward declarations: Upsert and Resolve both tidy covered conflict copies.
@@ -302,6 +325,21 @@ local function Sanitize(x)
     return e
 end
 
+-- Would receiving `id` at `version` change anything here? False when we hold
+-- that version or have moved past it, or already keep it as a conflict copy:
+-- Upsert would ignore it. The Link addon asks this before fetching an entry.
+-- (A copy of OUR version listed by the other account can't be told apart from
+-- its retired tombstone by id and version alone, so it is fetched once.)
+function Catalog.Wants(id, version)
+    if type(id) ~= "string" or type(version) ~= "string" then return false end
+    local p = Presets()
+    local e = p[id]
+    if not e then return true end
+    if e.version == version or Contains(e.ancestors, version) then return false end
+    if p[CopyId(id, version)] then return false end
+    return true
+end
+
 -- Apply one entry received from `fromChar`'s account. Returns the action
 -- taken: "ignore", "replace", "conflict", or nil plus "bad-entry". Never
 -- touches game state, and never applies anything to a character.
@@ -349,7 +387,7 @@ function Catalog.Upsert(incoming, fromChar)
     end
     -- Divergent: keep ours, keep theirs whole as a deterministic conflict copy.
     -- A copy id that already exists, live or retired, means it was handled.
-    local cid = id .. "~" .. incoming.version
+    local cid = CopyId(id, incoming.version)
     if p[cid] then return "ignore" end
     local copy = Sanitize(incoming)
     local originalName = incoming.name or local_.name
@@ -479,6 +517,7 @@ function Catalog.Resolve(copyId, choice, expectedRootVersion, newName)
     end
 
     RetireCovered(root.id)
+    Wrote(root)
     return root, created
 end
 

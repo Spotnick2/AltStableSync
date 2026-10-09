@@ -13,6 +13,7 @@ Libs\LibStub\LibStub.lua
 Core.lua
 Categories.lua
 Catalog.lua
+Envelope.lua
 Game.lua
 Backups.lua
 Ready.lua

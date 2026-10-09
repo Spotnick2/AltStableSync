@@ -4,16 +4,26 @@ package-as: AltStableSync
 # packager-ready so a later CurseForge release is a tag, not a rework.
 enable-nolib-creation: no
 
-# LibStub is vendored in Libs/. LibGlass-1.0 is the external, pinned to a TAG
-# (never "latest"), bumped only in a release made anyway. #18 adds the Link
-# addon's own external here (Plugins/Link/Libs/LibAccountSync-1.0, tag r5) and
-# a move-folders entry that ships Plugins/Link as top-level AltStableSyncLink.
+# LibStub is vendored in Libs/. The externals are pinned to TAGS (never
+# "latest"), bumped only in a release made anyway. LibAccountSync goes into the
+# Link addon only, so its store (the household key) is written to
+# AltStableSyncLink.lua and never to AltStableSync.lua (#18). External keys
+# are paths from the project root; move-folders paths include the package name.
 # Comments on their own lines only - the packager's YAML reader keeps an inline
 # "# ..." as part of the value (measured in GlassUnitFrames' migration).
 externals:
   Libs/LibGlass-1.0:
     url: https://github.com/Spotnick2/LibGlass
     tag: r2
+  # r5 (76fedef): messages mode and SendTo, both required by Link.lua.
+  Plugins/Link/Libs/LibAccountSync-1.0:
+    url: https://github.com/Spotnick2/LibAccountSync
+    tag: r5
+
+# WoW only discovers top-level addon folders: the packager moves the Link
+# addon out of the core folder (AltStable's and GlassChat's pattern).
+move-folders:
+  AltStableSync/Plugins/Link: AltStableSyncLink
 
 # YAML list, not markdown bullets. Ignores match from the package root, and
 # CurseForge's packager does not honour an external's own ignore list, so the
@@ -33,3 +43,10 @@ ignore:
   - Libs/LibGlass-1.0/AGENTS.md
   - Libs/LibGlass-1.0/CLAUDE.md
   - Libs/LibGlass-1.0/README.md
+  # LibAccountSync's own non-shipped paths. Its ChatThrottleLib/ and LibStub/
+  # ship: its XML loads them.
+  - Plugins/Link/Libs/LibAccountSync-1.0/tests
+  - Plugins/Link/Libs/LibAccountSync-1.0/docs
+  - Plugins/Link/Libs/LibAccountSync-1.0/Tools
+  - Plugins/Link/Libs/LibAccountSync-1.0/CLAUDE.md
+  - Plugins/Link/Libs/LibAccountSync-1.0/README.md
