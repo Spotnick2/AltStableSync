@@ -32,7 +32,7 @@ local entry = C.Create("loadout", { class = "PRIEST", category = "holy", name = 
     provenance = { sourceChar = "Karuzo-Elegia", build = "70245" } },
     { actions = { [1] = { kind = "spell", id = 2050 }, [12] = { kind = "macro", name = "Heal", scope = "char" } },
       bindings = { ACTIONBUTTON1 = { "1", "SHIFT-1" } },
-      macros = { Heal = { body = "/cast Heal", icon = 135915 } } })
+      macros = { Heal = { body = "/cast Heal", icon = 135915 } }, cover = { { 1, 120 }, { 145, 180 } } })
 entry = C.Replace(entry.id, entry.modules, entry.version)   -- now it has a `previous`
 check("fixture has a previous", entry.previous ~= nil)
 
@@ -68,10 +68,16 @@ do
     refused("bad stream", "ASE1:00000000:" .. C_EncodingUtil.EncodeBase64("Q" .. "{}"), "bad-envelope")
     refused("checksum mismatch", "ASE1:00000001:" .. body, "bad-checksum")
     -- A body whose checksum matches but whose content was altered elsewhere:
-    local cbor = C_EncodingUtil.SerializeCBOR({ s = 2, e = { id = "x" } })
-    local newer = "ASE1:" .. E.Adler32(cbor) .. ":" .. C_EncodingUtil.EncodeBase64(C_EncodingUtil.CompressString(cbor))
-    refused("newer schema", newer, "newer-schema")
-    local noE = C_EncodingUtil.SerializeCBOR({ s = 1 })
+    local function wrap(v)
+        local c = C_EncodingUtil.SerializeCBOR(v)
+        return "ASE1:" .. E.Adler32(c) .. ":" .. C_EncodingUtil.EncodeBase64(C_EncodingUtil.CompressString(c))
+    end
+    refused("newer schema", wrap({ s = 3, e = { id = "x" } }), "newer-schema")
+    -- #5: a 1-12 build's envelopes are refused as older, never imported.
+    refused("older schema", wrap({ s = 1, e = { id = "x" } }), "older-schema")
+    refused("string schema", wrap({ s = "2", e = { id = "x" } }), "newer-schema")
+    eq("schema is 2", E.SCHEMA, 2)
+    local noE = C_EncodingUtil.SerializeCBOR({ s = 2 })
     refused("no entry", "ASE1:" .. E.Adler32(noE) .. ":" .. C_EncodingUtil.EncodeBase64(C_EncodingUtil.CompressString(noE)),
             "bad-envelope")
     local notTable = C_EncodingUtil.SerializeCBOR("hello")

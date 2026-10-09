@@ -3,8 +3,8 @@
 --
 -- The agreed slice scope is issue #4's "Agreed slice scope" comment; the rules
 -- are docs/DESIGN.md's safety model. In short:
---   - target set: action slots 1-12, the bindings of ACTIONBUTTON1-12, and the
---     character macros those slots need;
+--   - target set: the measured action slots (Game.SLOT_RANGES, #5), the
+--     bindings of ACTIONBUTTON1-12, and the character macros those slots need;
 --   - Plan only reads; Load and Restore write, and only after the player
 --     confirmed a preview of exactly the plan that is applied: the whole plan
 --     is compared at confirmation, and any difference refuses;
@@ -59,7 +59,8 @@ end
 -- Capture (for Save As): the slots, bindings and character macros
 ------------------------------------------------------------
 
--- modules = { actions = {[slot] = ...}, bindings = {[cmd] = {key, ...}}, macros = {[name] = {body, icon}} }
+-- modules = { actions = {[slot] = ...}, bindings = {[cmd] = {key, ...}}, macros = {[name] = {body, icon}},
+--             cover = the slot ranges captured (#5) }
 function Loadout.Capture()
     local Game = G()
     local book = Game.Spellbook()
@@ -69,21 +70,35 @@ function Loadout.Capture()
     -- A spell on the bars at several ranks is a healer's mana ladder: the
     -- highest of them follows the trainer, the lower ones stay "exact".
     -- Rank order is book order; the measured low-rank flag wins, so the
-    -- known top rank always ranks highest.
+    -- known top rank always ranks highest. A ladder needs both ranks on
+    -- screen together (#5): Action Bar 1's pages and the stance/form pages
+    -- replace one another, so a rank left under a stance page (or on the
+    -- other page) never makes one on another page "exact".
     local function rank(s) return s.low and s.order or math.huge end
-    local seen, ladderTop = {}, {}
-    for slot = Game.SLOTS.first, Game.SLOTS.last do
+    local seen, pageTop, anyTop = {}, {}, {}
+    for _, slot in ipairs(Game.SLOT_LIST) do
         local a = Game.ActionAt(slot)
         seen[slot] = a
         local s = a and a.kind == "spell" and book.byId[a.id]
-        if s and (ladderTop[s.name] or 0) < rank(s) then ladderTop[s.name] = rank(s) end
+        if s then
+            local page = Game.MainPage(slot) or 0
+            pageTop[page] = pageTop[page] or {}
+            if (pageTop[page][s.name] or 0) < rank(s) then pageTop[page][s.name] = rank(s) end
+            if (anyTop[s.name] or 0) < rank(s) then anyTop[s.name] = rank(s) end
+        end
     end
-    for slot = Game.SLOTS.first, Game.SLOTS.last do
+    -- The highest rank of `name` that can be on screen with `slot`.
+    local function ladderTop(slot, name)
+        local page = Game.MainPage(slot)
+        if not page then return anyTop[name] end
+        return math.max((pageTop[page] or {})[name] or 0, (pageTop[0] or {})[name] or 0)
+    end
+    for _, slot in ipairs(Game.SLOT_LIST) do
         local a = seen[slot]
         if a and a.kind == "spell" then
             local s = book.byId[a.id]
             local name = (s and s.name) or (C_Spell.GetSpellName and C_Spell.GetSpellName(a.id))
-            local exact = s and rank(s) < ladderTop[s.name]
+            local exact = s and rank(s) < ladderTop(slot, s.name)
             actions[slot] = { kind = "spell", id = a.id, name = name, policy = exact and "exact" or "highest" }
         elseif a and a.kind == "item" then
             actions[slot] = { kind = "item", id = a.id }
@@ -100,7 +115,7 @@ function Loadout.Capture()
         if not keys then return nil, "Couldn't read the key bindings; try again." end
         bindings[cmd] = keys
     end
-    return { actions = actions, bindings = bindings, macros = macros }
+    return { actions = actions, bindings = bindings, macros = macros, cover = ASS.Catalog.Copy(Game.SLOT_RANGES) }
 end
 
 ------------------------------------------------------------
@@ -222,12 +237,27 @@ function Loadout.Plan(entry)
     if entry.class ~= PlayerClass() then
         plan.blocked = "This loadout is for another class." return Finish(plan)
     end
+    -- Without its cover a later Save can't use what this load records, so
+    -- "load it again" would never help (#5).
+    if not ASS.Cover.Ok(entry.modules) then
+        plan.blocked = "This loadout is damaged (no list of covered slots); it can't be loaded."
+        return Finish(plan)
+    end
     plan.blocked = Loadout.Blocked()
     if plan.blocked then return Finish(plan) end
     local modules = entry.modules or {}
     local book = Game.Spellbook()
     local creating, charCount = {}, Game.CharMacroCount()
-    for slot = Game.SLOTS.first, Game.SLOTS.last do
+    -- Slots this build doesn't read or write are listed, never applied.
+    local outside = {}
+    for slot in pairs(modules.actions or {}) do
+        if type(slot) == "number" and not Game.IS_SLOT[slot] then outside[#outside + 1] = slot end
+    end
+    table.sort(outside)
+    for _, slot in ipairs(outside) do
+        plan.skips[#plan.skips + 1] = { slot = slot, reason = "not supported on this build" }
+    end
+    for _, slot in ipairs(Game.SLOT_LIST) do
         local want = modules.actions and modules.actions[slot]
         if want then
             local target, why, create = Resolve(want, modules, book)
@@ -528,15 +558,29 @@ end
 
 local function Unsupported(a) return a ~= nil and a.kind == "unsupported" end
 
+-- Does slot content `x` differ from B's `b`? A character macro counts its
+-- body and icon too: `def(name)` gives x's definition (nil: action only).
+local function SlotDiffers(x, b, def, B)
+    if Serialize(x) ~= Serialize(b) then return true end
+    if def and x and x.kind == "macro" and x.scope == "char" then
+        return Serialize(def(x.name)) ~= Serialize(CharMacro(B, x.name))
+    end
+    return false
+end
+
 -- The merge (pure). `rec` is the loaded record (baseline B, after A,
 -- unavailable), `current` a fresh Capture() (C). Per slot:
 --   C unreadable or ambiguous            -> B, and A stays the comparison
+--   outside A's cover (no comparison)    -> B inside B's cover, else C (#5)
+--   outside B's cover (never covered)    -> C (#5)
 --   A unreadable, slot skipped at load   -> B, and A stays the comparison
 --   C same as A (unchanged since then)   -> B: the inherited intent
 --   C empty, slot unavailable at load    -> B (an emptied skipped destination)
 --   anything else                        -> C (a deliberate change)
--- `drop`: unavailable slots stop being covered instead (nil never erases
--- another character's slot). Modules, slots and commands this build doesn't
+-- `drop`: unavailable slots hold nothing in the entry instead; they stay in
+-- its cover as "empty", which a Load never applies (an empty slot is not an
+-- instruction to erase), and which keeps this character's own content there
+-- from being taken on a later Save. Modules, slots and commands this build doesn't
 -- capture are kept from B as they are (A35). Returns nil plus a reason on a
 -- macro or key clash.
 function Loadout.Merge(rec, current, characterBindings, drop)
@@ -544,17 +588,42 @@ function Loadout.Merge(rec, current, characterBindings, drop)
     local B, A = rec.baseline or {}, rec.after or {}
     local bAct, aAct, cAct = B.actions or {}, A.actions or {}, current.actions or {}
     local was = rec.unavailable or {}
-    local first, last = Game.SLOTS.first, Game.SLOTS.last
+    local Cover = ASS.Cover
+    -- Coverage is never guessed: without it, "never captured" and "captured
+    -- empty" can't be told apart (#5).
+    if not (Cover.Ok(B) and Cover.Ok(A)) then
+        return nil, "This character's record of the loaded setup is damaged (no list of covered slots). Load it again."
+    end
+    local bCov, aCov = B.cover, A.cover
+    local bSet, aSet = Cover.AddTo({}, bCov), Cover.AddTo({}, aCov)
+    local stale = 0         -- slots that differ from B but have no comparison
     local out = Copy(B)
     local actions, src, adv, advSrc = {}, {}, {}, {}
     local kept, dropped, unavailable, changed, gone = {}, {}, {}, {}, {}
-    for slot, b in pairs(bAct) do
-        if type(slot) ~= "number" or slot < first or slot > last then actions[slot], src[slot] = Copy(b), "B" end
+    -- Coverage moves with the values (#5): the output covers B's cover plus
+    -- each slot taken from a readable C; the comparison covers each slot it
+    -- advanced to C, and keeps its old membership where it stays.
+    local outSet, advSet = Cover.AddTo({}, bCov), {}
+    for slot in pairs(aSet) do
+        if not Game.IS_SLOT[slot] then advSet[slot] = true end
     end
-    for slot = first, last do
+    for slot, b in pairs(bAct) do
+        if not Game.IS_SLOT[slot] then actions[slot], src[slot] = Copy(b), "B" end
+    end
+    for _, slot in ipairs(Game.SLOT_LIST) do
         local b, a, c = bAct[slot], aAct[slot], cAct[slot]
+        local inA, inB = aSet[slot] == true, bSet[slot] == true
         local keepB, keepA, why = false, false, nil
         if Unsupported(c) then keepB, keepA, why = true, true, "couldn't read this slot"
+        -- No comparison was ever taken here (a capture by a 1-12 build): keep
+        -- what the entry has; where the entry never covered it either, the
+        -- slot is new to the entry and C is taken.
+        elseif not inA then
+            if inB then
+                keepB, keepA = true, true
+                if SlotDiffers(c, b, function(n) return CharMacro(current, n) end, B) then stale = stale + 1 end
+            end
+        elseif not inB then         -- the entry never covered it: C
         -- An unreadable A only hides an edit where the load skipped the slot;
         -- where the load placed B, a readable C is what is there now.
         elseif Unsupported(a) and was[slot] then keepB, keepA = true, true
@@ -573,14 +642,21 @@ function Loadout.Merge(rec, current, characterBindings, drop)
             end
         else
             actions[slot], src[slot] = Copy(c), "C"
+            outSet[slot] = true
         end
-        if keepA then adv[slot], advSrc[slot] = Copy(a), "A" else adv[slot], advSrc[slot] = Copy(c), "C" end
+        if keepA then
+            adv[slot], advSrc[slot] = Copy(a), "A"
+            if inA then advSet[slot] = true end
+        else
+            adv[slot], advSrc[slot] = Copy(c), "C"
+            advSet[slot] = true
+        end
     end
 
     -- Character macros follow the slots that use them; one name, one body.
     local slots = {}
     for slot in pairs(actions) do if type(slot) == "number" then slots[#slots + 1] = slot end end
-    for slot = first, last do if actions[slot] == nil then slots[#slots + 1] = slot end end
+    for _, slot in ipairs(Game.SLOT_LIST) do if actions[slot] == nil then slots[#slots + 1] = slot end end
     table.sort(slots)
     local macros, advMacros = {}, {}
     for _, slot in ipairs(slots) do
@@ -606,12 +682,9 @@ function Loadout.Merge(rec, current, characterBindings, drop)
 
     -- What the preview lists as changed: the slot's action, or the body or
     -- icon of the character macro it uses. Dropped slots are listed apart.
-    for slot = first, last do
-        local x, b = actions[slot], bAct[slot]
-        local diff = Serialize(x) ~= Serialize(b)
-        if not diff and src[slot] == "C" and x and x.kind == "macro" and x.scope == "char" then
-            diff = Serialize(macros[x.name]) ~= Serialize(CharMacro(B, x.name))
-        end
+    for _, slot in ipairs(Game.SLOT_LIST) do
+        local x = actions[slot]
+        local diff = SlotDiffers(x, bAct[slot], src[slot] == "C" and function(n) return macros[n] end, B)
         if diff and not gone[slot] then changed[#changed + 1] = slot end
     end
 
@@ -668,13 +741,28 @@ function Loadout.Merge(rec, current, characterBindings, drop)
         return t
     end
     out.actions, out.macros, out.bindings = orNil(actions, B.actions), orNil(macros, B.macros), orNil(bindings, B.bindings)
+    out.cover = Cover.FromSet(outSet)
+    -- Slots this Save adds to the entry's cover, and how many hold an action.
+    if stale > 0 then
+        notes[#notes + 1] = (stale == 1
+            and "1 slot differs from the loadout but wasn't loaded by this version, so it isn't saved: load it again to save it."
+            or ("%d slots differ from the loadout but weren't loaded by this version, so they aren't saved: load it again to save them."):format(stale))
+    end
+    local added, addedFull = 0, 0
+    for slot in pairs(outSet) do
+        if not bSet[slot] then
+            added = added + 1
+            if actions[slot] ~= nil then addedFull = addedFull + 1 end
+        end
+    end
     return {
+        added = added, addedFull = addedFull,
         modules = out,
         noop = Serialize(out) == Serialize(B),
         kept = kept, dropped = dropped, notes = notes,
         changed = changed, keysChanged = keysChanged,
         unavailable = unavailable,
-        advanced = { actions = adv, macros = advMacros, bindings = advB },
+        advanced = { actions = adv, macros = advMacros, bindings = advB, cover = Cover.FromSet(advSet) },
     }
 end
 
@@ -737,13 +825,22 @@ function Loadout.PlanSaveAs()
     if rec and rec.after then
         local m, merr = Loadout.Merge(rec, current, G().CharacterBindings(), false)
         if m then
-            return { modules = m.modules, after = m.advanced, unavailable = m.unavailable, kept = m.kept, notes = m.notes }
+            return { modules = m.modules, after = m.advanced, unavailable = m.unavailable, kept = m.kept, notes = m.notes,
+                     added = m.added, addedFull = m.addedFull }
         end
         why = merr
     end
     local after = Copy(current)
     if not G().CharacterBindings() then after.bindings = nil end
     return { modules = current, after = after, unavailable = {}, kept = {}, notes = {}, lossy = rec ~= nil, why = why }
+end
+
+-- What a Save As preview froze: the content, the comparison it records, and
+-- whether it keeps or loses inherited entries. A confirm whose fresh plan
+-- differs is refused (#44), as Save's is.
+function Loadout.SaveAsFingerprint(p)
+    return Serialize({ m = p.modules, a = p.after, u = p.unavailable, l = p.lossy or false,
+                       n = p.added or 0 })
 end
 
 -- Create the new entry from a Save As plan, and make it this character's
@@ -773,9 +870,11 @@ function Loadout.PlanRestore(which)
     table.sort(slots)
     for _, slot in ipairs(slots) do
         local want = snap.actions[slot]
-        local current = Game.ActionAt(slot)
+        local current = Game.IS_SLOT[slot] and Game.ActionAt(slot)
         local target, why
-        if want == false then
+        if not Game.IS_SLOT[slot] then
+            why = "not supported on this build"
+        elseif want == false then
             target = nil
         elseif want.kind == "spell" then
             if Game.SpellKnown(want.id, book) then target = { kind = "spell", id = want.id } else why = "spell no longer known" end
@@ -794,7 +893,11 @@ function Loadout.PlanRestore(which)
         if not why and not Game.SameAction(current, target) and not Game.Restorable(current) then
             why = "slot now holds something that couldn't be put back"
         end
-        if why then
+        if why and not Game.IS_SLOT[slot] then
+            -- No build of this one writes it: listed, and the backup can still
+            -- finish (otherwise it would stay "partial" forever).
+            plan.skips[#plan.skips + 1] = { slot = slot, reason = why }
+        elseif why then
             plan.unavailable[#plan.unavailable + 1] = { slot = slot, reason = why }
         elseif not Game.SameAction(current, target) then
             plan.actions[#plan.actions + 1] = { slot = slot, target = target, current = current }
@@ -841,7 +944,7 @@ function Loadout.Restore(which, shown)
         local rec = ASS.char.loaded and ASS.char.loaded.loadout
         if rec then rec.after, rec.unavailable = nil, nil end
     end
-    result.unavailable, result.kept = plan.unavailable, plan.kept
+    result.unavailable, result.kept, result.skips = plan.unavailable, plan.kept, plan.skips
     result.keysBlocked = plan.keysBlocked
     result.partial = not Complete(plan, result) or nil
     -- The pinned operation is released only when it is fully restored.

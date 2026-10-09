@@ -18,7 +18,47 @@ local ASS = AltStableSync
 local Game = {}
 ASS.Game = Game
 
-Game.SLOTS = { first = 1, last = 12 }                  -- the slice's target set
+-- The action slots a loadout covers (#5; measured on 70291 with
+-- /syncprobe bars, docs/forever-api-notes.md "Action bars"): 1-120 (Action
+-- Bar 1 pages 1-2, Action Bars 2-5, and the four stance/form pages, written
+-- by slot id whatever form is active) and 145-180 (Action Bars 6-8). Never
+-- 121-144 (skyriding/possess/override pages) or 181+ (no button shows them).
+Game.SLOT_RANGES = { { 1, 120 }, { 145, 180 } }
+Game.IS_SLOT = ASS.Cover.AddTo({}, Game.SLOT_RANGES)
+Game.SLOT_LIST = {}
+for slot in pairs(Game.IS_SLOT) do Game.SLOT_LIST[#Game.SLOT_LIST + 1] = slot end
+table.sort(Game.SLOT_LIST)
+
+-- Action Bar 1's two pages and the four stance/form pages take turns on the
+-- same twelve buttons; every other bar shows alongside whichever is up. The
+-- page index of a slot, or nil for a bar that is always beside it.
+local MAIN_PAGES = { 1, 13, 73, 85, 97, 109 }
+function Game.MainPage(slot)
+    for i, first in ipairs(MAIN_PAGES) do
+        if slot >= first and slot < first + 12 then return i end
+    end
+    return nil
+end
+
+-- Bars as the game's settings name them, by first slot (measured button ->
+-- slot map). The stance/form pages are numbered: which form uses which page
+-- isn't measured yet.
+local BARS = {
+    { 1, "Action Bar 1" }, { 13, "Action Bar 1, page 2" }, { 25, "Action Bar 4" }, { 37, "Action Bar 5" },
+    { 49, "Action Bar 3" }, { 61, "Action Bar 2" }, { 73, "Stance/form page 1" }, { 85, "Stance/form page 2" },
+    { 97, "Stance/form page 3" }, { 109, "Stance/form page 4" }, { 145, "Action Bar 6" },
+    { 157, "Action Bar 7" }, { 169, "Action Bar 8" },
+}
+
+-- The bar's name and the button (1-12) for a slot; "Slot N" for any other.
+function Game.SlotLabel(slot)
+    for i = #BARS, 1, -1 do
+        local first = BARS[i][1]
+        if slot >= first and slot < first + 12 then return BARS[i][2], slot - first + 1 end
+    end
+    return "Slot " .. tostring(slot), nil
+end
+
 Game.COMMANDS = {}
 for i = 1, 12 do Game.COMMANDS[i] = "ACTIONBUTTON" .. i end
 

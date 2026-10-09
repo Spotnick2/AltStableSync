@@ -16,6 +16,7 @@ dofile("tests/wow_stubs.lua")
 dofile("tests/wow_game.lua")
 
 local G = WoW.game
+local FULL = { { 1, 120 }, { 145, 180 } }   -- every measured slot (#5)
 local A, L
 
 -- Spells: Flash Heal r1/r2, Lesser Heal r1/r2, Greater Heal (top), a future spell.
@@ -66,9 +67,14 @@ local function main()
     }
 end
 
+-- Every supported slot (#5) plus two excluded sentinels, so "restored
+-- exactly" and "never touched" cover the whole surface.
 local function state()
     local parts = {}
-    for slot = 1, 12 do
+    local slots = {}
+    for _, slot in ipairs(A.Game.SLOT_LIST) do slots[#slots + 1] = slot end
+    slots[#slots + 1], slots[#slots + 2] = 130, 185
+    for _, slot in ipairs(slots) do
         local a = G.actions[slot]
         if a then
             parts[#parts + 1] = slot .. "=" .. a.kind .. ":" .. tostring(a.kind == "macro" and a.ref.name or a.id)
@@ -501,6 +507,7 @@ end
 -- Hand-made entries for the edge cases the review named
 ------------------------------------------------------------
 local function custom(modules)
+    modules.cover = modules.cover or FULL
     return assert(A.Catalog.Create("loadout", { class = "PRIEST", category = "general",
         name = "Custom " .. tostring(math.random(1, 1e9)) }, modules))
 end
@@ -1165,24 +1172,24 @@ do
     eq("macro body edit: saved", m.modules.macros.Shield.body, "/cast Renew")
     -- Pure merge: slot 1 keeps B's Heal, slot 2 takes C's different Heal.
     local mac = function(body) return { kind = "macro", name = "Heal", scope = "char", body = body } end
-    local recM = { baseline = { actions = { [1] = mac("/x"), [2] = mac("/x") }, macros = { Heal = { body = "/x" } } },
-                   after = { actions = { [1] = { kind = "item", id = 1 }, [2] = mac("/x") }, macros = { Heal = { body = "/x" } } },
+    local recM = { baseline = { cover = FULL, actions = { [1] = mac("/x"), [2] = mac("/x") }, macros = { Heal = { body = "/x" } } },
+                   after = { cover = FULL, actions = { [1] = { kind = "item", id = 1 }, [2] = mac("/x") }, macros = { Heal = { body = "/x" } } },
                    unavailable = { [1] = "slot holds something this slice can't put back" } }
     local cur = { actions = { [1] = { kind = "item", id = 1 }, [2] = mac("/y") }, macros = { Heal = { body = "/y" } }, bindings = {} }
     local out, why = L.Merge(recM, cur, true)
     eq("macro clash: refused", out, nil)
     check("macro clash: says so", tostring(why):find("differs", 1, true) ~= nil, why)
     -- Pure merge: a key that would end up on two commands is refused.
-    local recK = { baseline = { actions = {}, bindings = { ACTIONBUTTON1 = { "Q" } } },
-                   after = { actions = {}, bindings = { ACTIONBUTTON1 = { "X" }, ACTIONBUTTON2 = { "Y" } } } }
+    local recK = { baseline = { cover = FULL, actions = {}, bindings = { ACTIONBUTTON1 = { "Q" } } },
+                   after = { cover = FULL, actions = {}, bindings = { ACTIONBUTTON1 = { "X" }, ACTIONBUTTON2 = { "Y" } } } }
     local curK = { actions = {}, bindings = { ACTIONBUTTON1 = { "X" }, ACTIONBUTTON2 = { "Q" } } }
     out, why = L.Merge(recK, curK, true)
     eq("key clash: refused", out, nil)
     -- Pure merge: a slot that was unreadable when the comparison was taken.
     -- Where the load skipped it, B is kept and A stays the comparison; where
     -- the load placed B, a readable C is what is there now.
-    local recU = { baseline = { actions = { [1] = { kind = "spell", id = 7, name = "X", policy = "highest" } } },
-                   after = { actions = { [1] = { kind = "unsupported", what = "unreadable" } } },
+    local recU = { baseline = { cover = FULL, actions = { [1] = { kind = "spell", id = 7, name = "X", policy = "highest" } } },
+                   after = { cover = FULL, actions = { [1] = { kind = "unsupported", what = "unreadable" } } },
                    unavailable = { [1] = "not learned" } }
     local curU = { actions = { [1] = { kind = "spell", id = 8, name = "Y", policy = "highest" } }, bindings = {} }
     out = L.Merge(recU, curU, true)
@@ -1201,7 +1208,7 @@ do
     local before = rec().version
     A.Catalog.Upsert({ id = entry.id, version = "ffffffffffff:1", parent = entry.version,
                        ancestors = { entry.version }, kind = "loadout", class = "PRIEST", category = "general",
-                       name = "Everyday", modules = { actions = {} } }, "Other")
+                       name = "Everyday", modules = { actions = {}, cover = { { 1, 12 } } } }, "Other")
     eq("sync never touches the record", rec().version, before)
     local m, why = L.PlanSave()
     eq("A39: stale refused", m, nil)
@@ -1322,19 +1329,28 @@ end
 do
     -- Slots, commands and macros outside this build's set survive a Save.
     local far = { kind = "macro", name = "Far", scope = "char", body = "/x" }
-    local recF = { baseline = { actions = { [1] = { kind = "spell", id = 7 }, [13] = far },
+    local recF = { baseline = { cover = FULL, actions = { [1] = { kind = "spell", id = 7 }, [130] = far },
                                 macros = { Far = { body = "/x", icon = 1 } },
                                 bindings = { ACTIONBUTTON1 = { "1" }, MULTIACTIONBAR1BUTTON1 = { "F" } } },
-                   after = { actions = { [1] = { kind = "spell", id = 7 } }, bindings = { ACTIONBUTTON1 = { "1" } } } }
+                   after = { cover = FULL, actions = { [1] = { kind = "spell", id = 7 } }, bindings = { ACTIONBUTTON1 = { "1" } } } }
     local curF = { actions = { [1] = { kind = "spell", id = 9 } }, macros = {}, bindings = { ACTIONBUTTON1 = { "1" } } }
     local out = L.Merge(recF, curF, true)
-    eq("outside slots: slot 13 kept", out and out.modules.actions[13] and out.modules.actions[13].name, "Far")
+    -- #5: a slot with no comparison whose character macro changed only its
+    -- icon is kept from B, and the Save says it isn't saved.
+    local mac = { kind = "macro", name = "Far", scope = "char", body = "/x" }
+    local recS = { baseline = { cover = FULL, actions = { [30] = mac }, macros = { Far = { body = "/x", icon = 1 } } },
+                   after = { cover = { { 1, 12 } }, actions = {} } }
+    local outS = L.Merge(recS, { actions = { [30] = mac }, macros = { Far = { body = "/x", icon = 2 } }, bindings = {} }, true)
+    eq("#5 stale icon: B kept", outS and outS.modules.macros.Far.icon, 1)
+    check("#5 stale icon: noted", outS and outS.notes[1] and outS.notes[1]:find("1 slot differs", 1, true) ~= nil, outS and outS.notes[1])
+    eq("outside slots: slot 130 kept", out and out.modules.actions[130] and out.modules.actions[130].name, "Far")
     eq("outside slots: its macro kept", out and out.modules.macros.Far and out.modules.macros.Far.body, "/x")
     eq("outside commands: kept", out and out.modules.bindings.MULTIACTIONBAR1BUTTON1[1], "F")
     eq("outside commands: in-range change still saved", out and out.modules.actions[1].id, 9)
     -- An entry without some modules is still a noop when nothing changed.
-    local recN = { baseline = { actions = { [1] = { kind = "spell", id = 7 } } },
-                   after = { actions = { [1] = { kind = "spell", id = 7 } } } }
+    local full = { { 1, 120 }, { 145, 180 } }
+    local recN = { baseline = { actions = { [1] = { kind = "spell", id = 7 } }, cover = full },
+                   after = { actions = { [1] = { kind = "spell", id = 7 } }, cover = full } }
     out = L.Merge(recN, { actions = { [1] = { kind = "spell", id = 7 } }, macros = {}, bindings = { ACTIONBUTTON1 = {} } }, true)
     check("missing modules: noop", out and out.noop)
 
@@ -1356,9 +1372,9 @@ do
     L.Merge = function() return nil, "Macro clash here." end
     A._shown = nil
     A.Commands.saveas("Clash")
-    L.Merge = merge
     eq("saveas clash: warns with the reason", A._shown and A._shown.lines[1], "Macro clash here.")
     A._shown.onConfirm()
+    L.Merge = merge
     local made
     for _, e in ipairs(A.Catalog.List("loadout", "PRIEST", "general")) do if e.name == "Clash" then made = e end end
     check("saveas clash: saved on confirm", made ~= nil)
@@ -1379,7 +1395,7 @@ do
     A.Commands.save("drop")
     local text = table.concat(A._shown.lines, "\n")
     check("preview: key listed", text:find("ACTIONBUTTON3: 3", 1, true) ~= nil, text)
-    local _, n8 = text:gsub("slot 8:", "")
+    local _, n8 = text:gsub("button 8:", "")
     eq("preview: dropped slot listed once", n8, 1)
     G.keys["3"] = nil
 end
@@ -1390,8 +1406,8 @@ do
     -- using the same macro advances.
     local M = { kind = "macro", name = "M", scope = "char", body = "/m" }
     local fut = { kind = "spell", id = 7, name = "Future", policy = "highest" }
-    local rec1 = { baseline = { actions = { [1] = fut, [2] = M }, macros = { M = { body = "/m", icon = 1 } } },
-                   after = { actions = { [1] = M, [2] = M }, macros = { M = { body = "/m", icon = 1 } } },
+    local rec1 = { baseline = { cover = FULL, actions = { [1] = fut, [2] = M }, macros = { M = { body = "/m", icon = 1 } } },
+                   after = { cover = FULL, actions = { [1] = M, [2] = M }, macros = { M = { body = "/m", icon = 1 } } },
                    unavailable = { [1] = "not learned" } }
     local cur1 = { actions = { [1] = { kind = "unsupported", what = "unreadable" }, [2] = M },
                    macros = { M = { body = "/m", icon = 2 } }, bindings = {} }
@@ -1521,6 +1537,205 @@ do
     G.actions[10] = { kind = "spell", id = 2061 }           -- r1 into slot 10, which was empty
     m = L.PlanSave()
     eq("#42: rung via a changed slot: exact", m and m.modules.actions[10].policy, "exact")
+end
+
+-- #5: every bar (measured on 70291: 1-120 and 145-180).
+local function R(c)
+    local t = {}
+    for _, r in ipairs(c or {}) do t[#t + 1] = r[1] .. "-" .. r[2] end
+    return table.concat(t, ",")
+end
+do
+    -- Capture covers the measured slots and nothing else.
+    boot(); ready(); main()
+    G.actions[30] = { kind = "item", id = 5512 }            -- Action Bar 4
+    G.actions[80] = { kind = "spell", id = 9472 }           -- a stance/form page
+    G.actions[150] = { kind = "item", id = 5512 }           -- Action Bar 6
+    G.actions[130] = { kind = "item", id = 5512 }           -- skyriding/possess page: excluded
+    G.actions[185] = { kind = "item", id = 5512 }           -- above 180: excluded
+    local m = L.Capture()
+    eq("#5: cover", R(m.cover), "1-120,145-180")
+    check("#5: other bars captured", m.actions[30] and m.actions[80] and m.actions[150])
+    check("#5: excluded slots not captured", m.actions[130] == nil and m.actions[185] == nil)
+    eq("#5: labels", table.concat({ A.Game.SlotLabel(80) }, " "), "Stance/form page 1 8")
+    eq("#5: labels, bar 2", table.concat({ A.Game.SlotLabel(61) }, " "), "Action Bar 2 1")
+
+    -- Load across bars; excluded slots are never written; restore is exact.
+    entry = A.Catalog.Create("loadout", { class = "PRIEST", category = "general", name = "Bars" }, m)
+    alt()
+    G.actions[130] = { kind = "item", id = 4540 }
+    G.actions[185] = { kind = "item", id = 4540 }
+    local before = state()
+    local r = L.Load(entry, L.Plan(entry))
+    check("#5: loaded", r and not r.failed, r and tostring(r.failed))
+    eq("#5: bar 4 written", G.actions[30] and G.actions[30].id, 5512)
+    eq("#5: form page written (the alt's top Flash Heal)", G.actions[80] and G.actions[80].id, 2061)
+    eq("#5: bar 6 written", G.actions[150] and G.actions[150].id, 5512)
+    eq("#5: excluded 130 untouched", G.actions[130].id, 4540)
+    eq("#5: excluded 185 untouched", G.actions[185].id, 4540)
+    L.Restore(1, L.PlanRestore(1))
+    eq("#5: restored exactly across bars", state(), before)
+
+    -- A backup slot outside the set is reported, never written, and doesn't
+    -- keep the restore "partial" forever.
+    A.Backups.Get(1).actions[130] = false
+    local rp = L.PlanRestore(1)
+    local why
+    for _, u in ipairs(rp.skips) do if u.slot == 130 then why = u.reason end end
+    eq("#5: restore outside the set: reported", why, "not supported on this build")
+    eq("#5: restore outside the set: not unavailable", #rp.unavailable, 0)
+    local rr = L.Restore(1, rp)
+    eq("#5: restore outside the set: untouched", G.actions[130].id, 4540)
+    check("#5: restore outside the set: not partial", rr and not rr.partial)
+
+    -- Load lists an entry's slots outside the set instead of ignoring them.
+    local wide = A.Catalog.Copy(entry)
+    wide.modules.actions[130] = { kind = "item", id = 5512 }
+    local lp = L.Plan(wide)
+    why = nil
+    for _, s in ipairs(lp.skips) do if s.slot == 130 then why = s.reason end end
+    eq("#5: load outside the set: listed", why, "not supported on this build")
+    for _, op in ipairs(lp.actions) do check("#5: load outside the set: never written", op.slot ~= 130) end
+
+    -- An entry without a valid cover can't be loaded: Save could never use
+    -- the record ("load it again" would loop).
+    local bare = A.Catalog.Copy(entry)
+    bare.modules.cover = nil
+    local bp = L.Plan(bare)
+    check("#5: no cover: load refused", bp.blocked and bp.blocked:find("damaged", 1, true) ~= nil, bp.blocked)
+
+    -- A rank ladder split across two bars (#42).
+    boot(); ready(); main()
+    G.actions[12] = nil
+    G.actions[40] = { kind = "spell", id = 2052 }
+    m = L.Capture()
+    eq("#5: ladder across bars: low", m.actions[2].policy, "exact")
+    eq("#5: ladder across bars: high", m.actions[40].policy, "highest")
+    -- Pages that take turns on Action Bar 1 never ladder with each other: a
+    -- warrior's stale rank under the stance page stays "highest".
+    G.actions[40] = nil
+    G.actions[73] = { kind = "spell", id = 2052 }
+    m = L.Capture()
+    eq("#5: rank under a stance page: not a ladder", m.actions[2].policy, "highest")
+    G.actions[73], G.actions[20] = nil, { kind = "spell", id = 2052 }
+    m = L.Capture()
+    eq("#5: rank on the other page: not a ladder", m.actions[2].policy, "highest")
+    -- A bar beside a stance page is on screen with it: that is a ladder.
+    G.actions[20] = nil
+    G.actions[73], G.actions[40] = { kind = "spell", id = 2050 }, { kind = "spell", id = 2052 }
+    m = L.Capture()
+    eq("#5: stance page beside a bar: ladder low", m.actions[73].policy, "exact")
+    eq("#5: stance page beside a bar: ladder high", m.actions[40].policy, "highest")
+end
+
+-- #5: an entry captured by a 1-12 build. Save adds the other bars once,
+-- then is a no-op; Save As does the same.
+do
+    boot(); ready(); main()
+    local old = L.Capture()
+    for slot in pairs(old.actions) do if slot > 12 then old.actions[slot] = nil end end
+    old.cover = { { 1, 12 } }
+    entry = A.Catalog.Create("loadout", { class = "PRIEST", category = "general", name = "Old" }, old)
+    alt()
+    G.actions[40] = { kind = "item", id = 4540 }            -- the alt's own bar 5
+    L.Load(entry, L.Plan(entry))
+    local m = L.PlanSave()
+    check("#5 old entry: not a no-op", m and not m.noop)
+    eq("#5 old entry: slots added", m and m.added, #A.Game.SLOT_LIST - 12)
+    eq("#5 old entry: with an action", m and m.addedFull, 1)
+    A._shown = nil
+    A.Commands.save()
+    check("#5 old entry: preview says so", A._shown and table.concat(A._shown.lines, "\n"):find("didn't cover yet (1 with an action, counted above)", 1, true) ~= nil)
+    check("#5 old entry: grouped under the bar", A._shown and table.concat(A._shown.lines, "\n"):find("  Action Bar 5 (1):\n    button 4: item 4540", 1, true) ~= nil,
+          A._shown and table.concat(A._shown.lines, " | "))
+    local p = L.PlanSaveAs()
+    eq("#5 old entry: Save As covers every bar", p and R(p.modules.cover), "1-120,145-180")
+    eq("#5 old entry: Save As takes bar 5", p and p.modules.actions[40] and p.modules.actions[40].id, 4540)
+    A._shown = nil
+    A.Commands.saveas("Widened")
+    check("#5 old entry: Save As says it adds bars first", A._shown and A._shown.lines[1]:find("Adds", 1, true) ~= nil)
+    -- The confirm saves what was shown or nothing: a merge that refuses by
+    -- then (a new clash) must not turn into a plain capture.
+    local merge = L.Merge
+    L.Merge = function() return nil, "Macro clash here." end
+    WoW.chatLines = {}
+    A._shown.onConfirm()
+    L.Merge = merge
+    local widened
+    for _, x in ipairs(A.Catalog.List("loadout", "PRIEST", "general")) do if x.name == "Widened" then widened = x end end
+    eq("#5 widening confirm: changed plan refused", widened, nil)
+    check("#5 widening confirm: says so", table.concat(WoW.chat(), " "):find("changed since the preview", 1, true) ~= nil)
+    check("#5 old entry: saved", L.Save(m) ~= nil)
+    local e = A.Catalog.Get(entry.id)
+    eq("#5 old entry: cover now every bar", R(e.modules.cover), "1-120,145-180")
+    eq("#5 old entry: bar 5 saved", e.modules.actions[40].id, 4540)
+    check("#5 old entry: second Save is a no-op", L.PlanSave().noop)
+end
+
+-- #5: a comparison taken by a 1-12 build (A covers 1-12) never turns into
+-- "observed": an inherited slot outside it is kept on every Save.
+do
+    boot(); ready(); main()
+    G.actions[30] = { kind = "item", id = 5512 }
+    entry = A.Catalog.Create("loadout", { class = "PRIEST", category = "general", name = "Wide" }, L.Capture())
+    alt()
+    L.Load(entry, L.Plan(entry))
+    rec().after.cover = { { 1, 12 } }                       -- what the 1-12 build's load recorded
+    for slot in pairs(rec().after.actions) do if slot > 12 then rec().after.actions[slot] = nil end end
+    G.actions[30] = { kind = "item", id = 4540 }            -- different from the entry
+    G.actions[10] = { kind = "spell", id = 2052 }           -- a real edit, so the Save happens
+    local m = L.PlanSave()
+    eq("#5 old comparison: inherited slot kept", m and m.modules.actions[30].id, 5512)
+    check("#5 old comparison: says to load again", m and m.notes[1] and m.notes[1]:find("load it again to save", 1, true) ~= nil,
+          m and m.notes[1])
+    check("#5 old comparison: saved", L.Save(m) ~= nil)
+    check("#5 old comparison: still not covered by the comparison", not A.Cover.Has(rec().after.cover, 30))
+    m = L.PlanSave()
+    eq("#5 old comparison: second Save keeps it", m and m.modules.actions[30].id, 5512)
+end
+
+-- #5: a newly covered slot that can't be read at the first Save stays
+-- uncovered, is captured once it reads, and the next Save is a no-op.
+local function unreadableThenReadable(viaSaveAs)
+    boot(); ready(); main()
+    local old = L.Capture()
+    for slot in pairs(old.actions) do if slot > 12 then old.actions[slot] = nil end end
+    old.cover = { { 1, 12 } }
+    entry = A.Catalog.Create("loadout", { class = "PRIEST", category = "general", name = "Old2" }, old)
+    alt()
+    L.Load(entry, L.Plan(entry))
+    G.actions[50] = { kind = "flyout", id = 2 }             -- unreadable at the first Save
+    local tag = viaSaveAs and "#5 unreadable (Save As): " or "#5 unreadable: "
+    if viaSaveAs then
+        local p = L.PlanSaveAs()
+        check(tag .. "forked", L.SaveAs(p, "Fork2") ~= nil)
+    else
+        check(tag .. "first Save", saveNow() ~= nil)
+    end
+    local e = A.Catalog.Get(rec().id)
+    check(tag .. "not covered yet", not A.Cover.Has(e.modules.cover, 50))
+    G.actions[50] = { kind = "item", id = 4540 }
+    check(tag .. "second Save", saveNow() ~= nil)
+    e = A.Catalog.Get(rec().id)
+    eq(tag .. "captured", e.modules.actions[50] and e.modules.actions[50].id, 4540)
+    check(tag .. "third Save is a no-op", L.PlanSave().noop)
+end
+unreadableThenReadable(false)
+unreadableThenReadable(true)
+
+-- #5: a record without a valid cover is never guessed at.
+do
+    loadedAlt()
+    rec().baseline.cover = nil                              -- a hand edit
+    local m, why = L.PlanSave()
+    check("#5 damaged B: Save refused", m == nil and tostring(why):find("damaged", 1, true) ~= nil, why)
+    A._shown = nil
+    A.Commands.saveas("Fork3")
+    check("#5 damaged B: Save As warns with the reason", A._shown and A._shown.lines[1]:find("damaged", 1, true) ~= nil)
+    loadedAlt()
+    rec().after.cover = { { 5, 1 } }
+    m, why = L.PlanSave()
+    check("#5 malformed A: Save refused", m == nil and tostring(why):find("damaged", 1, true) ~= nil, why)
 end
 
 -- Commands: the preview is frozen; no record means Save As; fresh Save As sets the record.

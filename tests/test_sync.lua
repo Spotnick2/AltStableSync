@@ -139,7 +139,7 @@ local function liveConflicts(acc)
     for _, e in pairs(acc.db.presets) do if type(e) == "table" and e.conflict and not e.deleted then n = n + 1 end end
     return n
 end
-local function mods(tag) return { actions = { [1] = { kind = "spell", id = tag } }, bindings = {}, macros = {} } end
+local function mods(tag) return { actions = { [1] = { kind = "spell", id = tag } }, bindings = {}, macros = {}, cover = { { 1, 12 } } } end
 local function save(acc, name, tag, category)
     use(acc)
     return C.Create("loadout", { class = "PRIEST", category = category or "holy", name = name,
@@ -189,6 +189,63 @@ do
     a.online, b.online = false, false
     run(S.INTERVAL + 12)
     eq("basic: no listed peer, no status", a.sync.EntryStatus(e), nil)
+end
+
+------------------------------------------------------------
+-- #5: a peer on the older wire schema pauses sync; nothing it sends is
+-- imported or cached as handled, so once it updates (same session, same
+-- entry version) the entry is fetched and the pause clears.
+------------------------------------------------------------
+do
+    reset()
+    local a, b = account("Alpha", "aaaaaaaaaaaa"), account("Beta", "bbbbbbbbbbbb")
+    local e = save(a, "Raid", 2050)
+    local from = { guid = a.guid, name = "Alpha", realm = "Elegia" }
+    use(b)
+    local function old(t) t.s = 1; return Env.Pack(t) end
+    b.sync.Receive("MAN\n" .. old({ b = "aaa", c = 1, p = 1, n = 1, l = { [e.id] = e.version } }), from)
+    b.sync.Receive("REQ\n" .. old({ i = e.id }), from)
+    b.sync.Receive("ENT\n" .. e.id .. "\n" .. e.version .. "\n" .. old({ e = C.Copy(a.db.presets[e.id]) }), from)
+    eq("old peer: nothing imported", b.db.presets[e.id], nil)
+    local n = 0
+    for _, r in ipairs(b.reports) do if r:find("older AltStableSync", 1, true) then n = n + 1 end end
+    eq("old peer: one notice", n, 1)
+    local function schemaOf(acc, guid)
+        for _, p in ipairs(acc.sync.Peers()) do if p.guid == guid then return p.schema end end
+        return "no peer"
+    end
+    eq("old peer: paused", schemaOf(b, a.guid), "older-schema")
+    eq("old peer: no request sent", reqs("Beta", e.id), 0)
+    -- Per entry it reads paused, not pending (#44 review).
+    local mine = save(b, "Mine", 2052)
+    eq("old peer: entry status says paused", b.sync.EntryStatus(b.db.presets[mine.id]), "sync paused")
+    -- Its first schema-2 manifest clears the pause on its own.
+    b.sync.Receive("MAN\n" .. Env.Pack({ s = Env.SCHEMA, b = "aaa2", c = 1, p = 1, n = 1, l = {} }), from)
+    eq("updated peer: a manifest clears the pause", schemaOf(b, a.guid), nil)
+    b.sync.Receive("MAN\n" .. old({ b = "aaa", c = 2, p = 1, n = 1, l = {} }), from)
+    eq("old peer again: paused", schemaOf(b, a.guid), "older-schema")
+    -- A corrupt entry proves nothing: the pause stays.
+    b.sync.Receive("ENT\nloadout-x-1\nx:1\nASE1:00000000:zz", from)
+    eq("old peer: a corrupt entry keeps the pause", schemaOf(b, a.guid), "older-schema")
+    run(S.INTERVAL + 15)                                    -- the peer now speaks schema 2
+    eq("updated peer: entry fetched", b.db.presets[e.id] and b.db.presets[e.id].version, e.version)
+    eq("updated peer: pause cleared", schemaOf(b, a.guid), nil)
+end
+
+-- A peer found incompatible mid-exchange gets no more requests: what was
+-- queued or outstanding for it is dropped until it speaks our schema.
+do
+    reset()
+    local a, b = account("Alpha", "aaaaaaaaaaaa"), account("Beta", "bbbbbbbbbbbb")
+    local e, f = save(a, "Raid", 2050), save(a, "Pvp", 2051)
+    local from = { guid = a.guid, name = "Alpha", realm = "Elegia" }
+    use(b)
+    b.sync.Receive("MAN\n" .. Env.Pack({ s = Env.SCHEMA, b = "pre", c = 1, p = 1, n = 1,
+                                         l = { [e.id] = e.version, [f.id] = f.version } }), from)
+    check("paused peer: two requests out", (b.sync.Outstanding(a.guid)) == 2)
+    b.sync.Receive("ENT\n" .. e.id .. "\n" .. e.version .. "\n" .. Env.Pack({ s = 1, e = C.Copy(a.db.presets[e.id]) }), from)
+    local o, q = b.sync.Outstanding(a.guid)
+    eq("paused peer: nothing outstanding or queued", o + q, 0)
 end
 
 ------------------------------------------------------------
@@ -360,7 +417,7 @@ do
     eq("refused: catalog untouched", n, 0)
     check("refused: said so once", #b.reports >= 1 and b.reports[1]:find("can't read", 1, true) ~= nil)
     -- A bad entry (fails the catalog's receive boundary).
-    local bad = Env.Pack({ s = 1, e = { id = "x", version = "v", kind = "weird" } })
+    local bad = Env.Pack({ s = Env.SCHEMA, e = { id = "x", version = "v", kind = "weird" } })
     b.sync.Receive("ENT\nx\nv\n" .. bad, { guid = a.guid, name = "Alpha" })
     eq("refused: bad entry not stored", b.db.presets.x, nil)
 
@@ -483,7 +540,7 @@ do
     a.online = true
     local t0 = T
     use(b)
-    b.sync.Receive("MAN\n" .. Env.Pack({ s = 1, b = "aaa", c = 9, p = 1, n = 1, l = { [e.id] = a.db.presets[e.id].version } }),
+    b.sync.Receive("MAN\n" .. Env.Pack({ s = Env.SCHEMA, b = "aaa", c = 9, p = 1, n = 1, l = { [e.id] = a.db.presets[e.id].version } }),
                    { guid = a.guid, name = "Alpha", realm = "Elegia" })
     run(S.INTERVAL + 15)
     eq("older: B never asks for A's older version", reqs("Beta", e.id, t0), 0)
@@ -525,7 +582,7 @@ do
     b.online = true
     use(a); a.sync.Tick()                         -- A sees B listed
     local function man(p, n, l, c)
-        a.sync.Receive("MAN\n" .. Env.Pack({ s = 1, b = "bbb", c = c or 1, p = p, n = n, l = l }),
+        a.sync.Receive("MAN\n" .. Env.Pack({ s = Env.SCHEMA, b = "bbb", c = c or 1, p = p, n = n, l = l }),
                        { guid = b.guid, name = "Beta", realm = "Elegia" })
     end
     local cur = a.db.presets[e.id]
@@ -547,7 +604,7 @@ do
     man(1, 1, { [e.id] = old }, 6)
     eq("confirm: an older version listed is pending", a.sync.EntryStatus(cur), "pending")
     -- A new session of the peer (it reloaded) replaces the old one for good.
-    a.sync.Receive("MAN\n" .. Env.Pack({ s = 1, b = "bbb2", c = 1, p = 1, n = 1, l = { [e.id] = cur.version } }),
+    a.sync.Receive("MAN\n" .. Env.Pack({ s = Env.SCHEMA, b = "bbb2", c = 1, p = 1, n = 1, l = { [e.id] = cur.version } }),
                    { guid = b.guid, name = "Beta", realm = "Elegia" })
     eq("session: the new session counts", a.sync.EntryStatus(cur), "confirmed")
     man(1, 1, { [e.id] = old }, 99)
@@ -609,7 +666,7 @@ do
     a.online = false                               -- B is driven by hand below
     use(b); b.sync.Tick()
     local function man(c, v)
-        b.sync.Receive("MAN\n" .. Env.Pack({ s = 1, b = "aaa", c = c, p = 1, n = 1, l = { [e.id] = v } }),
+        b.sync.Receive("MAN\n" .. Env.Pack({ s = Env.SCHEMA, b = "aaa", c = c, p = 1, n = 1, l = { [e.id] = v } }),
                        { guid = a.guid, name = "Alpha", realm = "Elegia" })
     end
     local peersOf = b.transport.Peers
@@ -693,7 +750,7 @@ do
     local sender = { guid = b.guid, name = "Beta", realm = "Elegia" }
     local function man(session, c, l, sid)
         use(a)
-        a.sync.Receive("MAN\n" .. Env.Pack({ s = 1, b = session, c = c, p = 1, n = 1, l = l }), sender, sid)
+        a.sync.Receive("MAN\n" .. Env.Pack({ s = Env.SCHEMA, b = session, c = c, p = 1, n = 1, l = l }), sender, sid)
     end
     -- B's own entries, so A has something to fetch from each manifest.
     use(b)
@@ -724,7 +781,7 @@ do
     b.transport.Peers = function() return { { guid = a.guid, name = "Alpha", realm = "Elegia" } } end
     use(b); b.sync.Tick()
     local sender = { guid = a.guid, name = "Alpha", realm = "Elegia" }
-    local function man(c, v) use(b); b.sync.Receive("MAN\n" .. Env.Pack({ s = 1, b = "aaa", c = c, p = 1, n = 1, l = { [e.id] = v } }), sender) end
+    local function man(c, v) use(b); b.sync.Receive("MAN\n" .. Env.Pack({ s = Env.SCHEMA, b = "aaa", c = c, p = 1, n = 1, l = { [e.id] = v } }), sender) end
     man(1, v1)                                     -- asks for v1
     man(2, v2)                                     -- v2 queued while v1 is out
     T = T + S.REQ_TIMEOUT + 1
@@ -749,7 +806,7 @@ do
     C.Rename(g.id, "Fresh 2", g1)
     local gText, g2 = Env.Encode(a.db.presets[g.id]), a.db.presets[g.id].version
     use(b)
-    b.sync.Receive("MAN\n" .. Env.Pack({ s = 1, b = "aaa", c = 4, p = 1, n = 1, l = { [g.id] = g1, [e.id] = v2 } }), sender)
+    b.sync.Receive("MAN\n" .. Env.Pack({ s = Env.SCHEMA, b = "aaa", c = 4, p = 1, n = 1, l = { [g.id] = g1, [e.id] = v2 } }), sender)
     b.sync.Receive("ENT\n" .. g.id .. "\n" .. g2 .. "\n" .. gText, sender)
     eq("newer answer: stored", b.db.presets[g.id] and b.db.presets[g.id].version, g2)
     eq("newer answer: the request is done", (b.sync.Outstanding(a.guid)), 0)
@@ -971,12 +1028,18 @@ do
         check("status: silent peer named", lines():find("no reply yet", 1, true) ~= nil)
         local list = {}
         for id, e in pairs(L.db.presets) do list[id] = e.version end
-        inst.handler("MAN\n" .. L.Envelope.Pack({ s = 1, b = "ccc", c = 1, p = 1, n = 1, l = list }), peer)
+        inst.handler("MAN\n" .. L.Envelope.Pack({ s = L.Envelope.SCHEMA, b = "ccc", c = 1, p = 1, n = 1, l = list }), peer)
         L.Commands.link("")
         local live = 0
         for _, e in pairs(L.db.presets) do if not e.deleted and not e.conflict then live = live + 1 end end
         check("status: confirmed counts only live entries",
               lines():find(("Gamma-Elegia: %d confirmed, 0 pending"):format(live), 1, true) ~= nil, lines())
+        -- #5: an older peer's message pauses it; status says so instead of counts.
+        inst.handler("MAN\n" .. L.Envelope.Pack({ s = 1, b = "ccc", c = 2, p = 1, n = 1, l = list }), peer)
+        WoW.chatLines = {}
+        L.Commands.link("")
+        check("status: paused peer", lines():find("Gamma-Elegia: sync paused - that account runs an older AltStableSync; update it.", 1, true) ~= nil, lines())
+        check("status: no counts for a paused peer", lines():find("confirmed", 1, true) == nil, lines())
         inst.Peers = function() return {} end
     end
     eq("commands: no game state touched", #touched, 0)

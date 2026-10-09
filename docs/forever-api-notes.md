@@ -128,6 +128,7 @@ Event counts: UPDATE_BINDINGS ×5, UPDATE_MACROS ×6, ACTIONBAR_SLOT_CHANGED ×2
 - Sizes: CBOR 22,335 bytes, then Deflate 2,023, then Base64 2,700. Encoding took 0.7 ms.
 - The decode round trip is **deep-equal**, and integer keys survive as numbers.
 - **Consequence for #17/#18:** the envelope is small. A whole profile fits well under LibAccountSync's 16 KB.
+- **Measured with real loadouts on 70291 (#5, 2026-10-09):** the largest of 5 saved entries, covering every bar, encodes to **1,508 bytes** on the wire (envelope plus id and version).
 
 ## Build 1.60.1.70291 (2026-10-08) - client update, re-checked by hand
 
@@ -166,6 +167,49 @@ The client was built on Oct 7, 2026, interface 16001.
 - **Caster** bars keep the old rank, unless the spell is cast through a macro.
 - So a low rank alone on a caster's bar is usually stale, not a choice. Healers, though, keep two or three ranks of one heal on purpose to save mana.
 - Ranks are separate, ascending spellbook items (Raptor Strike ranks 1 and 2 at book slots 25 and 26, above), so book order gives rank order.
+
+### Action bars: button → slot, per state (#5, 2026-10-09)
+
+Measured with `/syncprobe bars` (`Tools/AltStableSyncProbe`) on four low-level characters: a hunter,
+a warrior, a druid and a rogue. None of them had a second stance, a form or stealth yet.
+
+**Buttons → slots** (every button reports its slot through `GetPagedID`; identical on all four):
+
+| Bar (Settings name) | Frame | Slots |
+|---|---|---|
+| Action Bar 1, page 1 | `ActionButton1–12` | 1–12 |
+| Action Bar 1, page 2 (paging) | `ActionButton1–12` | 13–24 (page 2 measured on the hunter) |
+| Action Bar 4 | `MultiBarRightButton` | 25–36 |
+| Action Bar 5 | `MultiBarLeftButton` | 37–48 |
+| Action Bar 3 | `MultiBarBottomRightButton` | 49–60 |
+| Action Bar 2 | `MultiBarBottomLeftButton` | 61–72 |
+| Battle Stance (warrior) | `ActionButton1–12` | **73–84**; slot 1 keeps its own content underneath |
+| Action Bars 6–8 | `MultiBar5/6/7Button` | 145–180 |
+
+- `C_ActionBar.GetBonusBarIndexForSlot`: 73–84 = 7, 85–96 = 8, 97–108 = 9, 109–120 = 10,
+  121–132 = 11; nothing else has one (1–200 scanned, on all four characters).
+- `OverrideActionBarButton1–6` show slots 1–6: the override bar aliases Action Bar 1 and stores nothing.
+  `BonusActionButton` doesn't exist. Bonus/override/vehicle/temp-shapeshift/extra bar indices: 0, 33,
+  31, 32, 34 out of any form.
+- **Hidden bars keep their slots.** On the warrior, druid and rogue, Action Bars 2–8 were hidden
+  (0/12 visible); their buttons still map to the same slots.
+- **Slots 181–200 hold copies** of main-bar actions on every character (e.g. 181–184 = slots 9–12's
+  contents in another order, 197 and 200 = slots 3 and 2). No button ever shows them.
+- **`/syncprobe bars write <slot>`** (an empty slot, out of combat, not in a form): written, read back,
+  picked up and the slot and cursor empty again, with **no `ADDON_ACTION_BLOCKED`/`FORBIDDEN`**, on
+  slots 80, 90, 100 and 115 (pages 7–10, none active), 20 (page 2 while page 1 shows) and 150 (a
+  hidden Action Bar 6).
+- **The page that's showing takes writes too.** The warrior in Battle Stance (`GetShapeshiftForm` 1,
+  `GetBonusBarOffset` 1, so Action Bar 1 shows slots 73–84): `/syncprobe bars write 80` wrote, read back
+  and emptied slot 80, with the cursor empty and no `ADDON_ACTION_BLOCKED`/`FORBIDDEN`.
+- **Binding commands** (`GetNumBindings`/`GetBinding`, for #7): 116 — `ACTIONBUTTON1–12`,
+  `MULTIACTIONBAR1–7BUTTON1–12`, `BONUSACTIONBUTTON1–10`, `SHAPESHIFTBUTTON1–10`. No `MULTIACTIONBAR8`.
+
+**Consequence for #5:** a loadout covers slots **1–120 and 145–180**, by slot id. **121–132**
+(page 11: skyriding/possess), **133–144** (no button showed them) and **181+** (shadow copies) are never
+read or written. **Not measured yet:** which form or stance uses which of pages 7–10 (no character
+had one); the preview names them "Stance/form page 1–4". A druid, warrior or rogue that gets its form
+or stealth can confirm with `/syncprobe bars <label>` in that form.
 
 ## Still open
 

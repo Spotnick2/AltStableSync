@@ -68,6 +68,7 @@ local COPY = {
     ["conflict-copy"] = "That is a conflict copy: settle it with /altsync resolve.",
     ["not-conflict"] = "That conflict was already settled.",
     ["rename-empty"] = "Give it a name: /altsync rename <id or name> <new name>.",
+    ["bad-modules"] = "Its saved data is damaged (no list of covered slots); nothing was changed.",
 }
 local function Copy(err) return COPY[err] or tostring(err) end
 
@@ -80,6 +81,25 @@ local function DescribeAction(a)
     if a.kind == "item" then return "item " .. tostring(a.id) end
     if a.kind == "macro" then return "macro " .. tostring(a.name) end
     return tostring(a.what or a.kind)
+end
+
+-- Per-slot lines grouped under one heading per bar with its count (#5),
+-- ordered by slot. items = { { slot = n, text = "..." } }. Every line is kept:
+-- the preview scrolls.
+local function BySlot(lines, items)
+    table.sort(items, function(a, b) return a.slot < b.slot end)
+    for _, it in ipairs(items) do it.bar, it.button = ASS.Game.SlotLabel(it.slot) end
+    local i = 1
+    while i <= #items do
+        local j = i
+        while j < #items and items[j + 1].bar == items[i].bar do j = j + 1 end
+        lines[#lines + 1] = ("  %s (%d):"):format(items[i].bar, j - i + 1)
+        for k = i, j do
+            local b = items[k].button
+            lines[#lines + 1] = (b and ("    button %d: "):format(b) or "    ") .. items[k].text
+        end
+        i = j + 1
+    end
 end
 
 -- The preview's lines for a plan (pure; tested).
@@ -104,20 +124,25 @@ function Commands.Describe(plan)
     else
         lines[#lines + 1] = ("Bindings (Destination: Character): %s change."):format(Plural(nKeys, "key"))
     end
+    local items = {}
     for _, op in ipairs(plan.actions) do
-        lines[#lines + 1] = ("  slot %d: %s -> %s"):format(op.slot, DescribeAction(op.current), DescribeAction(op.target))
+        items[#items + 1] = { slot = op.slot, text = ("%s -> %s"):format(DescribeAction(op.current), DescribeAction(op.target)) }
     end
+    BySlot(lines, items)
     local keys = {}
     for k, v in pairs(plan.keys) do keys[#keys + 1] = { k = k, v = v } end
     table.sort(keys, function(a, b) return a.k < b.k end)
     for _, kv in ipairs(keys) do
         lines[#lines + 1] = ("  %s: %s -> %s"):format(kv.k, kv.v.from or "unbound", kv.v.to or "unbound")
     end
-    for _, s in ipairs(plan.skips) do
-        lines[#lines + 1] = ("  slot %d left unchanged: %s"):format(s.slot, s.reason)
-    end
+    items = {}
+    for _, s in ipairs(plan.skips) do items[#items + 1] = { slot = s.slot, text = "left unchanged: " .. tostring(s.reason) } end
     for _, u in ipairs(plan.unavailable or {}) do
-        lines[#lines + 1] = ("  slot %d can't be restored exactly: %s"):format(u.slot, u.reason)
+        items[#items + 1] = { slot = u.slot, text = "can't be restored exactly: " .. tostring(u.reason) }
+    end
+    if #items > 0 then
+        lines[#lines + 1] = "Not changed:"
+        BySlot(lines, items)
     end
     if plan.kind == "restore" and #(plan.kept or {}) > 0 then
         lines[#lines + 1] = ("Kept: %s that load created (not deleted)."):format(Plural(#plan.kept, "macro"))
@@ -163,10 +188,8 @@ end
 
 local function Count(t) local n = 0; for _ in pairs(t or {}) do n = n + 1 end; return n end
 
+-- Saves the plan `p` the player saw (or that needed no preview).
 local function SaveAs(arg, p)
-    local err
-    if not p then p, err = ASS.Loadout.PlanSaveAs() end
-    if not p then Print("Not saved: " .. tostring(err)) return end
     local e, cerr = ASS.Loadout.SaveAs(p, arg)
     if not e then Print("Not saved: " .. Copy(cerr)) return end
     local msg = ("Saved %q (%d slots, bindings, %d character macros)."):format(e.name,
@@ -185,15 +208,34 @@ end
 function Commands.saveas(arg)
     local p, err = ASS.Loadout.PlanSaveAs()
     if not p then Print("Not saved: " .. tostring(err)) return end
-    if not p.lossy then return SaveAs(arg, p) end
-    ASS.Preview.Show({
-        title = "Save As " .. tostring(arg) .. "?",
+    if not p.lossy and (p.added or 0) == 0 then return SaveAs(arg, p) end
+    local lines
+    if p.lossy then
         lines = {
             p.why or "No usable comparison with the loaded setup (its load didn't finish, it was restored over, or it was loaded by an older version).",
             "Save As captures this character as it is now, and may leave out entries it inherited.",
-        },
+        }
+    else
+        lines = {
+            ("Adds %s the loaded setup didn't cover yet (%d with an action), from this character's bars."):format(
+                Plural(p.added, "slot"), p.addedFull or 0),
+            "Everything the loaded setup has is kept, as it would be on Save.",
+        }
+    end
+    ASS.Preview.Show({
+        title = "Save As " .. tostring(arg) .. "?",
+        lines = lines,
         confirm = "Save As",
-        onConfirm = function() SaveAs(arg) end,
+        -- The confirm saves what the preview showed, or nothing.
+        onConfirm = function()
+            local q, qerr = ASS.Loadout.PlanSaveAs()
+            if not q then Print("Not saved: " .. tostring(qerr)) return end
+            if ASS.Loadout.SaveAsFingerprint(q) ~= ASS.Loadout.SaveAsFingerprint(p) then
+                Print("Not saved: Something changed since the preview: review it again.")
+                return
+            end
+            SaveAs(arg, q)
+        end,
     })
 end
 
@@ -213,21 +255,31 @@ function Commands.save(arg)
         return
     end
     local lines = { ("%s and %s change in %q."):format(Plural(#m.changed, "slot"), Plural(#m.keysChanged, "key"), name) }
-    for _, slot in ipairs(m.changed) do
-        lines[#lines + 1] = ("  slot %d: %s"):format(slot, DescribeAction(m.modules.actions[slot]))
+    if (m.added or 0) > 0 then
+        lines[#lines + 1] = ("Adds %s this loadout didn't cover yet (%d with an action, counted above)."):format(
+            Plural(m.added, "slot"), m.addedFull or 0)
     end
+    local items = {}
+    for _, slot in ipairs(m.changed) do
+        items[#items + 1] = { slot = slot, text = DescribeAction(m.modules.actions[slot]) }
+    end
+    BySlot(lines, items)
     for _, cmd in ipairs(m.keysChanged) do
         local keys = m.modules.bindings and m.modules.bindings[cmd] or {}
         lines[#lines + 1] = ("  %s: %s"):format(cmd, #keys > 0 and table.concat(keys, ", ") or "unbound")
     end
     if #m.kept > 0 then
         lines[#lines + 1] = ("Keeping %s this character can't use:"):format(Plural(#m.kept, "entry"):gsub("entrys", "entries"))
-        for _, k in ipairs(m.kept) do lines[#lines + 1] = ("  slot %d: %s (%s)"):format(k.slot, DescribeAction(k.want), k.reason) end
+        items = {}
+        for _, k in ipairs(m.kept) do items[#items + 1] = { slot = k.slot, text = ("%s (%s)"):format(DescribeAction(k.want), k.reason) } end
+        BySlot(lines, items)
         if not drop then lines[#lines + 1] = "To leave the unusable ones out instead: /altsync save drop" end
     end
     if #m.dropped > 0 then
         lines[#lines + 1] = "Won't be kept (other characters' slots are left alone):"
-        for _, k in ipairs(m.dropped) do lines[#lines + 1] = ("  slot %d: %s (%s)"):format(k.slot, DescribeAction(k.want), k.reason) end
+        items = {}
+        for _, k in ipairs(m.dropped) do items[#items + 1] = { slot = k.slot, text = ("%s (%s)"):format(DescribeAction(k.want), k.reason) } end
+        BySlot(lines, items)
     end
     for _, n in ipairs(m.notes) do lines[#lines + 1] = n end
     lines[#lines + 1] = "Other characters keep their current setup until they load this version."

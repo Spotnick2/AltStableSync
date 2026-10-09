@@ -17,6 +17,11 @@
         /syncprobe                 every read-only section
         /syncprobe <section>       client | actions | ranks | login | editmode | encoding
         /syncprobe place           place a known spell in an EMPTY slot, read it back, clear it
+        /syncprobe bars [label]    #5: bar button -> action slot, slots 1-200, form/page state,
+                                   action-bar binding commands (read-only); label = the state,
+                                   e.g. "bear" or "page2" (each label is kept separately)
+        /syncprobe bars write <n>  #5: write a test spell into slot n ONLY if it is empty, read it
+                                   back, take it off again, verify slot and cursor are empty
         /syncprobe macro           create the test character macro (restart test)
         /syncprobe bind            bind CTRL-SHIFT-F11 in the CHARACTER binding set (restart test)
         /syncprobe cvar            write a marker CVar (restart test)
@@ -503,6 +508,175 @@ function P.place()
 end
 
 ----------------------------------------------------------------------------
+-- bars (#5): which underlying slot each visible button shows, per state
+----------------------------------------------------------------------------
+
+-- Every Blizzard action button family the client might have (each name is
+-- reported as present or absent; nothing is assumed).
+local BUTTON_BARS = { "ActionButton", "MultiBarBottomLeftButton", "MultiBarBottomRightButton",
+    "MultiBarRightButton", "MultiBarLeftButton", "MultiBar5Button", "MultiBar6Button", "MultiBar7Button",
+    "BonusActionButton", "OverrideActionBarButton" }
+
+-- A button's current action slot, and which accessor gave it.
+local function ButtonSlot(b)
+    for _, m in ipairs({ "GetPagedID", "CalculateAction" }) do
+        if type(b[m]) == "function" then
+            local ok, v = pcall(b[m], b)
+            if ok and type(v) == "number" then return v, m end
+        end
+    end
+    if type(b.action) == "number" then return b.action, ".action" end
+    return nil, "none"
+end
+
+-- "1-12=a 13-24=b": runs of equal values over 1..n.
+local function Runs(n, valueOf)
+    local out, start, cur = {}, 1, valueOf(1)
+    for i = 2, n + 1 do
+        local v = i <= n and valueOf(i) or {}
+        if v ~= cur then
+            out[#out + 1] = (start == i - 1 and tostring(start) or (start .. "-" .. (i - 1))) .. "=" .. tostring(cur)
+            start, cur = i, v
+        end
+    end
+    return table.concat(out, " ")
+end
+
+local function BarsMap(label)
+    Section("bars map  (" .. label .. ")")
+    -- State
+    Call("GetShapeshiftForm()", GetShapeshiftForm)
+    local okN, nForms = Call("GetNumShapeshiftForms()", GetNumShapeshiftForms)
+    for i = 1, (okN and tonumber(nForms) or 0) do Call(("GetShapeshiftFormInfo(%d)"):format(i), GetShapeshiftFormInfo, i) end
+    local AB = C_ActionBar or {}
+    for _, f in ipairs({ "GetActionBarPage", "GetBonusBarOffset", "GetBonusBarIndex", "HasBonusActionBar",
+                         "GetOverrideBarIndex", "GetVehicleBarIndex", "GetTempShapeshiftBarIndex",
+                         "GetExtraBarIndex", "HasOverrideActionBar", "HasVehicleActionBar",
+                         "HasTempShapeshiftActionBar" }) do
+        Call("C_ActionBar." .. f .. "()", AB[f])
+    end
+    -- Buttons -> slots
+    for _, bar in ipairs(BUTTON_BARS) do
+        if not _G[bar .. "1"] then
+            Record(("%-44s absent"):format(bar))
+        else
+            local parts, how, shown = {}, nil, 0
+            for i = 1, 12 do
+                local b = _G[bar .. i]
+                if b then
+                    local slot, m = ButtonSlot(b)
+                    how = how or m
+                    local okV, vis = pcall(b.IsVisible, b)
+                    if okV and vis then shown = shown + 1 end
+                    parts[#parts + 1] = i .. ">" .. tostring(slot)
+                else
+                    parts[#parts + 1] = i .. ">-"
+                end
+            end
+            Record(("%-44s via %s, %d/12 visible: %s"):format(bar, tostring(how), shown, table.concat(parts, " ")))
+        end
+    end
+    -- Slots 1-200: contents and bonus bar index
+    local info = {}
+    for slot = 1, 200 do
+        local ok, kind, id = pcall(GetActionInfo, slot)
+        info[slot] = not ok and "THREW" or kind and (kind .. ":" .. tostring(id)) or "empty"
+    end
+    local filled = {}
+    for slot = 1, 200 do if info[slot] ~= "empty" then filled[#filled + 1] = slot .. "=" .. info[slot] end end
+    Record(("%-44s %d: %s"):format("slots holding something", #filled, table.concat(filled, " ")))
+    local bonusFn = AB.GetBonusBarIndexForSlot
+    if type(bonusFn) == "function" then
+        Record(("%-44s %s"):format("GetBonusBarIndexForSlot 1-200", Runs(200, function(i)
+            local ok, v = pcall(bonusFn, i)
+            return ok and tostring(v) or "THREW"
+        end)))
+    else
+        Record("C_ActionBar.GetBonusBarIndexForSlot ABSENT")
+    end
+    Record(("%-44s %s"):format("GetActionInfo threw at", Runs(200, function(i) return info[i] == "THREW" and "threw" or "ok" end)))
+    -- Binding commands for the bars (#7): enumerated, so unbound ones show too.
+    local okB, n = pcall(GetNumBindings)
+    if okB and type(n) == "number" then
+        local cmds = {}
+        for i = 1, n do
+            local okI, cmd, _, k1, k2 = pcall(GetBinding, i)
+            if okI and type(cmd) == "string" and (cmd:find("^ACTIONBUTTON") or cmd:find("^MULTIACTIONBAR")
+                or cmd:find("^BONUSACTIONBUTTON") or cmd:find("^SHAPESHIFTBUTTON")) then
+                cmds[#cmds + 1] = cmd .. ((k1 or k2) and ("[" .. tostring(k1 or "") .. (k2 and ("," .. k2) or "") .. "]") or "")
+            end
+        end
+        Record(("%-44s %d: %s"):format("bar binding commands (GetBinding)", #cmds, table.concat(cmds, " ")))
+    else
+        Record("GetNumBindings unavailable")
+    end
+end
+
+local function BarsWrite(slot)
+    Section("bars write  (slot " .. tostring(slot) .. ", EMPTY only)")
+    if not slot or slot < 1 or slot > 200 then Record("usage: /syncprobe bars write <slot 1-200>"); return end
+    if InCombatLockdown() then Record("out of combat only"); return end
+    if GetCursorInfo() then Record("cursor is not empty - put it down and rerun"); return end
+    if not SlotEmpty(slot) then Record("slot " .. slot .. " is not empty - pick an empty slot; nothing written"); return end
+    Call("GetShapeshiftForm()", GetShapeshiftForm)
+    Call("C_ActionBar.GetBonusBarOffset()", C_ActionBar and C_ActionBar.GetBonusBarOffset)
+    Call("C_ActionBar.GetBonusBarIndexForSlot(slot)", C_ActionBar and C_ActionBar.GetBonusBarIndexForSlot, slot)
+    local pick
+    for _, e in ipairs(SpellBook()) do
+        if IsLearnedSpell(e.info) then pick = { id = e.info.spellID, name = e.info.name }; break end
+    end
+    if not pick then Record("no castable spell in the spellbook"); return end
+    Record(("%-44s slot %d, spell %s %q"):format("target", slot, pick.id, tostring(pick.name)))
+    local mark = #blocked
+    local function done(msg)
+        ClearCursor()
+        Record(msg)
+        Record(("%-44s %s"):format("ADDON_ACTION_BLOCKED/FORBIDDEN", TaintSince(mark)))
+    end
+    if not Call("C_Spell.PickupSpell(id)", C_Spell.PickupSpell, pick.id) or CursorSpell() ~= "spell" then
+        return done("pickup did not put a spell on the cursor - stopped, nothing written")
+    end
+    if not SlotEmpty(slot) then return done("slot " .. slot .. " is no longer empty - stopped, nothing written") end
+    Call("PlaceAction(slot)", PlaceAction, slot)
+    local leftover = GetCursorInfo()
+    Call("GetActionInfo(slot) after place", GetActionInfo, slot)
+    local okA, kind, placed = pcall(GetActionInfo, slot)
+    if leftover or not (okA and kind == "spell" and placed == pick.id) then
+        return done(("placed read back %s %s, cursor held %s - NOT removing; check slot %d by hand")
+            :format(ValStr(kind), ValStr(placed), ValStr(leftover), slot))
+    end
+    Call("PickupAction(slot)", PickupAction, slot)
+    local ck, _, _, cid = CursorSpell()
+    local same = ck == "spell" and (cid == pick.id or cid == nil)
+    Record(("%-44s %s %s"):format("cursor after PickupAction", ValStr(ck), ValStr(cid)))
+    ClearCursor()
+    local clean = SlotEmpty(slot) and not GetCursorInfo()
+    if same and clean then
+        done(("OK - slot %d written, read back, and empty again; cursor empty"):format(slot))
+    else
+        done(("NOT clean - slot %d empty: %s, cursor empty: %s, picked up our spell: %s - check by hand")
+            :format(slot, tostring(SlotEmpty(slot)), tostring(not GetCursorInfo()), tostring(same)))
+    end
+end
+
+-- Returns the label this run is kept under.
+function P.bars(rest)
+    local sub, arg = (rest or ""):match("^%s*(%S*)%s*(.-)%s*$")
+    if sub == "write" then
+        BarsWrite(tonumber(arg))
+        return "bars write " .. tostring(arg)
+    end
+    local label = (sub ~= "" and (sub .. (arg ~= "" and (" " .. arg) or "")))
+    if not label then
+        local okF, form = pcall(GetShapeshiftForm)
+        local okP, page = pcall(C_ActionBar and C_ActionBar.GetActionBarPage or GetActionBarPage)
+        label = ("form%s page%s"):format(tostring(okF and form), tostring(okP and page))
+    end
+    BarsMap(label)
+    return "bars " .. label
+end
+
+----------------------------------------------------------------------------
 -- Restart tests: macro, binding, CVar. Each records a marker ONLY after the
 -- write is verified; /syncprobe restart reads it after a FULL EXIT;
 -- /syncprobe clean undoes only what the probe recorded, verifies each undo,
@@ -782,13 +956,16 @@ end
 
 SLASH_ALTSTABLESYNCPROBE1 = "/syncprobe"
 SlashCmdList.ALTSTABLESYNCPROBE = function(msg)
-    local cmd = ((msg or ""):match("^%s*(%S*)") or ""):lower()
+    local cmd, rest = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
+    cmd = (cmd or ""):lower()
     if cmd == "copy" then ShowCopy(); return end
     lines = {}
     -- Each section protected: one error must not lose the rest of the run.
+    local label
     local function Run(name)
-        local ok, err = pcall(P[name])
-        if not ok then Record("|cffff5555SECTION " .. name .. " ERRORED:|r " .. tostring(err)) end
+        local ok, err = pcall(P[name], rest)
+        if not ok then Record("|cffff5555SECTION " .. name .. " ERRORED:|r " .. tostring(err))
+        elseif type(err) == "string" then label = err end
     end
     if cmd == "" or cmd == "all" then
         for _, name in ipairs(READ_ONLY) do Run(name) end
@@ -796,10 +973,10 @@ SlashCmdList.ALTSTABLESYNCPROBE = function(msg)
     elseif P[cmd] then
         Run(cmd)
     else
-        Out("/syncprobe [client|actions|ranks|login|editmode|encoding] | place | macro | bind | cvar | restart | clean | copy")
+        Out("/syncprobe [client|actions|ranks|login|editmode|encoding] | place | bars [label|write <n>] | macro | bind | cvar | restart | clean | copy")
         return
     end
-    Persist(cmd)
+    Persist(label or cmd)
     -- place reports half a second later; open the window after that.
     C_Timer.After(cmd == "place" and 0.7 or 0, ShowCopy)
 end

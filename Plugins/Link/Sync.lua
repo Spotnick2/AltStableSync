@@ -78,6 +78,21 @@ function Sync.New(o)
         report(text)
     end
 
+    -- A peer on another wire schema (#5) is paused, not refused: nothing it
+    -- sends is cached as handled, so once it updates, the same versions are
+    -- fetched. Its first message at our schema clears the pause.
+    local function Incompatible(p, why)
+        if why ~= "older-schema" and why ~= "newer-schema" then return false end
+        p.schema = why
+        -- It can't read our requests: stop asking until it speaks our schema
+        -- (its next manifest queues what we still lack).
+        p.queue, p.queued, p.out = {}, {}, {}
+        Once("schema:" .. p.guid .. ":" .. why, why == "older-schema"
+            and ("Your other account (%s) runs an older AltStableSync: sync is paused until both are updated."):format(p.label)
+            or ("Your other account (%s) runs a newer AltStableSync: update this one; sync is paused until then."):format(p.label))
+        return true
+    end
+
     local function Peer(guid, label)
         local p = peers[guid]
         if not p then
@@ -266,6 +281,8 @@ function Sync.New(o)
         -- version (late, after a timeout) leaves the newer request alone.
         if asked and asked.version == rver then p.out[rid] = nil end
         local entry, why = Env.Decode(text)
+        if not entry and Incompatible(p, why) then Pump(p) return end
+        if entry then p.schema = nil end       -- decoded at our schema: compatible
         if entry and (entry.id ~= rid or entry.version ~= rver) then entry, why = nil, "mismatch" end
         if not entry then
             -- Refused: don't ask for THAT version again this session.
@@ -302,8 +319,9 @@ function Sync.New(o)
         end
         p.heard = true
         if kind == "ENT" then return OnEntry(p, body) end
-        local m = Env.Unpack(body)
-        if not m then return end
+        local m, why = Env.Unpack(body)
+        if not m then Incompatible(p, why) return end
+        p.schema = nil
         if kind == "MAN" then return OnManifest(p, m, tonumber(sid)) end
         if kind == "REQ" then return OnRequest(p, m) end
     end
@@ -358,12 +376,14 @@ function Sync.New(o)
     ------------------------------------------------------------
 
     -- The listed peers: { label, guid, heard = it has spoken (runs the Link
-    -- addon), complete = we hold its whole manifest }.
+    -- addon), complete = we hold its whole manifest, schema = "older-schema" |
+    -- "newer-schema" while it runs an incompatible AltStableSync }.
     function self.Peers()
         local out = {}
         for _, p in pairs(peers) do
             if p.listed then
-                out[#out + 1] = { label = p.label, guid = p.guid, heard = p.heard, complete = p.manifest ~= nil }
+                out[#out + 1] = { label = p.label, guid = p.guid, heard = p.heard, complete = p.manifest ~= nil,
+                                  schema = p.schema }
             end
         end
         table.sort(out, function(a, b) return a.label < b.label end)
@@ -372,17 +392,22 @@ function Sync.New(o)
 
     -- "confirmed" when every peer that has spoken (or just `guid`) lists our
     -- exact version in its whole manifest, "too large", or "pending"; nil
-    -- with no such peer.
+    -- with no such peer. A peer on another schema is paused, not pending:
+    -- "sync paused" when no other peer answers for the entry.
     function self.EntryStatus(e, guid)
         if tooLarge[e.id] == e.version then return "too large" end
-        local any = false
+        local any, paused = false, false
         for _, p in pairs(peers) do
             if p.listed and p.heard and (guid == nil or p.guid == guid) then
-                any = true
-                if not (p.manifest and p.manifest[e.id] == e.version) then return "pending" end
+                if p.schema then
+                    paused = true
+                else
+                    any = true
+                    if not (p.manifest and p.manifest[e.id] == e.version) then return "pending" end
+                end
             end
         end
-        return any and "confirmed" or nil
+        return any and "confirmed" or (paused and "sync paused") or nil
     end
 
     function self.Outstanding(guid)

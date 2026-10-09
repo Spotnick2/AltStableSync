@@ -110,6 +110,10 @@ local function Status()
     for _, p in ipairs(peers) do
         if not p.heard then
             Print(("  %s: online, no reply yet (AltStableSyncLink not running there?)"):format(p.label))
+        elseif p.schema then
+            Print(("  %s: sync paused - that account runs %s AltStableSync; %s."):format(p.label,
+                p.schema == "older-schema" and "an older" or "a newer",
+                p.schema == "older-schema" and "update it" or "update this one"))
         else
             local n = { confirmed = 0, pending = 0, ["too large"] = 0 }
             for _, e in ipairs(entries) do

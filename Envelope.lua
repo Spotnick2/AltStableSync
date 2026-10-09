@@ -17,7 +17,9 @@ local Envelope = {}
 ASS.Envelope = Envelope
 
 local PREFIX = "ASE1:"
-local SCHEMA = 1
+-- 2 (#5): loadouts carry `cover`, and a 1-12 build must never receive or
+-- edit a wider entry, so every message kind moved to 2 together.
+local SCHEMA = 2
 Envelope.SCHEMA = SCHEMA
 
 -- Adler-32 in plain Lua 5.1 arithmetic (no bit library needed).
@@ -54,7 +56,8 @@ function Envelope.Pack(value)
 end
 
 -- The string -> the table, or nil plus "bad-envelope" / "bad-checksum" /
--- "newer-schema" (unknown or newer: refused, never guessed at).
+-- "older-schema" / "newer-schema" (anything but SCHEMA: refused, never
+-- guessed at; "newer" also covers a schema that isn't a number).
 function Envelope.Unpack(text)
     if type(text) ~= "string" then return nil, "bad-envelope" end
     local sum, b64 = text:match("^ASE1:(%x%x%x%x%x%x%x%x):(.+)$")
@@ -68,6 +71,7 @@ function Envelope.Unpack(text)
     if Adler32(cbor) ~= sum:lower() then return nil, "bad-checksum" end
     local value = Call(E.DeserializeCBOR, cbor)
     if type(value) ~= "table" then return nil, "bad-envelope" end
+    if type(value.s) == "number" and value.s < SCHEMA then return nil, "older-schema" end
     if value.s ~= SCHEMA then return nil, "newer-schema" end
     return value
 end
