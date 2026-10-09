@@ -512,9 +512,12 @@ declared in exactly one TOC.
 - **Nothing hides (#39).**
   - `link off` persists across logins. So while it is off, every successful `saveas`, `rename`,
     `delete` and `resolve` adds "Link is off: your other account won't see this until /altsync
-    link on." after its result. A refusal adds nothing, and so does a missing Link addon.
+    link on." after its result. If the Link addon is installed but failed to start, the line says
+    "Link isn't running (<why>)" instead. A refusal, including a stale one at the confirm, adds
+    nothing, and so does a missing Link addon.
   - `conflicts` lists this class's copies, which are the only ones this character can resolve. It
-    adds one line counting the copies on other classes' loadouts.
+    adds one line counting every other open copy: other classes' loadouts, and UI setups. That is
+    the same set `/altsync link` counts (`Catalog.Conflicts()`).
 
 ### Receive rules (per entry, idempotent)
 

@@ -918,6 +918,16 @@ do
         check("off: resolve notes it", out:find("Resolved", 1, true) and out:find(OFF, 1, true), out)
         out = said(function() L.Commands.rename(named.id .. " ") end)   -- refused: no note
         check("off: a refusal carries no note", out ~= "" and not out:find(OFF, 1, true), out)
+        -- Refused at the confirm (stale: changed after the preview): no note either.
+        local stale = L.Catalog.Create("loadout", { class = "PRIEST", category = "holy", name = "Stale" }, mods(12))
+        L.Commands.rename(stale.id .. " Stale 2")
+        L.Catalog.Rename(stale.id, "Moved", stale.version)
+        out = said(shown.onConfirm)
+        check("off: a stale rename carries no note", out:find("Not renamed", 1, true) and not out:find(OFF, 1, true), out)
+        L.Commands.delete(stale.id)
+        L.Catalog.Rename(stale.id, "Moved 2", L.Catalog.Get(stale.id).version)
+        out = said(shown.onConfirm)
+        check("off: a stale delete carries no note", out:find("Not deleted", 1, true) and not out:find(OFF, 1, true), out)
         L.Commands.link("on")
         local back = L.Catalog.Create("loadout", { class = "PRIEST", category = "holy", name = "Online" }, mods(7))
         L.Commands.rename(back.id .. " Online 2")
@@ -931,10 +941,21 @@ do
                            kind = "loadout", class = "HUNTER", category = "general", name = "Hy", modules = mods(9) }, "Other")
         check("other class: a hunter conflict exists", L.Catalog.Get("loadout-aaaaaaaaaaaa-1~aaaaaaaaaaaa:2") ~= nil)
         out = said(L.Commands.conflicts)
-        check("other class: counted with its class", out:find("1 more on other classes: HUNTER (1)", 1, true) ~= nil, out)
+        check("other class: counted with its class", out:find("1 more not listed here: HUNTER (1)", 1, true) ~= nil, out)
+        -- A UI setup conflict is counted too (Link's status counts it).
+        L.Catalog.Upsert({ id = "ui-bbbbbbbbbbbb-1", version = "bbbbbbbbbbbb:1", kind = "ui", name = "U", modules = {} }, "Other")
+        L.Catalog.Upsert({ id = "ui-bbbbbbbbbbbb-1", version = "bbbbbbbbbbbb:2", parent = "y:1", ancestors = { "y:1" },
+                           kind = "ui", name = "U2", modules = {} }, "Other")
+        out = said(L.Commands.conflicts)
+        check("ui conflict: counted", out:find("2 more not listed here: HUNTER (1), UI setups (1)", 1, true) ~= nil, out)
+        -- The class not known yet: nothing is called "elsewhere".
+        UnitClass = function() return nil, nil end
+        out = said(L.Commands.conflicts)
+        check("no class: no other-class line", not out:find("not listed here", 1, true), out)
         UnitClass = function() return "Hunter", "HUNTER" end
         out = said(L.Commands.conflicts)
         check("other class: listed on that class", out:find("loadout-aaaaaaaaaaaa-1~aaaaaaaaaaaa:2", 1, true) ~= nil, out)
+        check("other class: own copies not counted as elsewhere", not out:find("HUNTER (", 1, true), out)
         UnitClass = function() return "Priest", "PRIEST" end
     end
     -- /altsync link status: an online account that never replies is named as
@@ -963,6 +984,8 @@ do
     local L2 = bootLink(false)
     eq("link: older library -> disabled", L2.Link.state, "disabled")
     check("link: says why", tostring(L2.Link.why):find("messages mode", 1, true) ~= nil)
+    check("link failed: a change still says it won't sync",
+          tostring(L2.Link.OffNote()):find("isn't running (", 1, true) ~= nil, tostring(L2.Link.OffNote()))
 
     local L3, inst3 = bootLink(true, true)
     eq("link: refused core schema -> disabled", L3.Link.state, "disabled")

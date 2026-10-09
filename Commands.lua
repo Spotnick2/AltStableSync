@@ -6,7 +6,7 @@
 --   /altsync load <id|name>  preview, then load (writes only on confirm)
 --   /altsync backups         this character's snapshots
 --   /altsync restore [n|op]  preview, then restore exactly (default: newest)
---   /altsync rename <id> <new name>, delete <id|name>   catalog only, previewed
+--   /altsync rename <id|name> <new name>, delete <id|name>   catalog only, previewed
 --   /altsync conflicts, resolve <id|name> theirs|mine   catalog only, previewed
 --   /altsync status          (and /altsync link, from AltStableSyncLink)
 -- An entry is named by its id, or by its name when exactly one entry has it:
@@ -67,7 +67,7 @@ local COPY = {
     ["unknown-id"] = "That loadout no longer exists.",
     ["conflict-copy"] = "That is a conflict copy: settle it with /altsync resolve.",
     ["not-conflict"] = "That conflict was already settled.",
-    ["rename-empty"] = "Give it a name: /altsync rename <id> <new name>.",
+    ["rename-empty"] = "Give it a name: /altsync rename <id or name> <new name>.",
 }
 local function Copy(err) return COPY[err] or tostring(err) end
 
@@ -198,32 +198,34 @@ function Commands.save()
     Print("Save over an existing loadout is disabled until #28 lands; use /altsync saveas <name>.")
 end
 
--- Live conflict copies of this class (unresolved).
-local function Conflicts()
-    local out = {}
-    for _, e in ipairs(ASS.Catalog.ListAll("loadout", PlayerClass())) do
-        if e.conflict then out[#out + 1] = e end
-    end
-    return out
-end
-
--- Conflicts on other classes' loadouts, which this character can't list or
--- resolve: one line so they never hide behind "No conflicts" (#39).
-local function OtherClasses()
-    local mine, n, by = PlayerClass(), 0, {}
+-- Every live conflict copy, in one pass: this class's loadouts (listed and
+-- resolvable here), and one line counting the rest - other classes'
+-- loadouts and UI setups - so none hides behind "No conflicts" (#39). With
+-- the class not known yet, nothing is called "elsewhere".
+local function SplitConflicts()
+    local mine, here, by, n = PlayerClass(), {}, {}, 0
+    if not mine then return here, nil end
     for _, e in ipairs(ASS.Catalog.Conflicts()) do
-        if e.kind == "loadout" and e.class ~= mine then
+        if e.kind == "loadout" and e.class == mine then
+            here[#here + 1] = e
+        else
+            local key = e.kind == "loadout" and tostring(e.class) or "ui"
+            by[key] = (by[key] or 0) + 1
             n = n + 1
-            by[tostring(e.class)] = (by[tostring(e.class)] or 0) + 1
         end
     end
-    if n == 0 then return nil end
+    if n == 0 then return here, nil end
     local names = type(LOCALIZED_CLASS_NAMES_MALE) == "table" and LOCALIZED_CLASS_NAMES_MALE or {}
     local parts = {}
-    for class, k in pairs(by) do parts[#parts + 1] = ("%s (%d)"):format(names[class] or class, k) end
+    for key, k in pairs(by) do
+        parts[#parts + 1] = ("%s (%d)"):format(key == "ui" and "UI setups" or names[key] or key, k)
+    end
     table.sort(parts)
-    return ("%d more on other classes: %s. Resolve those on a character of that class."):format(n, table.concat(parts, ", "))
+    return here, ("%d more not listed here: %s. Resolve a class's loadouts on a character of that class."):format(
+        n, table.concat(parts, ", "))
 end
+
+local function Conflicts() return (SplitConflicts()) end
 
 local function Marker(e, copies)
     if e.conflict then
@@ -349,7 +351,7 @@ function Commands.delete(arg)
 end
 
 function Commands.conflicts()
-    local list, others = Conflicts(), OtherClasses()
+    local list, others = SplitConflicts()
     if #list == 0 then
         Print(others and "No conflicts for this class." or "No conflicts.")
     else
