@@ -94,7 +94,8 @@ function Game.Spellbook()
                     and (not T or info.itemType == T.Spell) then
                     local okR, low = pcall(C_SpellBook.IsSpellBookItemLowRank, i, BANK)
                     low = okR and low == true
-                    byId[info.spellID] = { name = info.name, low = low }
+                    -- `order`: ranks are separate, ascending book items (measured).
+                    byId[info.spellID] = { name = info.name, low = low, order = i }
                     if not low then top[info.name] = info.spellID end
                 end
             end

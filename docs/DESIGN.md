@@ -331,8 +331,15 @@ kind (`AltStableSyncChar.loaded`) with the applied/skipped result.
 |---|---|
 | Supported, observable, changed | Save the current value (after preview) |
 | Inherited entry was unresolvable, and the slot was not deliberately replaced | Keep the inherited entry |
-| Same family on a low alt, policy "highest known" | Keep "highest known"; don't freeze the low ID |
+| Same family on a low alt, policy "highest known" | Keep "highest known"; don't freeze the low ID. A rank update (a hunter bar after training, or the new rank dragged in) is no change |
 | Deliberate downrank | Keep the exact rank |
+
+**Which captured rank is deliberate** (#42). Caster bars keep an old rank after training, while hunter
+bars update, so the bars alone can't show intent. A spell on the bars at **two or more ranks** is a
+ladder: the highest of them on the bars is "highest known", and the lower ones are "exact". A spell at
+**one rank** is "highest known", whatever the rank. Rank order is spellbook order. A lone deliberate
+downrank is read as "highest known"; a macro (`/cast Heal(Rank 2)`) keeps its text as written. Save
+keeps the loaded policy for untouched slots, so a downrank inherited from the main stays exact.
 | Inherited addon absent, or field unreadable | Keep the prior payload |
 | Empty or ambiguous slot after a skipped load | Keep, unless the review chose `save drop` |
 | `save drop` chosen | The entries this character couldn't use stop being part of the entry; other characters' slots are left alone |
@@ -389,7 +396,7 @@ the previous content. It is not a history product.
 
 | Situation | Behaviour |
 |---|---|
-| Lower rank known | Highest known rank in the verified family; deliberate downranks stay |
+| Lower rank known | Highest known rank in the verified family; deliberate downranks (a ladder of ranks, #42) stay |
 | Spell not learned | Keep it in the entry; leave the destination untouched; report it |
 | Different racial | Don't guess an equivalent; leave it unresolved, or use a named variant |
 | Alliance/Horde macro text | Keep the literal text; use named variants ("PvP - Horde") |

@@ -60,6 +60,7 @@ local function main()
             [6] = { flyout = 1 },                   -- unsupported
             [7] = { macro = "Dup" },                -- ambiguous name -> unsupported
             [8] = { spell = 2060 },                 -- Greater Heal (an alt won't know it)
+            [12] = { spell = 2052 },                -- Lesser Heal r2: with slot 2, a rank ladder
         },
         keys = { ["1"] = "ACTIONBUTTON1", ["2"] = "ACTIONBUTTON2", ["SHIFT-2"] = "ACTIONBUTTON2" },
     }
@@ -109,6 +110,7 @@ do
     eq("capture: top rank -> highest", m.actions[1].policy, "highest")
     eq("capture: name kept for the family", m.actions[1].name, "Flash Heal")
     eq("A11: deliberate downrank -> exact", m.actions[2].policy, "exact")
+    eq("#42: the ladder's highest rank -> highest", m.actions[12].policy, "highest")
     eq("capture: item", m.actions[3].kind .. ":" .. m.actions[3].id, "item:5512")
     eq("A15: macro by name, not the shown spell id", m.actions[4].name, "Shield")
     eq("capture: char macro scope", m.actions[4].scope, "char")
@@ -1412,6 +1414,45 @@ do
     eq("frozen comparison: refused", r, nil)
     check("frozen comparison: says so", tostring(why):find("changed since the preview", 1, true) ~= nil, why)
     eq("frozen comparison: catalog untouched", A.Catalog.Get(entry.id).version, v)
+end
+
+-- #42: rank policy. Caster bars keep an old rank after training; hunter
+-- bars switch to the new one; healers keep a ladder of ranks on purpose.
+do
+    boot(); main(); ready()
+    G.actions[2], G.actions[12] = nil, nil
+    G.actions[10] = { kind = "spell", id = 2050 }           -- Lesser Heal r1 alone, r2 known: stale
+    local m = L.Capture()
+    eq("#42: a lone low rank -> highest", m.actions[10].policy, "highest")
+    G.actions[11] = { kind = "spell", id = 2050 }           -- the same rank twice is no ladder
+    m = L.Capture()
+    eq("#42: one rank twice -> highest", m.actions[11].policy, "highest")
+    G.actions[11] = { kind = "spell", id = 2052 }
+    m = L.Capture()
+    eq("#42: ladder low rank -> exact", m.actions[10].policy, "exact")
+    eq("#42: ladder high rank -> highest", m.actions[11].policy, "highest")
+    G.actions[10], G.actions[11] = { kind = "spell", id = 2052 }, { kind = "spell", id = 2050 }
+    m = L.Capture()
+    eq("#42: rank order, not slot order: high", m.actions[10].policy, "highest")
+    eq("#42: rank order, not slot order: low", m.actions[11].policy, "exact")
+
+    -- The alt trains Flash Heal r2 after loading.
+    local function train()
+        G.spells[1].low = true
+        G.spells[#G.spells + 1] = { id = 9473, name = "Flash Heal" }    -- not the main's id
+    end
+    loadedAlt()
+    train()
+    G.actions[1] = { kind = "spell", id = 9473 }            -- a hunter-style bar update
+    m = L.PlanSave()
+    check("#42: auto-updated rank is no change", m and m.noop, m and #m.changed)
+    G.actions[1] = { kind = "spell", id = 2061 }            -- a caster bar: the old rank stays
+    m = L.PlanSave()
+    check("#42: stale rank is no change", m and m.noop, m and #m.changed)
+    G.actions[11] = { kind = "spell", id = 9473 }           -- a new ladder: r1 in slot 1 is now a choice
+    m = L.PlanSave()
+    eq("#42: new ladder saves the downrank", m and m.modules.actions[1].policy, "exact")
+    eq("#42: and its rank", m and m.modules.actions[1].id, 2061)
 end
 
 -- Commands: the preview is frozen; no record means Save As; fresh Save As sets the record.

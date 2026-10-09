@@ -161,6 +161,12 @@ The client was built on Oct 7, 2026, interface 16001.
 
 **Verdict:** nothing this addon depends on changed. `MEASURED_ON_BUILD` is now 70291.
 
+**Action bars after training a new rank** (owner, 2026-10-09, from play; #42):
+- **Hunter** bars switch to the new rank by themselves.
+- **Caster** bars keep the old rank, unless the spell is cast through a macro.
+- So a low rank alone on a caster's bar is usually stale, not a choice. Healers, though, keep two or three ranks of one heal on purpose to save mana.
+- Ranks are separate, ascending spellbook items (Raptor Strike ranks 1 and 2 at book slots 25 and 26, above), so book order gives rank order.
+
 ## Still open
 
 - Does any taint appear after `/reload` following `place`? (Nothing was reported during the run.)

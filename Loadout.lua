@@ -63,14 +63,24 @@ end
 function Loadout.Capture()
     local Game = G()
     local book = Game.Spellbook()
-    local actions, macros = {}, {}
+    local actions, macros, seen = {}, {}, {}
+    -- Rank policy (#42). Caster bars keep an old rank after training (hunter
+    -- bars update), so one low rank alone is stale, not a choice: "highest".
+    -- A spell on the bars at several ranks is a healer's mana ladder: the
+    -- highest of them follows the trainer, the lower ones stay "exact".
+    local top = {}
     for slot = Game.SLOTS.first, Game.SLOTS.last do
-        local a = Game.ActionAt(slot)
+        seen[slot] = Game.ActionAt(slot)
+        local a = seen[slot]
+        local s = a and a.kind == "spell" and book.byId[a.id]
+        if s and (top[s.name] or 0) < s.order then top[s.name] = s.order end
+    end
+    for slot = Game.SLOTS.first, Game.SLOTS.last do
+        local a = seen[slot]
         if a and a.kind == "spell" then
             local s = book.byId[a.id]
             local name = (s and s.name) or (C_Spell.GetSpellName and C_Spell.GetSpellName(a.id))
-            -- A deliberate downrank: a low rank placed while the top rank is known.
-            local exact = s and s.low and name and book.top[name] ~= nil
+            local exact = s and s.order < top[s.name]
             actions[slot] = { kind = "spell", id = a.id, name = name, policy = exact and "exact" or "highest" }
         elseif a and a.kind == "item" then
             actions[slot] = { kind = "item", id = a.id }
@@ -500,6 +510,13 @@ local function SaveSame(c, a, cMods, aMods)
         end
         if c.scope == "char" and MacroIcon(c, cMods) ~= MacroIcon(a, aMods) then return false end
         return true
+    end
+    -- A rank update (a hunter bar after training, or the new rank dragged in)
+    -- is no change while both say "highest" for the same spell; the same rank
+    -- that became a ladder's downrank is one (#42).
+    if c.kind == "spell" then
+        if c.policy == "highest" and a.policy == "highest" and c.name ~= nil and c.name == a.name then return true end
+        return c.id == a.id and c.policy == a.policy
     end
     return c.id == a.id
 end
