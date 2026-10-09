@@ -6,7 +6,7 @@
 --   /altsync load <id|name>  preview, then load (writes only on confirm)
 --   /altsync backups         this character's snapshots
 --   /altsync restore [n|op]  preview, then restore exactly (default: newest)
---   /altsync rename <id> <new name>, delete <id|name>   catalog only, previewed
+--   /altsync rename <id|name> <new name>, delete <id|name>   catalog only, previewed
 --   /altsync conflicts, resolve <id|name> theirs|mine   catalog only, previewed
 --   /altsync status          (and /altsync link, from AltStableSyncLink)
 -- An entry is named by its id, or by its name when exactly one entry has it:
@@ -46,6 +46,14 @@ local function FindEntry(arg)
     return nil, lines
 end
 
+-- A catalog change succeeded: say so, and say if the other account won't
+-- hear of it because Link is off (#39). Nothing without the Link addon.
+local function Changed(msg)
+    Print(msg)
+    local note = ASS.Link and ASS.Link.OffNote and ASS.Link.OffNote()
+    if note then Print(note) end
+end
+
 local function Plural(n, word) return n .. " " .. word .. (n == 1 and "" or "s") end
 
 -- Catalog and Backups return short codes; this is the copy the player sees.
@@ -59,7 +67,7 @@ local COPY = {
     ["unknown-id"] = "That loadout no longer exists.",
     ["conflict-copy"] = "That is a conflict copy: settle it with /altsync resolve.",
     ["not-conflict"] = "That conflict was already settled.",
-    ["rename-empty"] = "Give it a name: /altsync rename <id> <new name>.",
+    ["rename-empty"] = "Give it a name: /altsync rename <id or name> <new name>.",
 }
 local function Copy(err) return COPY[err] or tostring(err) end
 
@@ -165,7 +173,7 @@ local function SaveAs(arg)
     local n, c = 0, 0
     for _ in pairs(modules.actions) do n = n + 1 end
     for _ in pairs(modules.macros) do c = c + 1 end
-    Print(("Saved %q (%d slots, bindings, %d character macros)."):format(e.name, n, c))
+    Changed(("Saved %q (%d slots, bindings, %d character macros)."):format(e.name, n, c))
 end
 
 -- Until #28, Save As is a fresh capture: when the last load here left entries
@@ -190,14 +198,34 @@ function Commands.save()
     Print("Save over an existing loadout is disabled until #28 lands; use /altsync saveas <name>.")
 end
 
--- Live conflict copies of this class (unresolved).
-local function Conflicts()
-    local out = {}
-    for _, e in ipairs(ASS.Catalog.ListAll("loadout", PlayerClass())) do
-        if e.conflict then out[#out + 1] = e end
+-- Every live conflict copy, in one pass: this class's loadouts (listed and
+-- resolvable here), and one line counting the rest - other classes'
+-- loadouts and UI setups - so none hides behind "No conflicts" (#39). With
+-- the class not known yet, nothing is called "elsewhere".
+local function SplitConflicts()
+    local mine, here, by, n = PlayerClass(), {}, {}, 0
+    if not mine then return here, nil end
+    for _, e in ipairs(ASS.Catalog.Conflicts()) do
+        if e.kind == "loadout" and e.class == mine then
+            here[#here + 1] = e
+        else
+            local key = e.kind == "loadout" and tostring(e.class) or "ui"
+            by[key] = (by[key] or 0) + 1
+            n = n + 1
+        end
     end
-    return out
+    if n == 0 then return here, nil end
+    local names = type(LOCALIZED_CLASS_NAMES_MALE) == "table" and LOCALIZED_CLASS_NAMES_MALE or {}
+    local parts = {}
+    for key, k in pairs(by) do
+        parts[#parts + 1] = ("%s (%d)"):format(key == "ui" and "UI setups" or names[key] or key, k)
+    end
+    table.sort(parts)
+    return here, ("%d more not listed here: %s. Resolve a class's loadouts on a character of that class."):format(
+        n, table.concat(parts, ", "))
 end
+
+local function Conflicts() return (SplitConflicts()) end
 
 local function Marker(e, copies)
     if e.conflict then
@@ -298,8 +326,8 @@ function Commands.rename(arg)
         confirm = "Rename",
         onConfirm = function()
             local r, err = ASS.Catalog.Rename(e.id, name, version)
-            Print(r and ("Renamed to %q."):format(r.name)
-                or ("Not renamed: " .. Copy(err == "name-empty" and "rename-empty" or err)))
+            if r then Changed(("Renamed to %q."):format(r.name))
+            else Print("Not renamed: " .. Copy(err == "name-empty" and "rename-empty" or err)) end
         end,
     })
 end
@@ -316,16 +344,21 @@ function Commands.delete(arg)
         confirm = "Delete",
         onConfirm = function()
             local r, err = ASS.Catalog.Delete(id, version)
-            Print(r and ("Deleted %q."):format(tostring(r.name)) or ("Not deleted: " .. Copy(err)))
+            if r then Changed(("Deleted %q."):format(tostring(r.name)))
+            else Print("Not deleted: " .. Copy(err)) end
         end,
     })
 end
 
 function Commands.conflicts()
-    local list = Conflicts()
-    if #list == 0 then Print("No conflicts.") return end
-    for _, c in ipairs(list) do Print(("  %s: %s"):format(c.id, tostring(c.name))) end
-    Print("Settle each with /altsync resolve <id> theirs or mine")
+    local list, others = SplitConflicts()
+    if #list == 0 then
+        Print(others and "No conflicts for this class." or "No conflicts.")
+    else
+        for _, c in ipairs(list) do Print(("  %s: %s"):format(c.id, tostring(c.name))) end
+        Print("Settle each with /altsync resolve <id> theirs or mine")
+    end
+    if others then Print(others) end
 end
 
 -- `resolve <id|name> theirs|mine`. For a deletion made on the other account,
@@ -376,7 +409,7 @@ function Commands.resolve(arg)
         confirm = "Resolve",
         onConfirm = function()
             local r, err = ASS.Catalog.Resolve(copyId, apiChoice, rootVersion)
-            Print(r and "Resolved." or ("Not resolved: " .. Copy(err)))
+            if r then Changed("Resolved.") else Print("Not resolved: " .. Copy(err)) end
         end,
     })
 end

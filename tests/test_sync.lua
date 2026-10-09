@@ -895,6 +895,68 @@ do
         check("rename: empty name names the rename command", lines():find("/altsync rename", 1, true) ~= nil)
         L.Commands.resolve("nothing maybe")
         check("resolve: usage on a bad choice", lines():find("Usage", 1, true) ~= nil)
+
+        -- #39: a change made while Link is off says the other account won't see it.
+        local OFF = "Link is off"
+        local function said(fn) local n0 = #WoW.chatLines; fn()
+            local t = {}; for i = n0 + 1, #WoW.chatLines do t[#t + 1] = tostring(WoW.chatLines[i]) end
+            return table.concat(t, " | ") end
+        L.Commands.link("off")
+        local named = L.Catalog.Create("loadout", { class = "PRIEST", category = "holy", name = "Offline" }, mods(6))
+        L.Commands.rename(named.id .. " Offline 2")
+        local out = said(shown.onConfirm)
+        check("off: rename notes it", out:find("Renamed", 1, true) and out:find(OFF, 1, true), out)
+        check("off: note after the result", (out:find(OFF, 1, true) or 0) > (out:find("Renamed", 1, true) or 1e9), out)
+        L.Commands.delete(named.id)
+        out = said(shown.onConfirm)
+        check("off: delete notes it", out:find(OFF, 1, true) ~= nil, out)
+        local fixed = L.Catalog.Create("loadout", { class = "PRIEST", category = "holy", name = "Fixed" }, mods(10))
+        L.Catalog.Upsert({ id = fixed.id, version = "cccccccccccc:2", parent = "q:1", ancestors = { "q:1" }, kind = "loadout",
+                           class = "PRIEST", category = "holy", name = "Fixed B", modules = mods(11) }, "Other")
+        L.Commands.resolve(fixed.id .. "~cccccccccccc:2 mine")
+        out = said(shown.onConfirm)
+        check("off: resolve notes it", out:find("Resolved", 1, true) and out:find(OFF, 1, true), out)
+        out = said(function() L.Commands.rename(named.id .. " ") end)   -- refused: no note
+        check("off: a refusal carries no note", out ~= "" and not out:find(OFF, 1, true), out)
+        -- Refused at the confirm (stale: changed after the preview): no note either.
+        local stale = L.Catalog.Create("loadout", { class = "PRIEST", category = "holy", name = "Stale" }, mods(12))
+        L.Commands.rename(stale.id .. " Stale 2")
+        L.Catalog.Rename(stale.id, "Moved", stale.version)
+        out = said(shown.onConfirm)
+        check("off: a stale rename carries no note", out:find("Not renamed", 1, true) and not out:find(OFF, 1, true), out)
+        L.Commands.delete(stale.id)
+        L.Catalog.Rename(stale.id, "Moved 2", L.Catalog.Get(stale.id).version)
+        out = said(shown.onConfirm)
+        check("off: a stale delete carries no note", out:find("Not deleted", 1, true) and not out:find(OFF, 1, true), out)
+        L.Commands.link("on")
+        local back = L.Catalog.Create("loadout", { class = "PRIEST", category = "holy", name = "Online" }, mods(7))
+        L.Commands.rename(back.id .. " Online 2")
+        out = said(shown.onConfirm)
+        check("on: no note", out:find("Renamed", 1, true) and not out:find(OFF, 1, true), out)
+
+        -- #39: conflicts on other classes' loadouts are counted, never hidden.
+        L.Catalog.Upsert({ id = "loadout-aaaaaaaaaaaa-1", version = "aaaaaaaaaaaa:1", kind = "loadout",
+                           class = "HUNTER", category = "general", name = "Hx", modules = mods(8) }, "Other")
+        L.Catalog.Upsert({ id = "loadout-aaaaaaaaaaaa-1", version = "aaaaaaaaaaaa:2", parent = "zzz:1", ancestors = { "zzz:1" },
+                           kind = "loadout", class = "HUNTER", category = "general", name = "Hy", modules = mods(9) }, "Other")
+        check("other class: a hunter conflict exists", L.Catalog.Get("loadout-aaaaaaaaaaaa-1~aaaaaaaaaaaa:2") ~= nil)
+        out = said(L.Commands.conflicts)
+        check("other class: counted with its class", out:find("1 more not listed here: HUNTER (1)", 1, true) ~= nil, out)
+        -- A UI setup conflict is counted too (Link's status counts it).
+        L.Catalog.Upsert({ id = "ui-bbbbbbbbbbbb-1", version = "bbbbbbbbbbbb:1", kind = "ui", name = "U", modules = {} }, "Other")
+        L.Catalog.Upsert({ id = "ui-bbbbbbbbbbbb-1", version = "bbbbbbbbbbbb:2", parent = "y:1", ancestors = { "y:1" },
+                           kind = "ui", name = "U2", modules = {} }, "Other")
+        out = said(L.Commands.conflicts)
+        check("ui conflict: counted", out:find("2 more not listed here: HUNTER (1), UI setups (1)", 1, true) ~= nil, out)
+        -- The class not known yet: nothing is called "elsewhere".
+        UnitClass = function() return nil, nil end
+        out = said(L.Commands.conflicts)
+        check("no class: no other-class line", not out:find("not listed here", 1, true), out)
+        UnitClass = function() return "Hunter", "HUNTER" end
+        out = said(L.Commands.conflicts)
+        check("other class: listed on that class", out:find("loadout-aaaaaaaaaaaa-1~aaaaaaaaaaaa:2", 1, true) ~= nil, out)
+        check("other class: own copies not counted as elsewhere", not out:find("HUNTER (", 1, true), out)
+        UnitClass = function() return "Priest", "PRIEST" end
     end
     -- /altsync link status: an online account that never replies is named as
     -- such; once one replies, counts cover what the player sees (no
@@ -922,6 +984,8 @@ do
     local L2 = bootLink(false)
     eq("link: older library -> disabled", L2.Link.state, "disabled")
     check("link: says why", tostring(L2.Link.why):find("messages mode", 1, true) ~= nil)
+    check("link failed: a change still says it won't sync",
+          tostring(L2.Link.OffNote()):find("isn't running (", 1, true) ~= nil, tostring(L2.Link.OffNote()))
 
     local L3, inst3 = bootLink(true, true)
     eq("link: refused core schema -> disabled", L3.Link.state, "disabled")

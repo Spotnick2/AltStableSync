@@ -65,6 +65,18 @@ function Link.Start()
     return true
 end
 
+-- A line for a command that just changed the catalog while nothing will
+-- carry the change (switched off - the setting persists across logins - or
+-- Link failed to start), or nil.
+function Link.OffNote()
+    if not Link.sync then
+        return ("Link isn't running (%s): your other account won't see this."):format(tostring(Link.why or "not started"))
+    end
+    if not Link.lib.IsEnabled() then
+        return "Link is off: your other account won't see this until /altsync link on."
+    end
+end
+
 function Link.Tick()
     if Link.sync and Link.lib.IsEnabled() then Link.sync.Tick() end
 end
@@ -87,11 +99,11 @@ local function Status()
     if #peers == 0 then Print("  No other account of yours is online.") end
     -- The entries a player sees: live, not conflict copies (those show as
     -- conflicts until resolved; the other account never lists our copy).
-    local entries, conflicts = {}, 0
+    local entries, conflicts = {}, #ASS.Catalog.Conflicts()
     for _, kind in ipairs({ "loadout", "ui" }) do
         for id, e in pairs(ASS.db.presets) do
-            if type(e) == "table" and e.kind == kind and not e.deleted then
-                if e.conflict then conflicts = conflicts + 1 else entries[#entries + 1] = e end
+            if type(e) == "table" and e.kind == kind and not e.deleted and not e.conflict then
+                entries[#entries + 1] = e
             end
         end
     end

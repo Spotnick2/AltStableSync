@@ -505,9 +505,19 @@ declared in exactly one TOC.
   with it.
 - **Commands** (catalog only, each previewed with the id and version it shows; stale is refused):
   `/altsync list` (every category of this class, with ids and pending / confirmed / conflict
-  markers), `rename <id> <name>`, `delete <id|name>`, `conflicts`, `resolve <id|name> theirs|mine`
-  ("theirs" on a deletion conflict means delete here too), and `/altsync link [refresh|on|off]`. A
-  name works only when exactly one entry has it, since sync can bring two entries with one name.
+  markers), `rename <id|name> <new name>`, `delete <id|name>`, `conflicts`, `resolve <id|name>
+  theirs|mine` ("theirs" on a deletion conflict means delete here too), and `/altsync link
+  [refresh|on|off]`. A name works only when exactly one entry has it, since sync can bring two
+  entries with one name (for `rename`, only a one-word name).
+- **Nothing hides (#39).**
+  - `link off` persists across logins. So while it is off, every successful `saveas`, `rename`,
+    `delete` and `resolve` adds "Link is off: your other account won't see this until /altsync
+    link on." after its result. If the Link addon is installed but failed to start, the line says
+    "Link isn't running (<why>)" instead. A refusal, including a stale one at the confirm, adds
+    nothing, and so does a missing Link addon.
+  - `conflicts` lists this class's copies, which are the only ones this character can resolve. It
+    adds one line counting every other open copy: other classes' loadouts, and UI setups. That is
+    the same set `/altsync link` counts (`Catalog.Conflicts()`).
 
 ### Receive rules (per entry, idempotent)
 
