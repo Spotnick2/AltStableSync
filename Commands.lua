@@ -188,10 +188,8 @@ end
 
 local function Count(t) local n = 0; for _ in pairs(t or {}) do n = n + 1 end; return n end
 
+-- Saves the plan `p` the player saw (or that needed no preview).
 local function SaveAs(arg, p)
-    local err
-    if not p then p, err = ASS.Loadout.PlanSaveAs() end
-    if not p then Print("Not saved: " .. tostring(err)) return end
     local e, cerr = ASS.Loadout.SaveAs(p, arg)
     if not e then Print("Not saved: " .. Copy(cerr)) return end
     local msg = ("Saved %q (%d slots, bindings, %d character macros)."):format(e.name,
