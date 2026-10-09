@@ -198,6 +198,9 @@ a warrior, a druid and a rogue. None of them had a second stance, a form or stea
   picked up and the slot and cursor empty again, with **no `ADDON_ACTION_BLOCKED`/`FORBIDDEN`**, on
   slots 80, 90, 100 and 115 (pages 7–10, none active), 20 (page 2 while page 1 shows) and 150 (a
   hidden Action Bar 6).
+- **The page that's showing takes writes too.** The warrior in Battle Stance (`GetShapeshiftForm` 1,
+  `GetBonusBarOffset` 1, so Action Bar 1 shows slots 73–84): `/syncprobe bars write 80` wrote, read back
+  and emptied slot 80, with the cursor empty and no `ADDON_ACTION_BLOCKED`/`FORBIDDEN`.
 - **Binding commands** (`GetNumBindings`/`GetBinding`, for #7): 116 — `ACTIONBUTTON1–12`,
   `MULTIACTIONBAR1–7BUTTON1–12`, `BONUSACTIONBUTTON1–10`, `SHAPESHIFTBUTTON1–10`. No `MULTIACTIONBAR8`.
 
