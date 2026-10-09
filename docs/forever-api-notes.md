@@ -4,7 +4,8 @@ Facts **measured on the client** that this addon depends on. Declared shapes com
 (`C:\Projects\References\forever-api-<version>.<build>.md`); addon-agnostic findings belong in the
 canonical `C:\Projects\References\PORTING-TBC-TO-FOREVER.md`, not here.
 
-`MEASURED_ON_BUILD` in `Core.lua` names the build this file describes: **70245**.
+`MEASURED_ON_BUILD` in `Core.lua` names the build this file describes: **70291**. The 70245 measurements below were
+re-checked on 70291 (see its section).
 
 ## Declared on 70235 (from the dump; the documented surface of 70245 is identical)
 
@@ -128,10 +129,42 @@ Event counts: UPDATE_BINDINGS ×5, UPDATE_MACROS ×6, ACTIONBAR_SLOT_CHANGED ×2
 - The decode round trip is **deep-equal**, and integer keys survive as numbers.
 - **Consequence for #17/#18:** the envelope is small. A whole profile fits well under LibAccountSync's 16 KB.
 
-## Still open after the 70245 run
+## Build 1.60.1.70291 (2026-10-08) - client update, re-checked by hand
+
+The client was built on Oct 7, 2026, interface 16001.
+
+**Dump diff against 70245** (`Compare-Dumps.ps1`):
+- **Voice Chat and Discord:**
+  - `VoiceChatID` and `DiscordMemberOpaqueID` types;
+  - a voice-provider API (`C_VoiceChat.Get/Set/RestoreActiveVoiceProvider`, `C_Discord.IsVoiceEnabled`) and its events.
+- **LFG:** structures gained `voiceMode`.
+- **New functions:** `GetGlancingBlowChance` and `GetGlancingBlowPenalty`.
+- **Unchanged:**
+  - every function and event this addon or LibAccountSync calls, including the action-bar, macro, binding, `C_EncodingUtil`, `C_EditMode`, `C_CVar` and Battle.net surfaces;
+  - widget methods.
+
+**Behaviour.** The owner ran these lines on a hunter, out of combat:
+
+| `/run` line | 70291 | Same as 70245? |
+|---|---|---|
+| `print(GetBuildInfo())` | `1.60.1 70291 Oct  7 2026 16001` | build moved, as expected |
+| `print(WOW_PROJECT_ID, GetCurrentRegion(), GetNumSpecGroups(), C_SpecializationInfo.GetActiveSpecGroup(), GetCurrentBindingSet())` | `18 110 1 1 2` | yes, except the **region: 90 → 110** |
+| `for s=1,12 do local t,i,u=GetActionInfo(s) if t then print(s,t,i,u,GetActionText(s)) end end` | `spell <id> spell` for spells; `item <id>` for items | yes |
+| `local s=1 print(GetActionInfo(s)) print(GetActionText(s)) PickupAction(s) print(GetCursorInfo()) PlaceAction(s)` (account macro `RXPTargeting`) | `macro 2`; `RXPTargeting`; `macro 2` | yes, plus the new case below |
+| `local E=C_EncodingUtil local s=E.EncodeBase64(E.CompressString(E.SerializeCBOR({s=1,a="x"}))) local t=E.DeserializeCBOR(E.DecompressString(E.DecodeBase64(s))) print(#s,t.s,t.a)` | `16 1 x` | yes, round trip intact |
+
+- **New case: a macro with no spell.** A macro that shows no spell reports `"macro", <its own macro index>` and **no** third value. It does not report a spell id. Account macro 2 read back as index 2 from both `GetActionInfo` and the cursor.
+  - **Capture is unaffected:** it identifies macros by `GetActionText`, never by the id.
+- **The region value moved between builds:** `GetCurrentRegion()` was 90 on 70245 and is 110 on 70291, on the same account. LibAccountSync reported region 110 in the same session, and linking worked.
+  - Like the project ID, **the region is never a flavour key or a migration trigger.**
+- The two-account Link rehearsal for PR #36 ran on this build the same evening. Battle.net messaging, the Link store file and the catalog file all worked.
+
+**Verdict:** nothing this addon depends on changed. `MEASURED_ON_BUILD` is now 70291.
+
+## Still open
 
 - Does any taint appear after `/reload` following `place`? (Nothing was reported during the run.)
-- What a macro slot whose spell is unlearned, or that has no spell, reports as its id. **Not needed:** capture uses `GetActionText`, never the id.
+- What a macro slot reports as its id when its spell is **unlearned**. (A macro with no spell is answered on 70291.) **Not needed:** capture uses `GetActionText`, never the id.
 
 ## Originally to measure (#2)
 
