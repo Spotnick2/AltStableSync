@@ -149,6 +149,30 @@ Event counts: UPDATE_BINDINGS ×5, UPDATE_MACROS ×6, ACTIONBAR_SLOT_CHANGED ×2
 - **Consequence for #17/#18:** the envelope is small. A whole profile fits well under LibAccountSync's 16 KB.
 - **Measured with real loadouts on 70291 (#5, 2026-10-09):** the largest of 5 saved entries, covering every bar, encodes to **1,508 bytes** on the wire (envelope plus id and version).
 
+## Build 1.60.1.70334 (2026-10-10) - client update, re-checked by hand
+
+The client was built on Oct 9, 2026, interface 16001.
+
+**Dump diff against 70291** (`Compare-Dumps.ps1`): the documented surface is **identical**: 6604
+functions, 1810 events, 798 tables, 7530 widget methods and 5421 namespace functions. Only the `_G`
+walks changed (+1 -155 globals, +67 -328 namespace candidates), which is other addons' noise. Every
+global this addon calls is still in the dump.
+
+**Behaviour.** The owner ran these lines on a hunter, out of combat:
+
+| `/run` line | 70334 | Same as 70291? |
+|---|---|---|
+| `print(GetBuildInfo())` | `1.60.1 70334 Oct  9 2026 16001` | build moved, as expected |
+| `print(WOW_PROJECT_ID, GetCurrentRegion(), GetNumSpecGroups(), C_SpecializationInfo.GetActiveSpecGroup(), GetCurrentBindingSet())` | `18 110 1 1 2` | yes |
+| `for s=1,12 do ... GetActionInfo(s) ... GetActionText(s) end` | `macro <spell id> spell <name>` for macros showing a spell; `spell <id> spell`; `item <id> nil` | yes |
+| `local s=1 print(GetActionInfo(s)) print(GetActionText(s)) PickupAction(s) print(GetCursorInfo()) PlaceAction(s)` (character macro `AuS`) | `macro 75 spell`; `AuS`; `macro 122` | yes: the cursor gives the macro index (122, a character macro) |
+| `local E=C_EncodingUtil ... print(#s,t.s,t.a)` | `16 1 x` | yes, round trip intact |
+
+Also on this build (owner, 2026-10-10): #7's switch to character keybindings, the two-step wizard and
+its full-exit check (PR #50).
+
+**Verdict:** nothing this addon depends on changed. `MEASURED_ON_BUILD` is now 70334.
+
 ## Build 1.60.1.70291 (2026-10-08) - client update, re-checked by hand
 
 The client was built on Oct 7, 2026, interface 16001.
