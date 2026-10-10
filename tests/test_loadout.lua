@@ -40,7 +40,8 @@ local function boot()
     WoW.fire("ADDON_LOADED", "AltStableSync")
     A = AltStableSync
     L = A.Loadout
-    A.Preview = { Show = function(o) A._shown = o end, Hide = function() end }
+    A.Preview = { Show = function(o) A._shown = o end, Hide = function() A._shown = nil end,
+                  Shown = function() return A._shown end }
 end
 
 local function ready()
@@ -2295,7 +2296,7 @@ do
 
     -- Success: three calls, keys identical, guard gone, no load.
     local shown = offer()
-    eq("#7: title", shown.title, "Turn on character keybindings?")
+    eq("#7: title", shown.title, "Load Everyday: step 1 of 2")
     local text = table.concat(shown.lines, "\n")
     check("#7: discloses the account save", text:find("saves your current keys as your account keybindings", 1, true) ~= nil)
     check("#7: says how to go back", text:find("untick it in Settings", 1, true) ~= nil)
@@ -2315,16 +2316,73 @@ do
     eq("#7: saved as the character set", G.charStore["1"], before["1"])
     eq("#7: in-memory keys committed to the account set (disclosed)", G.accountKeys["CTRL-9"], "TOGGLEAUTORUN")
     eq("#7: guard cleared", A.char.bindingSwitch, nil)
-    check("#7: says to load again", chat():find("load Everyday again", 1, true) ~= nil, chat())
-    -- The switch's UPDATE_BINDINGS holds planning back for a moment; then a
-    -- normal Load preview, and its Load is the only load.
-    A.Commands.load("Everyday")
-    eq("#7: right after: waiting, no confirm", A._shown.confirm, false)
-    ready()
-    A.Commands.load("Everyday")
-    eq("#7: then a normal load preview", A._shown.confirm, "Load")
+    -- Step 2 waits (display only) for the switch's UPDATE_BINDINGS to settle,
+    -- then shows the ordinary Load preview; its Load is the only load.
+    eq("#7: step 2 waiting", A._shown.title, "Load Everyday: step 2 of 2")
+    eq("#7: step 2 has no confirm while waiting", A._shown.confirm, false)
+    WoW.tick(1)
+    eq("#7: still waiting at 1 s", A._shown.title, "Load Everyday: step 2 of 2")
+    WoW.tick(2)
+    eq("#7: then the load preview", A._shown.title, "Load Everyday?")
+    eq("#7: marked step 2", A._shown.lines[1], A.Commands.STEP2)
+    eq("#7: with its Load button", A._shown.confirm, "Load")
+    eq("#7: the wait wrote nothing", calls(), "SaveBindings,LoadBindings,SaveBindings")
+    eq("#7: no other write at all before Load", #G.calls, 3)
     A._shown.onConfirm()
     eq("#7: loaded with keys", G.keys["2"], "ACTIONBUTTON2")
+
+    -- Step 2 stops when its preview is gone: cancelled, or another opened.
+    shown = offer()
+    shown.onConfirm()
+    A.Preview.Hide()
+    WoW.tick(5)
+    eq("#7: cancelled during the wait: nothing shown", A._shown, nil)
+    shown = offer()
+    shown.onConfirm()
+    A.Commands.restore("1")
+    local other = A._shown
+    WoW.tick(5)
+    check("#7: another preview opened: left alone", A._shown == other)
+    -- Never ready: a timeout message, no load preview.
+    shown = offer()
+    shown.onConfirm()
+    G.spells = {}
+    WoW.tick(12)
+    check("#7: timeout says what to do", (A._shown.lines[2] or ""):find("Still waiting", 1, true) ~= nil, A._shown.lines[2])
+    eq("#7: timeout: no confirm", A._shown.confirm, false)
+    eq("#7: timeout: nothing loaded", calls(), "SaveBindings,LoadBindings,SaveBindings")
+    -- Replaced, then the deadline passes: the newer preview stays.
+    shown = offer()
+    shown.onConfirm()
+    G.spells = {}
+    A.Commands.restore("1")
+    other = A._shown
+    WoW.tick(12)
+    check("#7: replaced: timeout leaves it alone", A._shown == other)
+    -- Deleted during the wait: said so, nothing shown.
+    shown = offer()
+    shown.onConfirm()
+    local live = A.Catalog.Get(entry.id)
+    A.Catalog.Delete(entry.id, live.version)
+    WoW.tick(3)
+    eq("#7: deleted: nothing shown", A._shown, nil)
+    check("#7: deleted: said so", chat():find("no longer exists", 1, true) ~= nil, chat())
+    eq("#7: deleted: nothing loaded", calls(), "SaveBindings,LoadBindings,SaveBindings")
+    -- Back on Account during the wait: the wizard ends, nothing loaded.
+    shown = offer()
+    shown.onConfirm()
+    G.bindingSet = 1
+    WoW.tick(3)
+    eq("#7: back on Account: nothing shown", A._shown, nil)
+    check("#7: back on Account: said so", chat():find("aren't on any more", 1, true) ~= nil, chat())
+    eq("#7: back on Account: nothing loaded", calls(), "SaveBindings,LoadBindings,SaveBindings")
+    -- No C_Timer: the message instead.
+    shown = offer()
+    local timer = C_Timer
+    C_Timer = nil
+    shown.onConfirm()
+    C_Timer = timer
+    check("#7: no timer: says to load", (A._shown.lines[2] or ""):find("/altsync load Everyday", 1, true) ~= nil)
 
     -- Refusals before any call: nothing written, no guard.
     local function refusedAtClick(label, arrange, want)
@@ -2431,7 +2489,8 @@ do
     AltStableSyncDB, AltStableSyncChar = db, ch
     WoW.fire("ADDON_LOADED", "AltStableSync")
     A, L = AltStableSync, AltStableSync.Loadout
-    A.Preview = { Show = function(o) A._shown = o end, Hide = function() end }
+    A.Preview = { Show = function(o) A._shown = o end, Hide = function() A._shown = nil end,
+                  Shown = function() return A._shown end }
     ready()
     check("#7: guard survives a reload", A.char.bindingSwitch ~= nil)
     G.calls = {}

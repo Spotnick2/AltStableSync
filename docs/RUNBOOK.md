@@ -72,8 +72,8 @@ Save As still works, but it warns that it captures the character as it is.
 
 A loadout with keys, loaded on a character that uses your account keybindings, first asks to turn
 on character keybindings (OK / Cancel). OK makes this character's keys an exact copy of the account
-ones and also saves the current keys as your account keybindings. Then run the load again to review
-it. To go back, untick Character Specific Keybindings in Settings (that deletes the character's own
+ones and also saves the current keys as your account keybindings. A moment later step 2 shows the
+usual load preview; click Load there. To go back, untick Character Specific Keybindings in Settings (that deletes the character's own
 keys). If the switch stops partway, it says why; it refuses to try again until the keys are as
 they were, and `/altsync status` shows it.
 

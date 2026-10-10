@@ -415,10 +415,52 @@ Commands.SWITCH_LINES = {
     "It also saves your current keys as your account keybindings, including changes not saved yet "
         .. "(for example by another addon).",
     "To go back, untick it in Settings; that deletes this character's keybindings.",
-    "Then load again to review the loadout.",
+    "Step 2 shows what the load changes, with its own Load button.",
 }
 
-function Commands.load(arg)
+-- Step 2 of the #7 wizard: wait (display only) until planning is ready, then
+-- show the ordinary Load preview. It stops if its own preview is no longer
+-- on screen: cancelled, or replaced by another preview.
+Commands.STEP2 = "Step 2 of 2. Character keybindings are on; cancelling leaves them on."
+function Commands.AwaitLoad(id, name)
+    local waiting = {
+        title = ("Load %s: step 2 of 2"):format(name),
+        lines = { "Character keybindings are on; cancelling leaves them on.",
+                  "Waiting for your keybindings to settle..." },
+        confirm = false,
+    }
+    ASS.Preview.Show(waiting)
+    if not (C_Timer and C_Timer.After) then
+        waiting.lines[2] = ("Run /altsync load %s to review and load it."):format(name)
+        ASS.Preview.Show(waiting)
+        return
+    end
+    local deadline = GetTime() + 10
+    local function tick()
+        if ASS.Preview.Shown() ~= waiting then return end      -- cancelled or replaced
+        if ASS.Ready.IsReady() then
+            ASS.Preview.Hide()
+            local e = ASS.Catalog.Get(id)
+            if not e or e.deleted then Print(Copy("unknown-id")) return end
+            if not ASS.Game.CharacterBindings() then
+                Print(("Character keybindings aren't on any more, so nothing was loaded. /altsync load %s to start again.")
+                    :format(name))
+                return
+            end
+            return Commands.load(id, Commands.STEP2)
+        end
+        if GetTime() >= deadline then
+            waiting.lines[2] = ("Still waiting for character data. Run /altsync load %s when ready."):format(name)
+            ASS.Preview.Show(waiting)
+            return
+        end
+        C_Timer.After(0.5, tick)
+    end
+    C_Timer.After(0.5, tick)
+end
+
+-- `note`: a line shown first (step 2 of the #7 wizard).
+function Commands.load(arg, note)
     local entry, why = FindEntry(arg)
     if not entry then for _, l in ipairs(why) do Print(l) end return end
     if type(entry.modules) ~= "table" then
@@ -427,18 +469,19 @@ function Commands.load(arg)
     end
     local plan = ASS.Loadout.Plan(entry)
     if plan.needsCharacterBindings then
-        -- #7: one click turns on character keybindings, and nothing else;
-        -- the load is a fresh preview with its own click afterwards.
-        local name = tostring(entry.name)
+        -- #7, a two-step wizard: step 1's OK turns on character keybindings
+        -- and nothing else; step 2 is the ordinary Load preview, planned
+        -- afresh once the switch's UPDATE_BINDINGS has settled, with its own
+        -- Load click.
+        local id, name = entry.id, tostring(entry.name)
         ASS.Preview.Show({
-            title = "Turn on character keybindings?",
+            title = ("Load %s: step 1 of 2"):format(name),
             lines = Commands.SWITCH_LINES,
             confirm = "OK",
             onConfirm = function()
                 local ok, why = ASS.Loadout.UseCharacterBindings()
                 if not ok then Print(why) return end
-                Print(("Character-specific keybindings are now on. Wait a moment, then /altsync load %s again "
-                    .. "to review and load it. Cancelling that preview leaves character keybindings on."):format(name))
+                Commands.AwaitLoad(id, name)
             end,
         })
         return
@@ -453,6 +496,7 @@ function Commands.load(arg)
         table.insert(lines, 1, ("Abandon the incomplete load of %s? Its backup stays in your backups."):format(
             tostring(pinned.op and pinned.op.name)))
     end
+    if note then table.insert(lines, 1, note) end
     ASS.Preview.Show({
         title = "Load " .. tostring(entry.name) .. "?",
         lines = lines,

@@ -55,6 +55,7 @@ function G.setup(opts)
     G.charStore = opts.charStore and copy(opts.charStore) or (G.bindingSet == 2 and copy(G.keys) or nil)
     G.unbound = { "TOGGLEAUTORUN", "JUMP" }
     G.numBindings, G.bindingFails, G.bindFault, G.keyFails, G.emptyCommand = nil, nil, nil, nil, nil
+    G.timers = {}
     -- macros: { name, icon, body, char = bool, shows = spellID }
     G.account, G.char = {}, {}
     for _, m in ipairs(opts.macros or {}) do
@@ -374,6 +375,23 @@ function LoadBindings(set)
     if set == Enum.BindingSet.Character and G.charStore then G.keys = copy(G.charStore) end
     if set == Enum.BindingSet.Account and G.accountKeys then G.keys = copy(G.accountKeys) end
     WoW.fire("UPDATE_BINDINGS")
+end
+
+-- C_Timer.After on the test clock: WoW.tick(seconds) advances it in 0.1 s
+-- steps and runs what is due.
+C_Timer = C_Timer or {}
+function C_Timer.After(delay, fn) G.timers[#G.timers + 1] = { at = WoW.clock + delay, fn = fn } end
+function WoW.tick(seconds)
+    local stop = WoW.clock + seconds
+    while WoW.clock < stop - 1e-9 do
+        WoW.clock = WoW.clock + 0.1
+        local due, rest = {}, {}
+        for _, t in ipairs(G.timers) do
+            if t.at <= WoW.clock + 1e-9 then due[#due + 1] = t else rest[#rest + 1] = t end
+        end
+        G.timers = rest
+        for _, t in ipairs(due) do t.fn() end
+    end
 end
 
 G.setup()

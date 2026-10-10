@@ -316,8 +316,12 @@ Only an explicit confirmation click writes game state.
    - If the character uses Account bindings, the binding part is blocked with "Enable
      character-specific keybindings in WoW settings, then try again." When the set reads as Account,
      the preview offers **OK / Cancel** instead (#7). OK runs Blizzard's checkbox sequence,
-     `SaveBindings(Account); LoadBindings(Character); SaveBindings(Character)`, and nothing else; the
-     load is then a fresh preview with its own click (cancelling it leaves character keybindings on).
+     `SaveBindings(Account); LoadBindings(Character); SaveBindings(Character)`, and nothing else. It is
+     step 1 of a two-step wizard: step 2 waits (display only, up to 10 s) for the switch's own
+     `UPDATE_BINDINGS` to settle, then shows the ordinary Load preview, planned afresh, whose Load
+     click is the only load write. Step 2 ends without loading if its preview is cancelled or
+     replaced, the entry is gone, or the character is back on Account keybindings; cancelling it
+     leaves character keybindings on.
      - The first call saves the keys in memory as the Account set, including changes another addon
        hasn't saved; the preview says so. On a Character set it would overwrite the account keys
        with this character's, so every call requires the set to read Account (it does until the
