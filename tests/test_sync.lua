@@ -202,7 +202,8 @@ do
     local e = save(a, "Raid", 2050)
     local from = { guid = a.guid, name = "Alpha", realm = "Elegia" }
     use(b)
-    local function old(t) t.s = 1; return Env.Pack(t) end
+    -- The previous wire (2, a #5 build) is older too (#46/#48).
+    local function old(t) t.s = Env.SCHEMA - 1; return Env.Pack(t) end
     b.sync.Receive("MAN\n" .. old({ b = "aaa", c = 1, p = 1, n = 1, l = { [e.id] = e.version } }), from)
     b.sync.Receive("REQ\n" .. old({ i = e.id }), from)
     b.sync.Receive("ENT\n" .. e.id .. "\n" .. e.version .. "\n" .. old({ e = C.Copy(a.db.presets[e.id]) }), from)
@@ -222,6 +223,11 @@ do
     -- Its first schema-2 manifest clears the pause on its own.
     b.sync.Receive("MAN\n" .. Env.Pack({ s = Env.SCHEMA, b = "aaa2", c = 1, p = 1, n = 1, l = {} }), from)
     eq("updated peer: a manifest clears the pause", schemaOf(b, a.guid), nil)
+    -- And the other way round: a peer on a newer wire pauses too.
+    b.sync.Receive("MAN\n" .. Env.Pack({ s = Env.SCHEMA + 1, b = "new", c = 1, p = 1, n = 1, l = {} }), from)
+    eq("newer peer: paused", schemaOf(b, a.guid), "newer-schema")
+    b.sync.Receive("MAN\n" .. Env.Pack({ s = Env.SCHEMA, b = "aaa3", c = 1, p = 1, n = 1, l = {} }), from)
+    eq("newer peer back on our wire: cleared", schemaOf(b, a.guid), nil)
     b.sync.Receive("MAN\n" .. old({ b = "aaa", c = 2, p = 1, n = 1, l = {} }), from)
     eq("old peer again: paused", schemaOf(b, a.guid), "older-schema")
     -- A corrupt entry proves nothing: the pause stays.
@@ -404,7 +410,7 @@ do
     local a, b = account("Alpha", "aaaaaaaaaaaa"), account("Beta", "bbbbbbbbbbbb")
     use(b)
     local before = C.Copy(b.db.presets)
-    local cbor = C_EncodingUtil.SerializeCBOR({ s = 2, e = { id = "loadout-zzz-1", version = "zzz:1" } })
+    local cbor = C_EncodingUtil.SerializeCBOR({ s = 3, e = { id = "loadout-zzz-1", version = "zzz:1" } })
     local newer = "ASE1:" .. Env.Adler32(cbor) .. ":" .. C_EncodingUtil.EncodeBase64(C_EncodingUtil.CompressString(cbor))
     b.sync.Receive("ENT\nloadout-zzz-1\nzzz:1\n" .. newer, { guid = a.guid, name = "Alpha", realm = "Elegia" })
     b.sync.Receive("ENT\nloadout-zzz-1\nzzz:1\nASE1:00000000:00", { guid = a.guid, name = "Alpha" })

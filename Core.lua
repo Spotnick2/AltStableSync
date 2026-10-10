@@ -26,9 +26,11 @@ local ADDON_NAME = "AltStableSync"
 -- and `unavailable` to the per-character `loaded` record, #28; a schema-2
 -- record has neither and is never given an invented one); and 3 -> 4 (#5),
 -- which stamps `cover = { {1, 12} }` on every loadout's modules, previous
--- modules and loaded record: what the 1-12 builds captured. There is no
--- migration framework.
-local SCHEMA = 4
+-- modules and loaded record: what the 1-12 builds captured; and 4 -> 5
+-- (#46), which only stamps the number: 5 adds the optional `class = true` on
+-- spell actions from the class spellbook tabs. There is no migration
+-- framework.
+local SCHEMA = 5
 ASS.SCHEMA = SCHEMA
 
 ------------------------------------------------------------
@@ -163,7 +165,7 @@ local function Validate(db, char)
             return "AltStableSyncDB.backups is a " .. type(db.backups) .. ", not a table"
         end
         dbAction = "upgrade1"
-    elseif db.schema ~= SCHEMA and db.schema ~= 2 and db.schema ~= 3 then
+    elseif db.schema ~= SCHEMA and db.schema ~= 2 and db.schema ~= 3 and db.schema ~= 4 then
         return WrongSchema("saved data", db.schema)
     else
         for _, field in ipairs(DB_TABLES) do
@@ -185,7 +187,7 @@ local function Validate(db, char)
         return "AltStableSyncChar is a " .. type(char) .. ", not a table"
     elseif char.schema == nil then
         return "AltStableSyncChar has data but no schema"
-    elseif char.schema ~= SCHEMA and char.schema ~= 2 and char.schema ~= 3 then
+    elseif char.schema ~= SCHEMA and char.schema ~= 2 and char.schema ~= 3 and char.schema ~= 4 then
         return WrongSchema("character data", char.schema)
     elseif char.loaded ~= nil and type(char.loaded) ~= "table" then
         return "AltStableSyncChar.loaded is a " .. type(char.loaded) .. ", not a table"
@@ -221,9 +223,11 @@ local function InitSavedVariables()
 
     AltStableSyncDB = AltStableSyncDB or {}
     local db = AltStableSyncDB
+    -- Only tables from before schema 4 get the legacy cover: a schema-4
+    -- entry without one is damaged, and stays refused (#46).
     if dbAction == "upgrade1" then
         db.profiles = nil          -- empty by validation
-    elseif dbAction == "upgrade" and type(db.presets) == "table" then
+    elseif dbAction == "upgrade" and db.schema < 4 and type(db.presets) == "table" then
         for _, e in pairs(db.presets) do
             if type(e) == "table" and e.kind == "loadout" then
                 StampCover(e.modules)
@@ -238,7 +242,7 @@ local function InitSavedVariables()
     -- A schema-2 `loaded` record stays without `after`, which Save treats as
     -- "no usable comparison"; its baseline (and a schema-3 `after`) were
     -- captured by a 1-12 build, so they get that cover.
-    if charAction == "upgrade" then
+    if charAction == "upgrade" and AltStableSyncChar.schema < 4 then
         local rec = type(AltStableSyncChar.loaded) == "table" and AltStableSyncChar.loaded.loadout
         if type(rec) == "table" then StampCover(rec.baseline); StampCover(rec.after) end
     end

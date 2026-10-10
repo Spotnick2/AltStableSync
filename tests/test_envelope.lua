@@ -72,12 +72,15 @@ do
         local c = C_EncodingUtil.SerializeCBOR(v)
         return "ASE1:" .. E.Adler32(c) .. ":" .. C_EncodingUtil.EncodeBase64(C_EncodingUtil.CompressString(c))
     end
-    refused("newer schema", wrap({ s = 3, e = { id = "x" } }), "newer-schema")
+    refused("newer schema", wrap({ s = 4, e = { id = "x" } }), "newer-schema")
     -- #5: a 1-12 build's envelopes are refused as older, never imported.
     refused("older schema", wrap({ s = 1, e = { id = "x" } }), "older-schema")
+    -- #46: a #5 build (wire 2) is older too: it can't keep class marks or
+    -- protected gaps, so sync pauses until both accounts update.
+    refused("wire 2 is older", wrap({ s = 2, e = { id = "x" } }), "older-schema")
     refused("string schema", wrap({ s = "2", e = { id = "x" } }), "newer-schema")
-    eq("schema is 2", E.SCHEMA, 2)
-    local noE = C_EncodingUtil.SerializeCBOR({ s = 2 })
+    eq("schema is 3", E.SCHEMA, 3)
+    local noE = C_EncodingUtil.SerializeCBOR({ s = 3 })
     refused("no entry", "ASE1:" .. E.Adler32(noE) .. ":" .. C_EncodingUtil.EncodeBase64(C_EncodingUtil.CompressString(noE)),
             "bad-envelope")
     local notTable = C_EncodingUtil.SerializeCBOR("hello")

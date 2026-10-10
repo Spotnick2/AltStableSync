@@ -108,8 +108,9 @@ AltStableSync is its own addon in its own repo, fully functional without AltStab
 ### Two different operations
 
 - **Load/Apply is adaptive.** It resolves the highest known rank within a verified spell family
-  (unless the entry deliberately holds a lower rank), and leaves unresolvable entries untouched,
-  reporting each one.
+  (unless the entry deliberately holds a lower rank). Inside the entry's cover it makes each slot
+  match the entry, emptying a slot whose entry this character verifiably can't use, and reports
+  each one (#46).
 - **Snapshot restore is exact.** It uses the captured IDs, literal macro content and binding values,
   never loadout resolution. A backup is a snapshot, never a catalog entry. Restore takes its own
   backup first.
@@ -137,7 +138,7 @@ bus.
 
 ```lua
 AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
-  schema = 4,                       -- #27 1 -> 2, #28 2 -> 3, #5 3 -> 4; an unknown or newer schema is refused untouched
+  schema = 5,                       -- #27 1 -> 2, #28 2 -> 3, #5 3 -> 4, #46 4 -> 5; an unknown or newer schema is refused untouched
   presets = {
     [id] = {
       id = "loadout-a1b2c3d4e5f6-12",          -- kind-writer-seq: never collides across accounts or copies
@@ -152,6 +153,7 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
       provenance = { sourceChar = "Name-Realm", build = "70245" },
       modules = { actions = {...}, bindings = {...}, macros = {...},    -- loadout
                   cover = { {1, 120}, {145, 180} } }  -- the action slots captured (#5); 1-12 for older entries
+                  -- a spell action from a class spellbook tab carries class = true (#46, schema 5)
              or { editmode = {...}, cvars = {...} },                    -- UI setup
       previous = { of = version, modules, updated },  -- LOCAL "undo my last Save": the content before the Save
                                                -- that produced version `of`; never sent, untouched by sync
@@ -170,7 +172,7 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
 }
 
 AltStableSyncChar = {               -- per character
-  schema = 4,                       -- same number as the DB; an unknown or newer one is refused untouched
+  schema = 5,                       -- same number as the DB; an unknown or newer one is refused untouched
   lastSelected = { ui = id, loadout = { category = "discipline", id = id } },
   loaded = {                        -- ONE baseline per kind: the last Load/Apply, or a Save/Save As (#28)
     ui = { id, version, baseline = <modules as loaded>, result = {...} },
@@ -264,12 +266,27 @@ Only an explicit confirmation click writes game state.
 2. **Preview before write**, in our own frame. The preview captures an **immutable copy of the entry
    and its version**. Confirming applies exactly that copy, or refuses as stale if the entry, or the
    target state the plan relied on, changed since (A38).
-3. **No clear-before-import.**
-   - Each write is read back. An unresolvable entry (spell not learned, item not owned, foreign
-     racial) leaves its destination untouched, and stays in the saved entry.
+3. **No clear-before-import.** Nothing is cleared up front; each slot is written or emptied on its
+   own, after the backup, and read back.
+   - **Inside the entry's cover, a Load makes the slot match the entry (#46, owner 2026-10-09).** An
+     empty slot in the entry is "captured empty", so the destination is emptied. An entry this
+     character **verifiably** can't use empties the destination too, and stays in the saved entry.
+     The verified reasons: not learned, rank not known (absent from a complete spellbook read **and**
+     unknown to the client by id, since profession spells may sit outside the class skill lines,
+     **and** marked `class = true`: Forever lists no unlearned spells, so only a spell captured from
+     a class tab, not "General" with its racials, nor a profession, is one this character can still
+     learn; an unmarked one, including any saved before schema 5, is "not marked as a class spell"
+     and left alone),
+     not in bags, account macro missing (no macro of that name at all), macro name conflict, macro
+     slots full. Each emptied slot is listed in the preview with its reason;
+     one that is already empty is listed as "stays empty until this character can use it".
+   - **Left untouched:** a slot outside the entry's cover (never captured) or outside the supported
+     set; content the backup can't put back (a mount, a companion, an ambiguous macro); and any
+     slot whose answer rests on a failed read (spellbook, bag count or macro list unreadable) or on
+     the entry itself (a missing macro definition, a body too long, an unsupported kind, a spell
+     with no name). An account macro of that name with another body is the player's own: left alone.
+     A slot the entry has empty that holds content the backup can't restore is not listed at all.
    - The player loads or retries **explicitly**; nothing retries on an event.
-   - An empty slot in the saved entry is not an instruction to erase the destination. Clearing is a
-     deliberate choice shown in the preview.
    - **Cursor hygiene:** refuse to start unless the cursor is empty (so the player's own payload is
      never touched). Before each `PlaceAction`, the cursor must hold exactly what we picked up.
      After it, the cursor may hold the slot's **displaced previous action**; that action is already
@@ -344,12 +361,14 @@ kind (`AltStableSyncChar.loaded`) with the applied/skipped result.
 |---|---|
 | Supported, observable, changed | Save the current value (after preview) |
 | Inherited entry was unresolvable, and the slot was not deliberately replaced | Keep the inherited entry |
+| The load kept the slot free (emptied, or already empty) for an action this character can't use | Keep the inherited entry **whatever the slot holds now**: the client puts a newly learned spell in the first empty slot (#46). The Save preview, its no-op message and Save As say "holds X now: not saved". It holds until a Load places the action there; `save drop` saves the slot empty and compares with what is there |
+| A kept spell captured again from a class tab | Gains `class = true` (one Save, "Marks N class spells"); a capture without the mark never removes it, including when another rank of the same spell is saved there |
 | Same family on a low alt, policy "highest known" | Keep "highest known"; don't freeze the low ID. A rank update (a hunter bar after training, or the new rank dragged in) is no change |
 | Deliberate downrank | Keep the exact rank |
 | Inherited addon absent, or field unreadable | Keep the prior payload |
 | Empty or ambiguous slot after a skipped load | Keep, unless the review chose `save drop` |
-| `save drop` chosen | The entries this character couldn't use stop being part of the entry; other characters' slots are left alone |
-| *(deferred)* Explicit clear | Storing "clear this slot", so later previews show a deletion, is **deferred past launch** (#28). Nil never erases another character's slot |
+| `save drop` chosen | The entries this character couldn't use stop being part of the entry. They stay covered as empty, so a later Load empties those slots on every character (#46); the preview says so |
+| Deliberate clear | A covered empty slot is a clear: a later Load empties it on every character (#46) |
 
 **Which captured rank is deliberate** (#42). Caster bars keep an old rank after training, while hunter
 bars update, so the bars alone can't show intent. A spell on the bars at **two or more ranks** is a
@@ -422,7 +441,7 @@ the previous content. It is not a history product.
 | Situation | Behaviour |
 |---|---|
 | Lower rank known | Highest known rank in the verified family; deliberate downranks (a ladder of ranks, #42) stay |
-| Spell not learned | Keep it in the entry; leave the destination untouched; report it |
+| Spell not learned | Keep it in the entry; empty the destination (#46), unless the spellbook read failed; report it |
 | Different racial | Don't guess an equivalent; leave it unresolved, or use a named variant |
 | Alliance/Horde macro text | Keep the literal text; use named variants ("PvP - Horde") |
 | Druid forms, stances, stealth | The four stance/form pages (slots 73–120) are captured and written by slot id, active or not (measured, #5). A form switch is never an edit. Which form uses which page isn't measured yet, so previews say "Stance/form page N" |
@@ -551,10 +570,11 @@ declared in exactly one TOC.
   outstanding per peer, and one completes when its entry arrives or after 30 seconds, when it goes
   back in the queue while still lacking. So an entry is never requested twice at once, and an id the
   peer never answers costs at most 3 requests per 30 seconds.
-- **Wire schema 2** (#5): every message kind carries `s = 2`. A 1-12 build sends and accepts only 1,
-  so sync between an updated and a not-yet-updated account **pauses** both ways: the updated side
-  says so once and its Link status shows "sync paused"; the old side shows entries as pending.
-  Update both accounts together.
+- **Wire schema 3** (#46; 2 was #5): every message kind carries `s = 3`. An older build sends and
+  accepts only its own, so sync between an updated and a not-yet-updated account **pauses** both
+  ways: the updated side says so once and its Link status shows "sync paused"; the old side shows
+  entries as pending. (A schema-2 build would save auto-placed spells over kept gaps and drop class
+  marks, then publish that as a normal successor.) Update both accounts together.
 - **Wire format** (`Plugins/Link/Sync.lua`): `MAN\n<envelope>` (manifest batch
   `{ b = session, c = counter, p = part, n = parts, l = { [id] = version } }`), `REQ\n<envelope>`
   (`{ i = id }`, sent to one peer) and `ENT\n<id>\n<version>\n<envelope>` (one entry, sent to the
@@ -601,7 +621,7 @@ offline while A saved three times) a plain fast-forward rather than a conflict.
 | Local version is in incoming `ancestors`, or the id is unknown | **replace** (fast-forward). Local `previous` is untouched; it is local Save recovery only |
 | Anything else (both accounts saved from a common version, or the lag exceeded 20 saves) | **divergent**: keep the local entry; store the incoming one whole as conflict copy `<id>~<incoming version>`, named "<name> (from <char>)", with a one-line notice. If that conflict id already exists, live **or tombstoned**, ignore it |
 | Unknown or newer envelope schema | reject; local untouched |
-| Older envelope schema (a 1-12 build, #5) | reject, nothing imported or remembered as refused; that peer shows "sync paused" until it updates, then the same versions are fetched |
+| Older envelope schema (an older build: 1-12 #5, or #5's wire 2) | reject, nothing imported or remembered as refused; that peer shows "sync paused" until it updates, then the same versions are fetched |
 
 - **Resolving a conflict settles both accounts.** The conflict copy offers **Keep this version** and
   **Keep mine**. Either one mints a new version of `<id>`: its content is the chosen version

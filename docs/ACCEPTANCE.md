@@ -14,13 +14,16 @@
 | A04 | Change a macro on the low-level priest and explicitly Save | Shared entry updates; other priest runtime unchanged until explicit Load |
 | A05 | Save As Dungeon healing | New stable ID; original entry and other characters unchanged |
 | A06 | Save As blank, whitespace, or duplicate name | Inline error in same category; matching name in another category allowed |
-| A07 | Load future spell into a low-level alt whose destination contains food | Spell retained in preset; food untouched; result says skipped |
+| A07 | Load future spell into a low-level alt whose destination contains food | Spell retained in preset; food slot emptied (#46), listed with the reason, back with Restore; result counts it as emptied |
 | A08 | Save that low-level alt without changing the skipped destination | Future spell retained, not replaced by food or empty capture |
 | A09 | Save As on that low-level alt | Fork retains unavailable inherited spell and original rank policy |
 | A10 | Highest-known policy loads Rank 2 on low alt; alt saves | Policy remains highest-known; higher alt later gets highest known rank |
 | A11 | Deliberate Rank 1 spell in loadout | Exact/downrank intent survives load and save; restore never upgrades |
 | A12 | Two candidate spell families or unsupported locale mapping | Defer visibly; do not guess using same display name alone |
-| A13 | Foreign racial, missing item or unlearned spell | Only resolvable entries change; each skip reason is available |
+| A13 | Foreign racial, missing item or unlearned spell | Resolvable entries are placed; the rest empty their slot, each with its reason (#46); a failed read leaves the slot untouched |
+| A13b | Slot empty in the loadout (inside its cover) holds something on this character | Emptied, listed in the preview, back with Restore (#46); outside the cover it is never touched |
+| A13c | A profession or racial in the loadout that this character doesn't have | Slot left alone ("not marked as a class spell"); a class spell not learned yet empties it (#46) |
+| A13d | The client auto-places a newly learned spell into a gap the load kept free, then the player Saves | The loadout keeps its spell there; the preview says "holds X now: not saved"; a later Load that places the action releases the slot (#46) |
 | A14 | Learn a previously skipped spell | Availability may update; no writes until explicit Load/Retry with new preview |
 | A15 | Macro action reports a spell ID as action ID | Captured macro is correct by name/guarded index resolution |
 | A16 | Duplicate macro names across scopes | Resolve identity correctly or defer; never edit an account macro |

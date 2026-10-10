@@ -41,6 +41,7 @@ function G.setup(opts)
     G.guid = opts.guid or "Player-70-0000AAAA"
     G.spells = opts.spells or {}
     G.items = opts.items or {}               -- [itemID] = count
+    G.extra = opts.extra or {}               -- [spellID] = name: known, not in the book
     G.combat = false
     G.combatAfter = nil
     G.calls = {}
@@ -140,19 +141,36 @@ local function spellById(id)
     for i, s in ipairs(G.spells) do if s.id == id then return s, i end end
 end
 local function isKnown(s) return s and s.known ~= false end
+-- Known by id: in the book, or one of G.extra (known but not in the class
+-- skill lines, like a profession).
+local function knownId(id)
+    if (G.extra or {})[id] then return true end
+    return isKnown((spellById(id))) and true or false
+end
 
 C_Spell = {
-    GetSpellName = function(id) local s = spellById(id); return s and s.name end,
+    GetSpellName = function(id)
+        local s = spellById(id)
+        return (s and s.name) or (G.extra or {})[id]
+    end,
     PickupSpell = function(id)
         mutate("C_Spell.PickupSpell", true)
         local s, i = spellById(id)
-        if isKnown(s) then G.cursor = { kind = "spell", id = id, book = i } end
+        if isKnown(s) or (G.extra or {})[id] then G.cursor = { kind = "spell", id = id, book = i } end
     end,
 }
+function IsPlayerSpell(id) return knownId(id) end
 
 C_SpellBook = {
-    GetNumSpellBookSkillLines = function() return 1 end,
-    GetSpellBookSkillLineInfo = function() return { name = "General", itemIndexOffset = 0, numSpellBookItems = #G.spells } end,
+    -- Line 1 "General" holds the leading spells marked `general` (racials,
+    -- Attack...); line 2 the class tab with the rest (measured layout, 70291).
+    GetNumSpellBookSkillLines = function() return 2 end,
+    GetSpellBookSkillLineInfo = function(line)
+        local nGeneral = 0
+        while G.spells[nGeneral + 1] and G.spells[nGeneral + 1].general do nGeneral = nGeneral + 1 end
+        if line == 1 then return { name = "General", itemIndexOffset = 0, numSpellBookItems = nGeneral } end
+        if line == 2 then return { name = "Class", itemIndexOffset = nGeneral, numSpellBookItems = #G.spells - nGeneral } end
+    end,
     GetSpellBookItemInfo = function(i)
         local s = G.spells[i]
         if not s then return nil end
@@ -160,7 +178,7 @@ C_SpellBook = {
                  itemType = isKnown(s) and Enum.SpellBookItemType.Spell or Enum.SpellBookItemType.FutureSpell }
     end,
     IsSpellBookItemLowRank = function(i) local s = G.spells[i]; return s and s.low or false end,
-    IsSpellKnown = function(id) return isKnown((spellById(id))) end,
+    IsSpellKnown = function(id) return knownId(id) end,
 }
 
 ------------------------------------------------------------
