@@ -408,6 +408,16 @@ function Commands.list()
     end
 end
 
+Commands.SWITCH_LINES = {
+    "This loadout sets key bindings, and this character uses your account keybindings.",
+    "OK gives this character its own keybindings, starting as an exact copy of your account ones: "
+        .. "the same as ticking Character Specific Keybindings in Settings.",
+    "It also saves your current keys as your account keybindings, including changes not saved yet "
+        .. "(for example by another addon).",
+    "To go back, untick it in Settings; that deletes this character's keybindings.",
+    "Then load again to review the loadout.",
+}
+
 function Commands.load(arg)
     local entry, why = FindEntry(arg)
     if not entry then for _, l in ipairs(why) do Print(l) end return end
@@ -416,6 +426,23 @@ function Commands.load(arg)
         Print("That entry has nothing to load. " .. Copy("conflict-copy")) return
     end
     local plan = ASS.Loadout.Plan(entry)
+    if plan.needsCharacterBindings then
+        -- #7: one click turns on character keybindings, and nothing else;
+        -- the load is a fresh preview with its own click afterwards.
+        local name = tostring(entry.name)
+        ASS.Preview.Show({
+            title = "Turn on character keybindings?",
+            lines = Commands.SWITCH_LINES,
+            confirm = "OK",
+            onConfirm = function()
+                local ok, why = ASS.Loadout.UseCharacterBindings()
+                if not ok then Print(why) return end
+                Print(("Character-specific keybindings are now on. Wait a moment, then /altsync load %s again "
+                    .. "to review and load it. Cancelling that preview leaves character keybindings on."):format(name))
+            end,
+        })
+        return
+    end
     local lines = Commands.Describe(plan)
     -- A no-op still gets "Done": it records what was loaded (docs/DESIGN.md: a
     -- no-op Load records the baseline) without writing game state.

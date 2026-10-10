@@ -91,7 +91,22 @@ There was **no `ADDON_ACTION_BLOCKED`/`FORBIDDEN`** during the run.
 - Blizzard's own set switching, from `Blizzard_Settings.lua`:
   - Account → Character is `SaveBindings(Account); LoadBindings(Character); SaveBindings(Character)`.
   - Character → Account deletes the character set, after a confirmation.
-  - AltStableSync never switches sets for the player.
+  - AltStableSync switches only Account -> Character, on the player's OK (#7).
+- Account -> Character, measured on 70291 (#7, a character on Account after a full exit; the full
+  binding map compared after each call, an `UPDATE_BINDINGS` listener running):
+
+  | After | `GetCurrentBindingSet()` | Keys as before |
+  |---|---|---|
+  | (before) | 1 | — |
+  | `SaveBindings(1)` | 1 | yes |
+  | `LoadBindings(2)` (fires `UPDATE_BINDINGS` inside the call) | **1** | yes |
+  | `SaveBindings(2)` | 2 | yes |
+
+  No `ADDON_ACTION_BLOCKED`/`FORBIDDEN`. The Settings checkbox shows ticked afterwards. After a full
+  exit: set 2, the same 127 bound commands, the same fingerprint length. Running the same three
+  calls while Character is active would save that character's keys as the Account set.
+  Not measured: what `LoadBindings(Character)` does when an older Character store exists (Blizzard's
+  untick deletes it), and what a reload restores after a partial switch.
 
 ### CVars
 - `cameraDistanceMaxZoomFactor`: `GetCVarInfo` returned `"1", "1.000000", isStoredServerAccount = true, false, false, false, false`.

@@ -5,7 +5,8 @@
 --   AltStableSyncDB   account-wide: schema, presets (the catalog, Catalog.lua),
 --                     backups, origin
 --   AltStableSyncChar per character: schema, last selections, loaded
---                     baselines, onboarding, interrupted operation
+--                     baselines, onboarding, interrupted operation,
+--                     a stopped keybinding switch (#7)
 -- The LibAccountSync store (AltStableSyncLAS) belongs to the separate
 -- AltStableSyncLink addon (#18), so it is written to its own file and never
 -- travels with this one. It is deliberately NOT declared here.
@@ -28,9 +29,10 @@ local ADDON_NAME = "AltStableSync"
 -- which stamps `cover = { {1, 12} }` on every loadout's modules, previous
 -- modules and loaded record: what the 1-12 builds captured; and 4 -> 5
 -- (#46), which only stamps the number: 5 adds the optional `class = true` on
--- spell actions from the class spellbook tabs. There is no migration
--- framework.
-local SCHEMA = 5
+-- spell actions from the class spellbook tabs; and 5 -> 6 (#7), a stamp too:
+-- 6 adds the optional per-character `bindingSwitch` guard. There is no
+-- migration framework.
+local SCHEMA = 6
 ASS.SCHEMA = SCHEMA
 
 ------------------------------------------------------------
@@ -165,7 +167,7 @@ local function Validate(db, char)
             return "AltStableSyncDB.backups is a " .. type(db.backups) .. ", not a table"
         end
         dbAction = "upgrade1"
-    elseif db.schema ~= SCHEMA and db.schema ~= 2 and db.schema ~= 3 and db.schema ~= 4 then
+    elseif db.schema ~= SCHEMA and db.schema ~= 2 and db.schema ~= 3 and db.schema ~= 4 and db.schema ~= 5 then
         return WrongSchema("saved data", db.schema)
     else
         for _, field in ipairs(DB_TABLES) do
@@ -187,10 +189,13 @@ local function Validate(db, char)
         return "AltStableSyncChar is a " .. type(char) .. ", not a table"
     elseif char.schema == nil then
         return "AltStableSyncChar has data but no schema"
-    elseif char.schema ~= SCHEMA and char.schema ~= 2 and char.schema ~= 3 and char.schema ~= 4 then
+    elseif char.schema ~= SCHEMA and char.schema ~= 2 and char.schema ~= 3 and char.schema ~= 4 and char.schema ~= 5 then
         return WrongSchema("character data", char.schema)
     elseif char.loaded ~= nil and type(char.loaded) ~= "table" then
         return "AltStableSyncChar.loaded is a " .. type(char.loaded) .. ", not a table"
+    elseif char.bindingSwitch ~= nil and (type(char.bindingSwitch) ~= "table" or type(char.bindingSwitch.before) ~= "table") then
+        -- #7's guard after a stopped switch: never guessed at.
+        return "AltStableSyncChar.bindingSwitch is damaged"
     else
         charAction = char.schema == SCHEMA and "ok" or "upgrade"
     end
@@ -296,6 +301,11 @@ local function SlashHandler(msg)
         end
         Print(("version %s, schema %d, %d saved setup(s), %d character backup set(s)"):format(
             tostring(version), ASS.db.schema, live, CountKeys(ASS.db.backups)))
+        local guard = ASS.char and ASS.char.bindingSwitch
+        if guard then
+            Print("an earlier switch to character keybindings stopped while " .. tostring(guard.at or "starting")
+                .. "; switching again needs your keys as they were before it")
+        end
     elseif ASS.Commands and type(ASS.Commands[cmd]) == "function" then
         ASS.Commands[cmd](rest)
     else

@@ -292,6 +292,29 @@ function Game.CharacterBindings()
     return ok and Enum and Enum.BindingSet and set == Enum.BindingSet.Character
 end
 
+-- The active binding set, or nil when unreadable.
+function Game.BindingSet()
+    local ok, set = pcall(GetCurrentBindingSet)
+    if ok and type(set) == "number" then return set end
+    return nil
+end
+
+-- Every bound command with all its keys, command -> list (#7). nil when any
+-- read fails: an incomplete map can't prove the keys were kept.
+function Game.BindingMap()
+    local ok, n = pcall(GetNumBindings)
+    if not ok or type(n) ~= "number" or n < 1 or n ~= math.floor(n) then return nil end
+    local map = {}
+    for i = 1, n do
+        local okB, command = pcall(GetBinding, i)
+        if not okB or type(command) ~= "string" or command == "" then return nil end
+        local keys = Game.KeysFor(command)
+        if not keys then return nil end
+        if #keys > 0 then map[command] = keys end
+    end
+    return map
+end
+
 function Game.CursorEmpty()
     local ok, kind = pcall(GetCursorInfo)
     return ok and kind == nil

@@ -51,6 +51,10 @@ function G.setup(opts)
     G.keys = copy(opts.keys or {})           -- [key] = command
     G.savedKeys = copy(G.keys)
     G.saveFails = false
+    G.accountKeys = G.bindingSet == 1 and copy(G.keys) or nil
+    G.charStore = opts.charStore and copy(opts.charStore) or (G.bindingSet == 2 and copy(G.keys) or nil)
+    G.unbound = { "TOGGLEAUTORUN", "JUMP" }
+    G.numBindings, G.bindingFails, G.bindFault, G.keyFails, G.emptyCommand = nil, nil, nil, nil, nil
     -- macros: { name, icon, body, char = bool, shows = spellID }
     G.account, G.char = {}, {}
     for _, m in ipairs(opts.macros or {}) do
@@ -300,6 +304,7 @@ end
 function GetCurrentBindingSet() return G.bindingSet end
 
 function GetBindingKey(command)
+    if G.keyFails then error("GetBindingKey failed", 2) end
     local keys = {}
     for k, c in pairs(G.keys) do if c == command then keys[#keys + 1] = k end end
     table.sort(keys)
@@ -314,12 +319,61 @@ function SetBinding(key, command)
     return true
 end
 
+-- The binding list: every command that has a key now, plus G.unbound (always
+-- listed, like the client's 333 entries), sorted. GetBinding(i) returns
+-- command, category, then its keys.
+local function bindingList()
+    local seen, list = {}, {}
+    for _, c in pairs(G.keys) do if not seen[c] then seen[c] = true; list[#list + 1] = c end end
+    for _, c in ipairs(G.unbound) do if not seen[c] then seen[c] = true; list[#list + 1] = c end end
+    table.sort(list)
+    return list
+end
+function GetNumBindings()
+    if G.numBindings ~= nil then return G.numBindings end
+    return #bindingList()
+end
+function GetBinding(i)
+    if G.bindingFails then error("GetBinding failed", 2) end
+    if G.emptyCommand then return "" end
+    local c = bindingList()[i]
+    if not c then return nil end
+    local keys = {}
+    for k, cmd in pairs(G.keys) do if cmd == c then keys[#keys + 1] = k end end
+    table.sort(keys)
+    return c, "category", unpack(keys)
+end
+
+-- Saved per-set stores (#7). Measured on 70291 for a character with no
+-- Character store: LoadBindings(Character) leaves the keys as they are,
+-- the active set reads Account until SaveBindings(Character), and
+-- UPDATE_BINDINGS fires inside LoadBindings. A Character store that differs
+-- (G.charStore) is an INJECTED fault, not a measured case.
+-- G.bindFault[name .. set] = "error" | "false" | "change-error" | "change-false":
+-- the call fails, after changing a key first for the "change-" ones.
+local function fault(name, set)
+    local f = G.bindFault and G.bindFault[name .. tostring(set)]
+    if not f then return nil end
+    if f:find("^change") then G.keys["F12"] = "FAULT_COMMAND" end
+    if f:find("error$") then error(name .. " failed", 3) end
+    return false
+end
+
 function SaveBindings(set)
     mutate("SaveBindings", true)
     if G.saveFails then error("SaveBindings failed", 2) end
+    if fault("SaveBindings", set) == false then return false end
+    if set == Enum.BindingSet.Account then G.accountKeys = copy(G.keys) end
+    if set == Enum.BindingSet.Character then G.charStore, G.bindingSet = copy(G.keys), set end
     if set == G.bindingSet then G.savedKeys = copy(G.keys) end
 end
 
-function LoadBindings() mutate("LoadBindings"); error("LoadBindings must never be called (no set switching)", 2) end
+function LoadBindings(set)
+    mutate("LoadBindings")
+    if fault("LoadBindings", set) == false then return false end
+    if set == Enum.BindingSet.Character and G.charStore then G.keys = copy(G.charStore) end
+    if set == Enum.BindingSet.Account and G.accountKeys then G.keys = copy(G.accountKeys) end
+    WoW.fire("UPDATE_BINDINGS")
+end
 
 G.setup()
