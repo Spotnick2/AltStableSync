@@ -100,6 +100,9 @@ function Loadout.Capture()
             local name = (s and s.name) or (C_Spell.GetSpellName and C_Spell.GetSpellName(a.id))
             local exact = s and rank(s) < ladderTop(slot, s.name)
             actions[slot] = { kind = "spell", id = a.id, name = name, policy = exact and "exact" or "highest" }
+            -- From a class tab (not General, not a profession): a Load may
+            -- empty its slot on a character that hasn't learned it (#46).
+            if s and s.line and s.line > 1 then actions[slot].class = true end
         elseif a and a.kind == "item" then
             actions[slot] = { kind = "item", id = a.id }
         elseif a and a.kind == "macro" then
@@ -141,8 +144,12 @@ local function Resolve(want, modules, book)
         local function absent(reason)
             local k = Game.SpellKnownById(want.id)
             if k then return { kind = "spell", id = want.id } end
-            if k == false and book.complete then return nil, reason end
-            return nil, "spellbook unreadable"
+            if k ~= false or not book.complete then return nil, "spellbook unreadable" end
+            -- Forever lists no unlearned spells: only a spell captured from a
+            -- class tab is one this character can still learn. A racial, a
+            -- profession or an unmarked (older) entry leaves the slot alone.
+            if want.class ~= true then return nil, "not marked as a class spell" end
+            return nil, reason
         end
         if want.policy == "exact" then
             if book.byId[want.id] then return { kind = "spell", id = want.id } end
@@ -613,8 +620,23 @@ local function Unsupported(a) return a ~= nil and a.kind == "unsupported" end
 
 -- Does slot content `x` differ from B's `b`? A character macro counts its
 -- body and icon too: `def(name)` gives x's definition (nil: action only).
+-- An action without its `class` mark (#46: metadata, not intent).
+local function Intent(x)
+    if type(x) ~= "table" or x.class == nil then return x end
+    local y = {}
+    for k, v in pairs(x) do if k ~= "class" then y[k] = v end end
+    return y
+end
+
+-- One spell family: both spells, and the same id or the same non-empty name.
+local function SameFamily(x, y)
+    if not (x and y and x.kind == "spell" and y.kind == "spell") then return false end
+    if type(x.id) == "number" and x.id == y.id then return true end
+    return type(x.name) == "string" and x.name ~= "" and x.name == y.name
+end
+
 local function SlotDiffers(x, b, def, B)
-    if Serialize(x) ~= Serialize(b) then return true end
+    if Serialize(Intent(x)) ~= Serialize(Intent(b)) then return true end
     if def and x and x.kind == "macro" and x.scope == "char" then
         return Serialize(def(x.name)) ~= Serialize(CharMacro(B, x.name))
     end
@@ -652,6 +674,10 @@ function Loadout.Merge(rec, current, characterBindings, drop)
     local out = Copy(B)
     local actions, src, adv, advSrc = {}, {}, {}, {}
     local kept, dropped, unavailable, changed, gone = {}, {}, {}, {}, {}
+    -- `ignored`: what sits now in a gap the load kept for the loadout's
+    -- action (#46: often a spell the client placed there when it was
+    -- learned); `marked`: class marks this Save adds to kept spells.
+    local ignored, marked = {}, 0
     -- Coverage moves with the values (#5): the output covers B's cover plus
     -- each slot taken from a readable C; the comparison covers each slot it
     -- advanced to C, and keeps its old membership where it stays.
@@ -665,7 +691,7 @@ function Loadout.Merge(rec, current, characterBindings, drop)
     for _, slot in ipairs(Game.SLOT_LIST) do
         local b, a, c = bAct[slot], aAct[slot], cAct[slot]
         local inA, inB = aSet[slot] == true, bSet[slot] == true
-        local keepB, keepA, why = false, false, nil
+        local keepB, keepA, why, protected = false, false, nil, false
         if Unsupported(c) then keepB, keepA, why = true, true, "couldn't read this slot"
         -- No comparison was ever taken here (a capture by a 1-12 build): keep
         -- what the entry has; where the entry never covered it either, the
@@ -679,13 +705,29 @@ function Loadout.Merge(rec, current, characterBindings, drop)
         -- An unreadable A only hides an edit where the load skipped the slot;
         -- where the load placed B, a readable C is what is there now.
         elseif Unsupported(a) and was[slot] then keepB, keepA = true, true
+        -- A gap the load kept for an action this character couldn't use
+        -- (emptied, or already empty): whatever is there now isn't saved over
+        -- the loadout's action - the client puts a newly learned spell in the
+        -- first empty slot (#46). It holds until a Load fills the slot.
+        elseif was[slot] and b ~= nil and a == nil then
+            keepB, keepA, protected = true, true, true
+            if c ~= nil then ignored[slot] = Copy(c) end
         elseif SaveSame(c, a, current, A, b) then keepB = true
         elseif c == nil and was[slot] then keepB = true
         end
         if keepB and drop and was[slot] and b ~= nil then
             dropped[#dropped + 1], gone[slot] = { slot = slot, want = b, reason = was[slot] }, true
+            -- A dropped gap compares with what is there now, so the next
+            -- Save doesn't take that as a new edit.
+            if protected then keepA, ignored[slot] = false, nil end
         elseif keepB then
             actions[slot], src[slot] = Copy(b), "B"
+            -- The class mark only grows: a fresh capture of the same spell
+            -- from a class tab adds it; a capture without it (a failed read,
+            -- an older build) never takes it away.
+            if SameFamily(b, c) and c.class == true and b.class ~= true then
+                actions[slot].class, marked = true, marked + 1
+            end
             if b ~= nil and was[slot] then
                 unavailable[slot] = was[slot]
                 kept[#kept + 1] = { slot = slot, want = b, reason = was[slot] }
@@ -795,6 +837,10 @@ function Loadout.Merge(rec, current, characterBindings, drop)
     out.actions, out.macros, out.bindings = orNil(actions, B.actions), orNil(macros, B.macros), orNil(bindings, B.bindings)
     out.cover = Cover.FromSet(outSet)
     -- Slots this Save adds to the entry's cover, and how many hold an action.
+    if marked > 0 then
+        notes[#notes + 1] = ("Marks %d class spell%s: a Load empties their slots on characters that haven't learned them yet.")
+            :format(marked, marked == 1 and "" or "s")
+    end
     if stale > 0 then
         notes[#notes + 1] = (stale == 1
             and "1 slot differs from the loadout but wasn't loaded by this version, so it isn't saved: load it again to save it."
@@ -810,6 +856,7 @@ function Loadout.Merge(rec, current, characterBindings, drop)
     return {
         added = added, addedFull = addedFull,
         before = bAct,                  -- B's actions, for the preview's "was -> now"
+        ignored = ignored, marked = marked,
         modules = out,
         noop = Serialize(out) == Serialize(B),
         kept = kept, dropped = dropped, notes = notes,
@@ -847,7 +894,7 @@ function Loadout.PlanSave(drop)
     m.entry, m.drop = entry, drop or false
     -- Everything the confirm commits: the entry and the new comparison.
     m.fingerprint = Serialize({ id = entry.id, v = entry.version, m = m.modules, d = m.drop,
-                                a = m.advanced, u = m.unavailable })
+                                a = m.advanced, u = m.unavailable, ig = m.ignored })
     return m
 end
 
@@ -879,7 +926,7 @@ function Loadout.PlanSaveAs()
         local m, merr = Loadout.Merge(rec, current, G().CharacterBindings(), false)
         if m then
             return { modules = m.modules, after = m.advanced, unavailable = m.unavailable, kept = m.kept, notes = m.notes,
-                     added = m.added, addedFull = m.addedFull }
+                     added = m.added, addedFull = m.addedFull, ignored = m.ignored }
         end
         why = merr
     end
@@ -893,7 +940,7 @@ end
 -- differs is refused (#44), as Save's is.
 function Loadout.SaveAsFingerprint(p)
     return Serialize({ m = p.modules, a = p.after, u = p.unavailable, l = p.lossy or false,
-                       n = p.added or 0 })
+                       n = p.added or 0, ig = p.ignored or {} })
 end
 
 -- Create the new entry from a Save As plan, and make it this character's

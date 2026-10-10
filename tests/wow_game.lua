@@ -162,8 +162,15 @@ C_Spell = {
 function IsPlayerSpell(id) return knownId(id) end
 
 C_SpellBook = {
-    GetNumSpellBookSkillLines = function() return 1 end,
-    GetSpellBookSkillLineInfo = function() return { name = "General", itemIndexOffset = 0, numSpellBookItems = #G.spells } end,
+    -- Line 1 "General" holds the leading spells marked `general` (racials,
+    -- Attack...); line 2 the class tab with the rest (measured layout, 70291).
+    GetNumSpellBookSkillLines = function() return 2 end,
+    GetSpellBookSkillLineInfo = function(line)
+        local nGeneral = 0
+        while G.spells[nGeneral + 1] and G.spells[nGeneral + 1].general do nGeneral = nGeneral + 1 end
+        if line == 1 then return { name = "General", itemIndexOffset = 0, numSpellBookItems = nGeneral } end
+        if line == 2 then return { name = "Class", itemIndexOffset = nGeneral, numSpellBookItems = #G.spells - nGeneral } end
+    end,
     GetSpellBookItemInfo = function(i)
         local s = G.spells[i]
         if not s then return nil end

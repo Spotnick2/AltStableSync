@@ -217,6 +217,20 @@ end
 local function Count(t) local n = 0; for _ in pairs(t or {}) do n = n + 1 end; return n end
 
 -- Saves the plan `p` the player saw (or that needed no preview).
+-- What a Save leaves out of a gap the loadout keeps for an action this
+-- character can't use yet (#46), one line per slot.
+local function Ignored(lines, ignored, actions)
+    local items = {}
+    for slot, c in pairs(ignored or {}) do
+        items[#items + 1] = { slot = slot, text = ("holds %s now: not saved (the loadout keeps %s there)")
+            :format(DescribeAction(c), DescribeAction(actions and actions[slot])) }
+    end
+    if #items == 0 then return end
+    table.sort(items, function(x, y) return x.slot < y.slot end)
+    lines[#lines + 1] = "Kept free for the loadout (load it again to change these slots):"
+    BySlot(lines, items)
+end
+
 local function SaveAs(arg, p)
     local e, cerr = ASS.Loadout.SaveAs(p, arg)
     if not e then Print("Not saved: " .. Copy(cerr)) return end
@@ -228,6 +242,9 @@ local function SaveAs(arg, p)
     end
     Changed(msg)
     for _, n in ipairs(p.notes) do Print(n) end
+    local lines = {}
+    Ignored(lines, p.ignored, p.modules.actions)
+    for _, l in ipairs(lines) do Print(l) end
 end
 
 -- Save As keeps what the loaded setup had and this character can't use
@@ -278,8 +295,12 @@ function Commands.save(arg)
     if not m then Print("Not saved: " .. tostring(err)) return end
     local name = tostring(m.entry.name)
     if m.noop then
-        Print(("Already saved: %q matches this character."):format(name))
+        local lines = {}
+        Ignored(lines, m.ignored, m.modules.actions)
+        Print(#lines > 0 and ("No changes to save in %q."):format(name)
+            or ("Already saved: %q matches this character."):format(name))
         for _, n in ipairs(m.notes) do Print(n) end
+        for _, l in ipairs(lines) do Print(l) end
         return
     end
     local lines = { ("%s and %s change in %q."):format(Plural(#m.changed, "slot"), Plural(#m.keysChanged, "key"), name) }
@@ -323,6 +344,7 @@ function Commands.save(arg)
         for _, k in ipairs(m.dropped) do items[#items + 1] = { slot = k.slot, text = ("%s (%s)"):format(DescribeAction(k.want), k.reason) } end
         BySlot(lines, items)
     end
+    Ignored(lines, m.ignored, m.modules.actions)
     for _, n in ipairs(m.notes) do lines[#lines + 1] = n end
     lines[#lines + 1] = "Other characters keep their current setup until they load this version."
     ASS.Preview.Show({

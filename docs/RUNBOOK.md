@@ -50,9 +50,15 @@ compared. A `/reload`, a stub test or the HTML mockup is never that proof.
 
 ## Saving from a lower-level character
 
-Load an entry on a low-level alt: the bars end up looking like the loadout. A slot whose spell or
-item the alt doesn't have yet is emptied (the preview lists each one with its reason), and so is a
-slot the loadout leaves empty. `/altsync restore 1` puts the bars back as they were.
+Load an entry on a low-level alt: the bars end up looking like the loadout. A slot whose class spell
+or item the alt doesn't have yet is emptied (the preview lists each one with its reason), and so is a
+slot the loadout leaves empty. Professions and racials the alt doesn't have leave their slot alone.
+`/altsync restore 1` puts the bars back as they were.
+
+New spells the alt learns land in the first empty slot, often one of those gaps. Save doesn't take
+them over the loadout's spell; it says "holds X now: not saved". Move the new spell to a slot of
+your own, or load the loadout again once the alt can use the spell. Loadouts saved before schema 5
+have no class marks yet: save them once on a character that knows the spells.
 
 `/altsync save` (over the entry this character loaded) and `/altsync saveas` both keep the
 inherited entries the alt couldn't load (A07–A11 in `docs/ACCEPTANCE.md`). The Save preview lists
@@ -75,7 +81,7 @@ A loadout saved before this version covers Action Bar 1 only. The first `/altsyn
 after a load adds the other bars ("Adds N slots this loadout didn't cover yet"); the next one is
 "Already saved".
 
-**Update both accounts together.** This version speaks sync schema 2. While one account is still on
+**Update both accounts together.** This version speaks sync schema 3. While one account is still on
 the old version, sync pauses both ways and `/altsync link` on the updated one says "sync paused".
 
 ## Nov 4 launch — day-one checklist (draft; finalised by #13)

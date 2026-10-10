@@ -168,6 +168,15 @@ Enchanting 7411, Tailoring 3909, Disenchant 13262, First Aid 3273, Cooking 2550 
 `IsPlayerSpell(id)` both return `true`. So "not in the scan" is never proof of "not learned": absence
 also needs both by-id answers to be `false`.
 
+**Spellbook tabs and unlearned spells** (owner, 2026-10-09; #46/#48):
+- Forever lists **no future (unlearned) spells**: item types on a level-18 warlock were Spell 31, Flyout 1,
+  FutureSpell (2) none. So "not in the book" can't tell a class spell not learned yet from someone else's.
+- Skill line 1 is **"General"**: Attack, Escape Artist, Eureka!, Shoot, Armor Proficiency, Dodge, Engineering
+  Specialization, Expansive Mind, Languages (gnome warlock, book 1-9). Racials and shared spells live there.
+  Lines 2-4 are the class trees (Demonology 10-18, Affliction 19-27, Destruction 28-32).
+  `FindSpellBookSlotForSpell(20589)` (Escape Artist) = 2.
+- When a character learns a spell, the client adds it to the **first empty action-bar slot** (owner, from play).
+
 **Action bars after training a new rank** (owner, 2026-10-09, from play; #42):
 - **Hunter** bars switch to the new rank by themselves.
 - **Caster** bars keep the old rank, unless the spell is cast through a macro.

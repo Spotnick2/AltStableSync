@@ -672,7 +672,7 @@ end
 -- matches"; one where the only differences stay empty says that (#46).
 do
     boot(); ready()
-    local e = custom({ actions = { [1] = { kind = "spell", id = 2060, name = "Greater Heal", policy = "highest" } } })
+    local e = custom({ actions = { [1] = { kind = "spell", id = 2060, name = "Greater Heal", policy = "highest", class = true } } })
     alt({ actions = { [1] = { flyout = 7 } } })
     WoW.chatLines = {}
     local p = L.Plan(e)
@@ -1808,8 +1808,8 @@ end
 -- character can; emptied where the loadout is empty or holds what this
 -- character verifiably can't use; everything else left alone.
 ------------------------------------------------------------
-local GH = { kind = "spell", id = 2060, name = "Greater Heal", policy = "highest" }
-local FH = { kind = "spell", id = 2061, name = "Flash Heal", policy = "highest" }
+local GH = { kind = "spell", id = 2060, name = "Greater Heal", policy = "highest", class = true }
+local FH = { kind = "spell", id = 2061, name = "Flash Heal", policy = "highest", class = true }
 local function byReason(list)
     local t = {}
     for _, x in ipairs(list or {}) do t[x.slot] = x.reason or x.why or "op" end
@@ -2012,19 +2012,119 @@ do
 end
 
 do
-    -- Filling a gap the loadout keeps for a future spell is a deliberate
-    -- change: Save takes it, and the preview says what it replaces.
+    -- A gap the load kept for a spell this character can't use yet: the
+    -- client drops a newly learned spell there, and Save must not take it
+    -- over the loadout's (#46, owner: new spells go to the first empty slot).
     boot(); ready()
     local e = custom({ actions = { [3] = GH } })
     alt({ actions = {} })
     L.Load(e, L.Plan(e))
-    G.actions[3] = { kind = "item", id = 4540 }
+    local v0 = A.Catalog.Get(e.id).version
+    G.actions[3] = { kind = "spell", id = 2061 }            -- "auto-placed"
+    WoW.chatLines = {}
+    A.Commands.save("")
+    local said = table.concat(WoW.chat(), "\n")
+    check("#48: only the gap differs: no changes to save", said:find("No changes to save", 1, true) ~= nil, said)
+    check("#48: not 'matches this character'", said:find("matches this character", 1, true) == nil, said)
+    check("#48: says what it left out", said:find("holds Flash Heal now: not saved (the loadout keeps Greater Heal there)", 1, true) ~= nil, said)
+    eq("#48: catalog untouched", A.Catalog.Get(e.id).version, v0)
+    -- Another real edit: saved, the gap still the loadout's, shown was -> now.
+    G.actions[5] = { kind = "item", id = 4540 }
     A._shown = nil
     A.Commands.save("")
     local text = A._shown and table.concat(A._shown.lines, "\n") or ""
-    check("#46: save preview shows was -> now", text:find("button 3: Greater Heal -> item 4540", 1, true) ~= nil, text)
+    check("#46: save preview shows was -> now", text:find("button 5: empty -> item 4540", 1, true) ~= nil, text)
+    check("#48: preview lists the kept gap", text:find("holds Flash Heal now: not saved", 1, true) ~= nil, text)
+    -- The gap's occupant changes after the preview: the confirm is refused.
+    G.actions[3] = { kind = "item", id = 5512 }
+    WoW.chatLines = {}
     A._shown.onConfirm()
-    eq("#46: the filled gap is saved", A.Catalog.Get(e.id).modules.actions[3].id, 4540)
+    check("#48: changed gap occupant: refused", table.concat(WoW.chat(), " "):find("changed since the preview", 1, true) ~= nil)
+    G.actions[3] = { kind = "spell", id = 2061 }
+    A.Commands.save("")
+    A._shown.onConfirm()
+    eq("#48: edit saved", A.Catalog.Get(e.id).modules.actions[5].id, 4540)
+    eq("#48: gap keeps the loadout's spell", A.Catalog.Get(e.id).modules.actions[3].id, 2060)
+    check("#48: next Save is a no-op", L.PlanSave().noop)
+    -- Save As keeps it too, and so does a Save on the new entry.
+    WoW.chatLines = {}
+    A.Commands.saveas("Fork")
+    local fork
+    for _, x in ipairs(A.Catalog.List("loadout", "PRIEST", "general")) do if x.name == "Fork" then fork = x end end
+    eq("#48: Save As keeps the loadout's spell", fork and fork.modules.actions[3].id, 2060)
+    check("#48: Save As says what it left out", table.concat(WoW.chat(), "\n"):find("holds Flash Heal now: not saved", 1, true) ~= nil)
+    check("#48: Save after Save As: no-op", L.PlanSave().noop)
+    -- A Load that still can't place it keeps the gap protected; one that
+    -- can (the spell is learned) releases it, and an edit there is saved.
+    L.Load(fork, L.Plan(fork))
+    G.actions[3] = { kind = "spell", id = 2061 }
+    check("#48: still protected after another Load", L.PlanSave().noop)
+    G.spells[#G.spells + 1] = { id = 2060, name = "Greater Heal" }
+    local pl = L.Plan(fork)
+    L.Load(fork, pl)
+    eq("#48: learned: the Load places it", G.actions[3] and G.actions[3].id, 2060)
+    G.actions[3] = { kind = "item", id = 4540 }
+    local mm = L.PlanSave()
+    eq("#48: released: the edit is saved", mm and mm.modules.actions[3] and mm.modules.actions[3].id, 4540)
+end
+
+do
+    -- save drop on a filled gap: the slot is saved empty, and the next Save
+    -- doesn't take what is there.
+    boot(); ready()
+    local e = custom({ actions = { [3] = GH, [1] = FH } })
+    alt({ actions = {} })
+    L.Load(e, L.Plan(e))
+    G.actions[3] = { kind = "spell", id = 2052 }
+    G.actions[2] = { kind = "item", id = 4540 }
+    local m = L.PlanSave(true)
+    L.Save(m)
+    eq("#48 drop: slot saved empty", A.Catalog.Get(e.id).modules.actions[3], nil)
+    check("#48 drop: still covered", A.Cover.Has(A.Catalog.Get(e.id).modules.cover, 3))
+    local m2 = L.PlanSave()
+    check("#48 drop: next Save is a no-op", m2 and m2.noop, m2 and #m2.changed)
+end
+
+do
+    -- Class marks: from a class tab only; a later Save adds them to an
+    -- older (unmarked) entry once; a failed read never removes them.
+    boot(); ready()
+    G.setup{ class = "PRIEST", guid = "Player-70-MARK",
+             spells = { { id = 20589, name = "Escape Artist", general = true }, { id = 2061, name = "Flash Heal" } },
+             extra = { [3273] = "First Aid" },
+             actions = { [1] = { spell = 20589 }, [2] = { spell = 2061 }, [3] = { spell = 3273 } } }
+    ready()
+    local c = L.Capture()
+    eq("#48: racial (General tab) not marked", c.actions[1].class, nil)
+    eq("#48: class tab spell marked", c.actions[2].class, true)
+    eq("#48: profession not marked", c.actions[3].class, nil)
+    -- An older entry without marks: one Save adds it, then nothing to save.
+    local old = A.Catalog.Copy(c)
+    old.actions[2].class = nil
+    local e = custom(old)
+    L.Load(e, L.Plan(e))
+    local m = L.PlanSave()
+    check("#48: adoption is a Save", m and not m.noop)
+    eq("#48: no action listed as changed", m and #m.changed, 0)
+    check("#48: says it marks", m and m.notes[1] and m.notes[1]:find("Marks 1 class spell", 1, true) ~= nil, m and m.notes[1])
+    eq("#48: id and policy kept", m.modules.actions[2].id .. m.modules.actions[2].policy, "2061highest")
+    L.Save(m)
+    eq("#48: marked in the catalog", A.Catalog.Get(e.id).modules.actions[2].class, true)
+    check("#48: then nothing to save", L.PlanSave().noop)
+    -- A failed book read: the capture loses the mark, the entry keeps it.
+    local realInfo2 = C_SpellBook.GetSpellBookItemInfo
+    C_SpellBook.GetSpellBookItemInfo = function(i, ...) if i == 2 then error("read failed") end return realInfo2(i, ...) end
+    check("#48: the capture really lost it", L.Capture().actions[2].class == nil)
+    local m3 = L.PlanSave()
+    C_SpellBook.GetSpellBookItemInfo = realInfo2
+    check("#48: failed read keeps the mark", m3 and m3.modules.actions[2].class == true)
+    -- Different family never adopts.
+    eq("#48: same family by name", (function()
+        local r = { baseline = { cover = FULL, actions = { [2] = { kind = "spell", id = 1, name = "X", policy = "highest" } } },
+                    after = { cover = FULL, actions = { [2] = { kind = "spell", id = 2, name = "Y", policy = "highest" } } } }
+        local o = L.Merge(r, { actions = { [2] = { kind = "spell", id = 2, name = "Y", policy = "highest", class = true } }, bindings = {} }, true)
+        return o and tostring(o.modules.actions[2].class)
+    end)(), "nil")
 end
 
 do
@@ -2107,7 +2207,8 @@ do
     eq("#48: on the bar", G.actions[3] and G.actions[3].id, 3273)
     alt({ actions = { [3] = { item = 4540 } } })
     plan = L.Plan(e)
-    eq("#48: not known by id either: emptied", ops(plan)[3] and ops(plan)[3].why, "not learned")
+    eq("#48: someone else's profession: left alone", byReason(plan.skips)[3], "not marked as a class spell")
+    eq("#48: no op", ops(plan)[3], nil)
     -- No name to look it up by: left alone.
     e = custom({ actions = { [3] = { kind = "spell", id = 9999, policy = "highest" } } })
     plan = L.Plan(e)

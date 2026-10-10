@@ -22,6 +22,8 @@
 | A12 | Two candidate spell families or unsupported locale mapping | Defer visibly; do not guess using same display name alone |
 | A13 | Foreign racial, missing item or unlearned spell | Resolvable entries are placed; the rest empty their slot, each with its reason (#46); a failed read leaves the slot untouched |
 | A13b | Slot empty in the loadout (inside its cover) holds something on this character | Emptied, listed in the preview, back with Restore (#46); outside the cover it is never touched |
+| A13c | A profession or racial in the loadout that this character doesn't have | Slot left alone ("not marked as a class spell"); a class spell not learned yet empties it (#46) |
+| A13d | The client auto-places a newly learned spell into a gap the load kept free, then the player Saves | The loadout keeps its spell there; the preview says "holds X now: not saved"; a later Load that places the action releases the slot (#46) |
 | A14 | Learn a previously skipped spell | Availability may update; no writes until explicit Load/Retry with new preview |
 | A15 | Macro action reports a spell ID as action ID | Captured macro is correct by name/guarded index resolution |
 | A16 | Duplicate macro names across scopes | Resolve identity correctly or defer; never edit an account macro |

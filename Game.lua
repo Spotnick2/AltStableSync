@@ -132,7 +132,9 @@ end
 
 local BANK = (Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player) or 0
 
--- The player's learned castable spells: { [id] = { name, low, order } }
+-- The player's learned castable spells: { [id] = { name, low, order, line } }
+-- (`line`: the skill line; 1 is "General", racials and shared spells,
+-- measured 70291, and the class tabs come after it)
 -- (`order`: the book index; ranks are ascending book items), and by name
 -- the top known rank (the same-name Spell entry that is not low rank).
 -- `complete` is false when any read failed: then a spell missing from it is
@@ -159,7 +161,7 @@ function Game.Spellbook()
                     if not rankRead then complete = false end
                     low = rankRead and low
                     -- `order`: ranks are separate, ascending book items (measured).
-                    byId[info.spellID] = { name = info.name, low = low, order = i }
+                    byId[info.spellID] = { name = info.name, low = low, order = i, line = line }
                     if rankRead and not low then top[info.name] = info.spellID end
                 end
             end
