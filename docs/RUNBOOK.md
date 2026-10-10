@@ -68,6 +68,15 @@ empty, so a later Load empties them on every character (the preview says so).
 Save needs a **completed** load to compare against. After an interrupted load, load again first;
 Save As still works, but it warns that it captures the character as it is.
 
+## Character keybindings
+
+A loadout with keys, loaded on a character that uses your account keybindings, first asks to turn
+on character keybindings (OK / Cancel). OK makes this character's keys an exact copy of the account
+ones and also saves the current keys as your account keybindings. A moment later step 2 shows the
+usual load preview; click Load there. To go back, untick Character Specific Keybindings in Settings (that deletes the character's own
+keys). If the switch stops partway, it says why; it refuses to try again until the keys are as
+they were, and `/altsync status` shows it.
+
 ## Bars, stances and forms
 
 A loadout's actions cover Action Bars 1–8 (both pages of Action Bar 1) and the four stance/form pages,

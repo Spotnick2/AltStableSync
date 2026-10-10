@@ -5,6 +5,7 @@
 -- Preview.Show{ title, lines, confirm = "Load", onConfirm = fn, onCancel = fn }
 -- One frame, reused; parented to UIParent; Escape and Cancel close it without
 -- writing anything. onConfirm runs at most once per Show.
+-- Preview.Shown() is the options table on screen now, or nil.
 -- #9 replaces this with the two-tab panel; the contract stays.
 ------------------------------------------------------------
 
@@ -15,6 +16,7 @@ local Preview = {}
 ASS.Preview = Preview
 
 local frame
+local current
 
 local function Build()
     local f = CreateFrame("Frame", "AltStableSyncPreview", UIParent, "BackdropTemplate")
@@ -69,6 +71,7 @@ local function Build()
     f.cancel = button("Cancel", -20)
     f.confirm = button("Load", -140)
     f:SetScript("OnHide", function(self)
+        current = nil
         local cb = self.onCancel
         self.onConfirm, self.onCancel = nil, nil
         if cb then cb() end
@@ -93,7 +96,10 @@ function Preview.Show(opts)
     if opts.confirm == false then frame.confirm:Hide() else frame.confirm:Show() end
     frame.onConfirm, frame.onCancel = opts.onConfirm, opts.onCancel
     frame:Show()
+    current = opts
 end
+
+function Preview.Shown() return current end
 
 function Preview.Hide()
     if frame then frame:Hide() end

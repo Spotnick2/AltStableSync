@@ -30,7 +30,8 @@
 | A17 | Macro body gains server trailing newline after full exit | Comparison recognizes documented normalization without altering body semantics |
 | A18 | Macro capacity full or Include character macros unchecked | Missing dependency shown before writes; no unrelated deletion or wrong button |
 | A19 | Macro contains a currently unlearned spell | If macro exists/created and placement is supported, place it; verify in game |
-| A20 | Character uses Account bindings; destination is Character | No automatic set switch; block/exclude safely and explain manual step |
+| A20 | Character uses Account bindings; destination is Character | No automatic set switch; the preview explains it and offers OK / Cancel (#7). OK turns on character keybindings as an exact copy (verified), nothing else; step 2 then shows the load preview by itself, with its own Load click |
+| A20b | The switch stops partway (combat, a refused call, keys that changed) | Reported with the active set; changed keys never saved; a retry refused while the keys differ from before, including after a reload (#7) |
 | A21 | A command has two keys and loadout displaces one | Preview displacement; read back both keys; exact restore recovers them |
 | A22 | Combat starts partway through apply | Stop further protected writes; retained result; manual re-preview to resume |
 | A23 | Cursor occupied before capture/apply | Refuse cursor-mutating work without touching payload |

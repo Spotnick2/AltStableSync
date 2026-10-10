@@ -70,7 +70,9 @@ Measured on the live client unless marked otherwise. Details and sources:
   characters. `Constants.MacroConsts` = 120 account / 30 character; character macros start at 121.
 - **Bindings:** `SaveBindings(Enum.BindingSet.Character)` persists across a full exit. Blizzard
   switches sets with `SaveBindings(Account); LoadBindings(Character); SaveBindings(Character)`, and
-  switching back deletes the character set. **This addon never switches sets.**
+  switching back deletes the character set. The addon switches only Account -> Character, on the
+  player's OK (#7, rule 8); measured on 70291: the active set reads Account until the final save, the
+  keys stay identical, `UPDATE_BINDINGS` fires inside `LoadBindings`, and it survives a full exit.
 - **Readiness:** the first `UPDATE_MACROS` holds account macros only. Everything read correctly by
   `PLAYER_LOGIN`; `SPELLS_CHANGED` fires after `PLAYER_ENTERING_WORLD`.
 - **Edit Mode:** the layout string round-trips the systems but **drops name and type**. Creating,
@@ -138,7 +140,7 @@ bus.
 
 ```lua
 AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
-  schema = 5,                       -- #27 1 -> 2, #28 2 -> 3, #5 3 -> 4, #46 4 -> 5; an unknown or newer schema is refused untouched
+  schema = 6,                       -- #27 1 -> 2, #28 2 -> 3, #5 3 -> 4, #46 4 -> 5, #7 5 -> 6; an unknown or newer schema is refused untouched
   presets = {
     [id] = {
       id = "loadout-a1b2c3d4e5f6-12",          -- kind-writer-seq: never collides across accounts or copies
@@ -172,7 +174,7 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
 }
 
 AltStableSyncChar = {               -- per character
-  schema = 5,                       -- same number as the DB; an unknown or newer one is refused untouched
+  schema = 6,                       -- same number as the DB; an unknown or newer one is refused untouched
   lastSelected = { ui = id, loadout = { category = "discipline", id = id } },
   loaded = {                        -- ONE baseline per kind: the last Load/Apply, or a Save/Save As (#28)
     ui = { id, version, baseline = <modules as loaded>, result = {...} },
@@ -184,6 +186,8 @@ AltStableSyncChar = {               -- per character
   },
   bindingsUnsaved = true | nil,     -- keys set in memory, not yet saved: the next Load/Restore saves
                                     -- even when every key matches (cleared by a successful SaveBindings)
+  bindingSwitch = { before = { [command] = { key, ... } }, at, when } | nil,
+                                    -- #7: a switch to character keybindings that stopped (schema 6)
   onboarding = { handled = true },  -- set by Not now, by opening the offer's preview, or by applying
   interrupted = { id, version, why, at },          -- resuming = a NEW preview + click;
                                                     -- its backup is backups[guid].operation
@@ -249,6 +253,7 @@ Only an explicit confirmation click writes game state.
 | Choosing an entry in a dropdown | no | **no** |
 | First-login offer (#10) | no | **no**. It only opens a preview |
 | Confirmation click on a Load/Apply/Restore preview | no | **yes**, after a verified backup |
+| OK on the "Turn on character keybindings?" preview (#7) | no | **only** the binding-set switch, verified, guarded (safety rule 8) |
 | Interruption (combat starts mid-apply) | no | stops writing. Resuming = a new preview + a new click |
 | Save / Save As / Delete / Recover / Keep-this-version (confirmed) | **yes** | no |
 | Catalog sync receipt (#18) | **yes**, by the receive rules | **no**, ever |
@@ -309,9 +314,42 @@ Only an explicit confirmation click writes game state.
 8. **Bindings are written to the Character set only, and only when it is the active set.** The
    preview shows "Destination: Character".
    - If the character uses Account bindings, the binding part is blocked with "Enable
-     character-specific keybindings in WoW settings, then try again." The Account set is never
-     written (it is shared by every Account-binding character on the WoW account). **Never switch
-     sets.**
+     character-specific keybindings in WoW settings, then try again." When the set reads as Account,
+     the preview offers **OK / Cancel** instead (#7). OK runs Blizzard's checkbox sequence,
+     `SaveBindings(Account); LoadBindings(Character); SaveBindings(Character)`, and nothing else. It is
+     step 1 of a two-step wizard: step 2 waits (display only, up to 10 s) for the switch's own
+     `UPDATE_BINDINGS` to settle, then shows the ordinary Load preview, planned afresh, whose Load
+     click is the only load write. Step 2 ends without loading if its preview is cancelled or
+     replaced, the entry is gone, or the character is back on Account keybindings; cancelling it
+     leaves character keybindings on.
+     - The first call saves the keys in memory as the Account set, including changes another addon
+       hasn't saved; the preview says so. On a Character set it would overwrite the account keys
+       with this character's, so every call requires the set to read Account (it does until the
+       last call, measured) and no combat.
+     - The full binding map is read before, and after each call before the next: every command in
+       the binding list with all its keys, plus what every ALT/CTRL/SHIFT/META chord of the keyboard,
+       mouse buttons 1-31, the wheel and the gamepad does, so keys bound by click (bar addons'
+       `CLICK ...`) are compared too; each custom command found that way is read by command as well,
+       so its other keys count. A custom binding only on an input outside that list stays out of
+       reach (no client call lists bound keys); it would need a Character store that differs
+       there, which the measured case doesn't have.
+       Unreadable or different stops there, so changed keys are never saved. Success is the set
+       reading Character with the map unchanged. A thrown error or a `false` return is a failure.
+     - After a stop with the account keys already saved, while Account is still active and the keys
+       in memory are no longer those, the saved account keys are reloaded (`LoadBindings(Account)`,
+       the same set, not a switch): otherwise Blizzard's Keybindings window or another addon saving
+       the current set would write them over the account keys. The reload is verified and reported;
+       in combat it doesn't run, and the report says so.
+       There is no other rollback: going back is the player's untick in Settings.
+     - `AltStableSyncChar.bindingSwitch` is written before the first call and removed only after a
+       verified success. While it exists, a new attempt runs only if the keys are exactly as before
+       the first one; otherwise it is refused with no binding call (saving changed keys as the Account
+       set would lose the account keys). Step 1 then lists the keys that differ and says OK makes
+       the current keys the account ones; that OK accepts exactly the keys it showed. It stays while
+       the character is on Character bindings, where it blocks nothing, and `/altsync status` shows
+       it only on Account bindings.
+     - Step 1's OK runs only while the entry is the version it showed (a sync may have replaced it).
+     - Never Character -> Account, never a set deletion, never from an event or a restore.
    - Displaced keys are shown, and both keys per command are kept in capture and restore.
 9. **Macros:**
    - **Account macros are never edited, created or deleted.** Sharing them is a separate, future,

@@ -408,14 +408,108 @@ function Commands.list()
     end
 end
 
+Commands.SWITCH_LINES = {
+    "This loadout sets key bindings, and this character uses your account keybindings.",
+    "OK gives this character its own keybindings, starting as an exact copy of your account ones: "
+        .. "the same as ticking Character Specific Keybindings in Settings.",
+    "It also saves your current keys as your account keybindings, including changes not saved yet "
+        .. "(for example by another addon).",
+    "To go back, untick it in Settings; that deletes this character's keybindings.",
+    "Step 2 shows what the load changes, with its own Load button.",
+}
+
+-- Step 2 of the #7 wizard: wait (display only) until planning is ready, then
+-- show the ordinary Load preview. It stops if its own preview is no longer
+-- on screen: cancelled, or replaced by another preview.
+Commands.STEP2 = "Step 2 of 2. Character keybindings are on; cancelling leaves them on."
+function Commands.AwaitLoad(id, name)
+    local waiting = {
+        title = ("Load %s: step 2 of 2"):format(name),
+        lines = { "Character keybindings are on; cancelling leaves them on.",
+                  "Waiting for your keybindings to settle..." },
+        confirm = false,
+    }
+    ASS.Preview.Show(waiting)
+    if not (C_Timer and C_Timer.After) then
+        waiting.lines[2] = ("Run /altsync load %s to review and load it."):format(name)
+        ASS.Preview.Show(waiting)
+        return
+    end
+    local deadline = GetTime() + 10
+    local function tick()
+        if ASS.Preview.Shown() ~= waiting then return end      -- cancelled or replaced
+        if ASS.Ready.IsReady() then
+            ASS.Preview.Hide()
+            local e = ASS.Catalog.Get(id)
+            if not e or e.deleted or e.kind ~= "loadout" or e.class ~= PlayerClass() then
+                Print(Copy("unknown-id")) return
+            end
+            if not ASS.Game.CharacterBindings() then
+                Print(("Character keybindings aren't on any more, so nothing was loaded. /altsync load %s to start again.")
+                    :format(name))
+                return
+            end
+            return Commands.LoadEntry(e, Commands.STEP2)
+        end
+        if GetTime() >= deadline then
+            waiting.lines[2] = ("Still waiting for character data. Run /altsync load %s when ready."):format(name)
+            ASS.Preview.Show(waiting)
+            return
+        end
+        C_Timer.After(0.5, tick)
+    end
+    C_Timer.After(0.5, tick)
+end
+
 function Commands.load(arg)
     local entry, why = FindEntry(arg)
     if not entry then for _, l in ipairs(why) do Print(l) end return end
+    return Commands.LoadEntry(entry)
+end
+
+-- The Load preview for one catalog entry. `note`: a line shown first (step 2
+-- of the #7 wizard).
+function Commands.LoadEntry(entry, note)
     if type(entry.modules) ~= "table" then
         -- A deletion conflict copy stands for "deleted on the other account".
         Print("That entry has nothing to load. " .. Copy("conflict-copy")) return
     end
     local plan = ASS.Loadout.Plan(entry)
+    if plan.needsCharacterBindings then
+        -- #7, a two-step wizard: step 1's OK turns on character keybindings
+        -- and nothing else; step 2 is the ordinary Load preview, planned
+        -- afresh once the switch's UPDATE_BINDINGS has settled, with its own
+        -- Load click.
+        local id, name = entry.id, tostring(entry.name)
+        local lines, differ, shownKeys = Commands.SWITCH_LINES, ASS.Loadout.SwitchGuard()
+        if differ == false then
+            Print("An earlier switch to character keybindings stopped, and your keys can't be read now. Try again in a moment.")
+            return
+        elseif differ then
+            -- A stopped switch, and the keys differ from before it: say so,
+            -- and let the player choose these keys as the account ones.
+            lines = { "An earlier switch to character keybindings stopped. Your keys now differ from before it: "
+                .. differ .. ".", "OK saves your current keys as your account keybindings, replacing the ones "
+                .. "saved before, then gives this character its own copy. Cancel if they don't look right." }
+            for i = 2, #Commands.SWITCH_LINES do lines[#lines + 1] = Commands.SWITCH_LINES[i] end
+        end
+        local version = entry.version
+        ASS.Preview.Show({
+            title = ("Load %s: step 1 of 2"):format(name),
+            lines = lines,
+            confirm = "OK",
+            onConfirm = function()
+                -- The switch is for this load: only while the entry is the
+                -- version previewed (a sync may have replaced or deleted it).
+                local e = ASS.Catalog.Get(id)
+                if not e or e.deleted or e.version ~= version then Print(Copy("stale")) return end
+                local ok, why = ASS.Loadout.UseCharacterBindings(shownKeys)
+                if not ok then Print(why) return end
+                Commands.AwaitLoad(id, name)
+            end,
+        })
+        return
+    end
     local lines = Commands.Describe(plan)
     -- A no-op still gets "Done": it records what was loaded (docs/DESIGN.md: a
     -- no-op Load records the baseline) without writing game state.
@@ -426,6 +520,7 @@ function Commands.load(arg)
         table.insert(lines, 1, ("Abandon the incomplete load of %s? Its backup stays in your backups."):format(
             tostring(pinned.op and pinned.op.name)))
     end
+    if note then table.insert(lines, 1, note) end
     ASS.Preview.Show({
         title = "Load " .. tostring(entry.name) .. "?",
         lines = lines,

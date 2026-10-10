@@ -67,9 +67,13 @@ over months. The full model is in `docs/DESIGN.md`; the short form:
    explicitly asks. Macro mutations first, reindex, then place.
    Sharing account macros between accounts is a separate, owner-approved policy change (#30), never
    an exception implied by other work.
-6. **Bindings are written to the Character set only, and only when it is active.** The Account set
-   is never written, and sets are never switched; Account-binding characters get a blocked binding
-   part with an explanation.
+6. **Bindings are written to the Character set only, and only when it is active.** Account-binding
+   characters get a blocked binding part with an explanation. The one exception (#7, owner decision
+   2026-10-09): on the player's explicit OK in that preview, the addon turns on character keybindings
+   the way the Settings checkbox does: `SaveBindings(Account); LoadBindings(Character);
+   SaveBindings(Character)`. That saves the keys in memory as the Account set (disclosed in the
+   preview), so it runs only while Account is active, is verified before every call, and is
+   guarded after any stop. Never Character -> Account, never a set deletion.
 7. **Out of combat only**; combat stops the operation and leaves an interrupted record. Resuming is
    a new preview and a new click.
 8. **Refuse unknown or newer schemas** — never best-effort parse saved data.
