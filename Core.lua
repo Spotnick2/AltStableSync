@@ -301,10 +301,12 @@ local function SlashHandler(msg)
         end
         Print(("version %s, schema %d, %d saved setup(s), %d character backup set(s)"):format(
             tostring(version), ASS.db.schema, live, CountKeys(ASS.db.backups)))
+        -- Shown only where it matters: on Character bindings it blocks nothing.
         local guard = ASS.char and ASS.char.bindingSwitch
-        if guard then
+        local okSet, set = pcall(GetCurrentBindingSet)
+        if guard and not (okSet and Enum and Enum.BindingSet and set == Enum.BindingSet.Character) then
             Print("an earlier switch to character keybindings stopped while " .. tostring(guard.at or "starting")
-                .. "; switching again needs your keys as they were before it")
+                .. "; if your keys differ from before it, the next switch asks first")
         end
     elseif ASS.Commands and type(ASS.Commands[cmd]) == "function" then
         ASS.Commands[cmd](rest)

@@ -326,16 +326,24 @@ Only an explicit confirmation click writes game state.
        hasn't saved; the preview says so. On a Character set it would overwrite the account keys
        with this character's, so every call requires the set to read Account (it does until the
        last call, measured) and no combat.
-     - The full binding map (every command, every key) is read before, and after each call before
-       the next: unreadable or different stops there, so changed keys are never saved. Success is
-       the set reading Character with the map unchanged. A thrown error or a `false` return is a
-       failure. There is no rollback: going back is the player's untick in Settings, which deletes
-       the character set.
+     - The full binding map is read before, and after each call before the next: every command in
+       the binding list with all its keys, plus what every modifier combination of the keyboard and
+       mouse keys does, so keys bound by click (bar addons' `CLICK ...`) are compared too.
+       Unreadable or different stops there, so changed keys are never saved. Success is the set
+       reading Character with the map unchanged. A thrown error or a `false` return is a failure.
+     - After a stop with the account keys already saved, while Account is still active and the keys
+       in memory are no longer those, the saved account keys are reloaded (`LoadBindings(Account)`,
+       the same set, not a switch): otherwise Blizzard's Keybindings window or another addon saving
+       the current set would write them over the account keys. The reload is verified and reported.
+       There is no other rollback: going back is the player's untick in Settings.
      - `AltStableSyncChar.bindingSwitch` is written before the first call and removed only after a
        verified success. While it exists, a new attempt runs only if the keys are exactly as before
        the first one; otherwise it is refused with no binding call (saving changed keys as the Account
-       set would lose the account keys). It stays while the character is on Character bindings,
-       where it blocks nothing, and `/altsync status` shows it.
+       set would lose the account keys). Step 1 then lists the keys that differ and says OK makes
+       the current keys the account ones; that OK accepts exactly the keys it showed. It stays while
+       the character is on Character bindings, where it blocks nothing, and `/altsync status` shows
+       it only on Account bindings.
+     - Step 1's OK runs only while the entry is the version it showed (a sync may have replaced it).
      - Never Character -> Account, never a set deletion, never from an event or a restore.
    - Displaced keys are shown, and both keys per command are kept in capture and restore.
 9. **Macros:**

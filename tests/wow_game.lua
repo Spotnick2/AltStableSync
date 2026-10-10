@@ -55,6 +55,7 @@ function G.setup(opts)
     G.charStore = opts.charStore and copy(opts.charStore) or (G.bindingSet == 2 and copy(G.keys) or nil)
     G.unbound = { "TOGGLEAUTORUN", "JUMP" }
     G.numBindings, G.bindingFails, G.bindFault, G.keyFails, G.emptyCommand = nil, nil, nil, nil, nil
+    G.actionFails = nil
     G.timers = {}
     -- macros: { name, icon, body, char = bool, shows = spellID }
     G.account, G.char = {}, {}
@@ -312,7 +313,10 @@ function GetBindingKey(command)
     return unpack(keys)
 end
 
-function GetBindingAction(key) return G.keys[key] or "" end
+function GetBindingAction(key)
+    if G.actionFails then error("GetBindingAction failed", 2) end
+    return G.keys[key] or ""
+end
 
 function SetBinding(key, command)
     mutate("SetBinding", true)
@@ -325,7 +329,11 @@ end
 -- command, category, then its keys.
 local function bindingList()
     local seen, list = {}, {}
-    for _, c in pairs(G.keys) do if not seen[c] then seen[c] = true; list[#list + 1] = c end end
+    -- Keys bound by SetBindingClick and the like ("CLICK Bar:LeftButton")
+    -- are not in the client's binding list.
+    for _, c in pairs(G.keys) do
+        if not seen[c] and not c:find(" ", 1, true) then seen[c] = true; list[#list + 1] = c end
+    end
     for _, c in ipairs(G.unbound) do if not seen[c] then seen[c] = true; list[#list + 1] = c end end
     table.sort(list)
     return list
@@ -369,7 +377,10 @@ function SaveBindings(set)
     if set == G.bindingSet then G.savedKeys = copy(G.keys) end
 end
 
+-- Only the #7 switch may call it: the tests wrap Loadout.UseCharacterBindings
+-- to set G.switching, so any other path (Restore, Save, an event) fails loudly.
 function LoadBindings(set)
+    if not G.switching then error("LoadBindings outside the #7 switch", 2) end
     mutate("LoadBindings")
     if fault("LoadBindings", set) == false then return false end
     if set == Enum.BindingSet.Character and G.charStore then G.keys = copy(G.charStore) end

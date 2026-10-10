@@ -42,6 +42,14 @@ local function boot()
     L = A.Loadout
     A.Preview = { Show = function(o) A._shown = o end, Hide = function() A._shown = nil end,
                   Shown = function() return A._shown end }
+    local switch = L.UseCharacterBindings
+    L.UseCharacterBindings = function(...)
+        G.switching = true
+        local r = { pcall(switch, ...) }
+        G.switching = false
+        assert(r[1], r[2])
+        return unpack(r, 2, table.maxn(r))
+    end
 end
 
 local function ready()
@@ -2435,28 +2443,38 @@ do
         local real = LoadBindings
         LoadBindings = function(set) real(set); G.bindingFails = true end
         return function() LoadBindings = real end
-    end, "couldn't read the keys to check them", "SaveBindings,LoadBindings")
+    end, "couldn't read the keys to check them", "SaveBindings,LoadBindings,LoadBindings")
 
     -- Every call failing every way: stop there, guard kept, never "Nothing
-    -- changed"; when keys changed, a retry makes no binding call at all.
+    -- changed". Keys changed after the account save: the saved account keys
+    -- are reloaded (the same set), so the keys are as before and a retry
+    -- runs. Keys changed with no account save: a retry makes no binding call.
     local seq = { "SaveBindings1", "LoadBindings2", "SaveBindings2" }
     local want = { "SaveBindings", "SaveBindings,LoadBindings", "SaveBindings,LoadBindings,SaveBindings" }
     for i, name in ipairs(seq) do
         for _, mode in ipairs({ "error", "false", "change-error", "change-false" }) do
             local label = name .. " " .. mode
+            local changed = mode:find("^change") ~= nil
             local s = offer()
+            local keys0 = A.Catalog.Copy(G.keys)
             G.bindFault = { [name] = mode }
             s.onConfirm()
-            eq("#7: " .. label .. ": stopped there", calls(), want[i])
+            local reload = changed and i > 1
+            eq("#7: " .. label .. ": stopped there", calls(), want[i] .. (reload and ",LoadBindings" or ""))
             check("#7: " .. label .. ": guard kept", A.char.bindingSwitch ~= nil and A.char.bindingSwitch.before ~= nil)
             check("#7: " .. label .. ": reported", chat():find("Stopped while", 1, true) ~= nil, chat())
             check("#7: " .. label .. ": never 'nothing changed'", chat():find("Nothing changed", 1, true) == nil)
             eq("#7: " .. label .. ": still Account", G.bindingSet, 1)
+            if reload then
+                check("#7: " .. label .. ": account keys reloaded", chat():find("were reloaded", 1, true) ~= nil, chat())
+                eq("#7: " .. label .. ": keys as before", G.keys["1"], keys0["1"])
+                eq("#7: " .. label .. ": no stray key", G.keys["F12"], nil)
+            end
             G.bindFault = nil
             G.calls, WoW.chatLines = {}, {}
             ready()
             local ok, why = L.UseCharacterBindings()
-            if mode:find("^change") then
+            if changed and not reload then
                 eq("#7: " .. label .. ": retry refused", why, L.SWITCH_GUARDED)
                 eq("#7: " .. label .. ": retry makes no call", calls(), "")
                 -- Put the key back: the retry runs, against the first baseline.
@@ -2464,22 +2482,48 @@ do
                 ok = L.UseCharacterBindings()
                 check("#7: " .. label .. ": keys as before: retry runs", ok == true)
             else
-                check("#7: " .. label .. ": keys unchanged: retry runs", ok == true, why)
+                check("#7: " .. label .. ": keys as before: retry runs", ok == true, why)
             end
             eq("#7: " .. label .. ": guard cleared on success", A.char.bindingSwitch, nil)
         end
     end
 
     -- Successful calls, failed verification: an injected Character store that
-    -- differs. Character is never saved, and the guard stays.
+    -- differs. Character is never saved; the account keys are reloaded.
     local s = offer({ bindingSet = 1, charStore = { ["1"] = "JUMP" } })
+    local keysBefore = A.Catalog.Copy(G.keys)
     s.onConfirm()
-    eq("#7: differing store: no Character save", calls(), "SaveBindings,LoadBindings")
-    check("#7: differing store: commands listed", chat():find("ACTIONBUTTON", 1, true) ~= nil, chat())
-    check("#7: differing store: retry warned", chat():find("switching again is refused while they differ", 1, true) ~= nil)
+    eq("#7: differing store: no Character save", calls(), "SaveBindings,LoadBindings,LoadBindings")
+    check("#7: differing store: reloaded", chat():find("were reloaded", 1, true) ~= nil, chat())
+    eq("#7: differing store: keys as before", G.keys["1"], keysBefore["1"])
     check("#7: differing store: guard kept", A.char.bindingSwitch ~= nil)
-    -- Reinitialised (a reload): the guard came from SavedVariables, the keys
-    -- still differ, so a retry makes zero binding calls.
+    -- The reload fails too: the changed keys are listed, and a retry asks first.
+    s = offer({ bindingSet = 1, charStore = { ["1"] = "JUMP" } })
+    G.bindFault = { LoadBindings1 = "error" }
+    s.onConfirm()
+    G.bindFault = nil
+    check("#7: reload failed: commands listed", chat():find("ACTIONBUTTON", 1, true) ~= nil, chat())
+    check("#7: reload failed: retry asks first", chat():find("switching again asks first while they differ", 1, true) ~= nil, chat())
+
+    -- Keys an addon bound by click (Bartender, Dominos) are compared too:
+    -- a Character store that differs only there is caught.
+    s = offer({ bindingSet = 1, charStore = { ["1"] = "ACTIONBUTTON2", ["2"] = "ACTIONBUTTON1",
+                                               ["SHIFT-2"] = "MOVEFORWARD", ["CTRL-1"] = "CLICK Bar:LeftButton" } })
+    G.keys["CTRL-1"] = "CLICK Bar:RightButton"
+    s.onConfirm()
+    eq("#7: click binding: no Character save", calls(), "SaveBindings,LoadBindings,LoadBindings")
+    eq("#7: click binding: reloaded", G.keys["CTRL-1"], "CLICK Bar:RightButton")
+    local m = A.Game.BindingMap()
+    eq("#7: click binding read by key", m and m["@CTRL-1"], "CLICK Bar:RightButton")
+    eq("#7: click binding not a listed command", m and m["CLICK Bar:RightButton"], nil)
+
+    -- A guard whose keys differ (an account save that failed after a key
+    -- changed). Reinitialised (a reload): the guard came from SavedVariables
+    -- and a plain retry makes zero binding calls.
+    s = offer()
+    G.bindFault = { SaveBindings1 = "change-error" }
+    s.onConfirm()
+    G.bindFault = nil
     local db, ch = AltStableSyncDB, AltStableSyncChar
     WoW.reset()
     for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Game.lua", "Backups.lua",
@@ -2491,6 +2535,14 @@ do
     A, L = AltStableSync, AltStableSync.Loadout
     A.Preview = { Show = function(o) A._shown = o end, Hide = function() A._shown = nil end,
                   Shown = function() return A._shown end }
+    local switch = L.UseCharacterBindings
+    L.UseCharacterBindings = function(...)
+        G.switching = true
+        local r = { pcall(switch, ...) }
+        G.switching = false
+        assert(r[1], r[2])
+        return unpack(r, 2, table.maxn(r))
+    end
     ready()
     check("#7: guard survives a reload", A.char.bindingSwitch ~= nil)
     G.calls = {}
@@ -2499,18 +2551,98 @@ do
     eq("#7: after reload: zero binding calls", calls(), "")
     WoW.chatLines = {}
     A.SlashHandler("status")
-    check("#7: status shows the guard", chat():find("switch to character keybindings stopped", 1, true) ~= nil, chat())
+    check("#7: status shows the guard on Account", chat():find("switch to character keybindings stopped", 1, true) ~= nil, chat())
+    -- The way out: step 1 says which keys differ and that OK makes the
+    -- current keys the account ones.
+    A.Commands.load("Everyday")
+    local text = table.concat(A._shown.lines, "\n")
+    check("#7: guarded step 1 lists the keys", text:find("key F12", 1, true) ~= nil, text)
+    check("#7: guarded step 1 says it replaces the account keys", text:find("replacing the ones saved before", 1, true) ~= nil, text)
     -- Dormant on Character: a normal Character-binding load leaves it alone,
-    -- and it still blocks a later switch from Account with different keys.
+    -- status says nothing, and it still asks first from Account.
     G.bindingSet, G.charStore = 2, A.Catalog.Copy(G.keys)
     local r = L.Load(entry, L.Plan(entry))
     check("#7: Character load works with a guard", r and not r.failed, r and tostring(r.failed))
     check("#7: guard left on Character", A.char.bindingSwitch ~= nil)
+    WoW.chatLines = {}
+    A.SlashHandler("status")
+    check("#7: status quiet on Character", chat():find("switch to character keybindings stopped", 1, true) == nil, chat())
     G.bindingSet = 1
     G.calls = {}
     ok, why = L.UseCharacterBindings()
     eq("#7: back on Account, keys differ: refused", why, L.SWITCH_GUARDED)
     eq("#7: no call", calls(), "")
+    ready()
+    A.Commands.load("Everyday")
+    G.calls, WoW.chatLines = {}, {}
+    local keysNow = A.Catalog.Copy(G.keys)
+    A._shown.onConfirm()
+    eq("#7: accepted: switched", G.bindingSet, 2)
+    eq("#7: accepted: current keys are the account ones", G.accountKeys["F12"], keysNow["F12"])
+    eq("#7: accepted: guard cleared", A.char.bindingSwitch, nil)
+
+    -- The switch's own gate, without the preview's: combat refuses, no call.
+    s = offer()
+    G.combat = true
+    ok, why = L.UseCharacterBindings()
+    G.combat = false
+    check("#7: direct call in combat refused", not ok and tostring(why):find("combat") ~= nil, why)
+    eq("#7: direct call in combat: no call", calls(), "")
+    eq("#7: direct call in combat: refused before arming", A.char.bindingSwitch, nil)
+    -- A key whose action can't be read: the map is unreadable.
+    G.actionFails = true
+    eq("#7: unreadable key action: unreadable map", A.Game.BindingMap(), nil)
+    G.actionFails = nil
+    -- A newer version of the same entry (a sync) since step 1 was shown.
+    s = offer()
+    local e1 = A.Catalog.Get(entry.id)
+    A.Catalog.Replace(e1.id, A.Catalog.Copy(e1.modules), e1.version)
+    s.onConfirm()
+    eq("#7: newer version: no binding call", calls(), "")
+    check("#7: newer version: said so", chat():find("changed since the preview", 1, true) ~= nil, chat())
+    -- A guard that appeared after step 1 was shown (no keys accepted there).
+    s = offer()
+    A.char.bindingSwitch = { before = { JUMP = { "Q" } } }
+    s.onConfirm()
+    eq("#7: guard after the preview: no call", calls(), "")
+    check("#7: guard after the preview: refused", chat():find("switching now could save these keys", 1, true) ~= nil, chat())
+    -- Keys shown in the guarded step 1, then changed again: refused.
+    ready()
+    A.Commands.load("Everyday")
+    local guarded = A._shown
+    G.keys["F11"] = "JUMP"
+    G.calls, WoW.chatLines = {}, {}
+    guarded.onConfirm()
+    eq("#7: keys changed after the guarded preview: no call", calls(), "")
+    check("#7: keys changed after the guarded preview: refused", chat():find("switching now could save these keys", 1, true) ~= nil, chat())
+    A.char.bindingSwitch, G.keys["F11"] = nil, nil
+    -- An entry that is no longer this class's by step 2: not handed off.
+    s = offer()
+    s.onConfirm()
+    A.Catalog.Get(entry.id).class = "MAGE"
+    WoW.tick(3)
+    eq("#7: other class: nothing shown", A._shown, nil)
+    check("#7: other class: said so", chat():find("no longer exists", 1, true) ~= nil, chat())
+
+    -- Step 1 belongs to its load: the entry changed since the preview.
+    s = offer()
+    local e = A.Catalog.Get(entry.id)
+    local mm = A.Catalog.Copy(e.modules); mm.bindings = {}
+    A.Catalog.Replace(e.id, mm, e.version)
+    s.onConfirm()
+    eq("#7: entry changed: no binding call", calls(), "")
+    check("#7: entry changed: said so", chat():find("changed since the preview", 1, true) ~= nil, chat())
+    -- No Enum.BindingSet: a load with keys shows the plain block, no error.
+    boot(); ready(); save()
+    alt({ bindingSet = 1 })
+    local enum = Enum.BindingSet
+    Enum.BindingSet = nil
+    local okP, plan = pcall(L.Plan, entry)
+    local okS = pcall(L.UseCharacterBindings)
+    Enum.BindingSet = enum
+    check("#7: no enum: plan works", okP and plan.blocked ~= nil and not plan.needsCharacterBindings, tostring(plan))
+    check("#7: no enum: switch refuses without an error", okS)
+
     -- The final set check: calls succeed but Character never turns on.
     s = offer()
     local realSave = SaveBindings

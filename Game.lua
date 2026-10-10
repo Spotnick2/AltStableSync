@@ -299,18 +299,43 @@ function Game.BindingSet()
     return nil
 end
 
--- Every bound command with all its keys, command -> list (#7). nil when any
--- read fails: an incomplete map can't prove the keys were kept.
+-- Keys checked by what they do (#7): the binding list (GetBinding) holds
+-- only the commands from Bindings.xml, not keys an addon bound with
+-- SetBindingClick/Macro/Spell/Item ("CLICK ...", "MACRO ..."), which bar
+-- addons use. Every modifier combination of these keys is read by key.
+local KEY_BASES = { "SPACE", "TAB", "ESCAPE", "BACKSPACE", "ENTER", "INSERT", "DELETE", "HOME", "END",
+    "PAGEUP", "PAGEDOWN", "UP", "DOWN", "LEFT", "RIGHT", "CAPSLOCK", "NUMLOCK", "PRINTSCREEN",
+    "`", "-", "=", "[", "]", "\\", ";", "'", ",", ".", "/",
+    "BUTTON3", "BUTTON4", "BUTTON5", "MOUSEWHEELUP", "MOUSEWHEELDOWN",
+    "NUMPADPLUS", "NUMPADMINUS", "NUMPADMULTIPLY", "NUMPADDIVIDE", "NUMPADDECIMAL" }
+for c = 65, 90 do KEY_BASES[#KEY_BASES + 1] = string.char(c) end
+for i = 0, 9 do KEY_BASES[#KEY_BASES + 1] = tostring(i); KEY_BASES[#KEY_BASES + 1] = "NUMPAD" .. i end
+for i = 1, 12 do KEY_BASES[#KEY_BASES + 1] = "F" .. i end
+local MODIFIERS = { "", "SHIFT-", "CTRL-", "ALT-", "CTRL-SHIFT-", "ALT-SHIFT-", "ALT-CTRL-", "ALT-CTRL-SHIFT-" }
+local KEYS = {}
+for _, m in ipairs(MODIFIERS) do for _, k in ipairs(KEY_BASES) do KEYS[#KEYS + 1] = m .. k end end
+Game.KEYS = KEYS
+
+-- Every bound command with all its keys (command -> list), plus what each
+-- of those keys and of Game.KEYS does ("@" .. key -> action) (#7). nil when
+-- any read fails: an incomplete map can't prove the keys were kept.
 function Game.BindingMap()
     local ok, n = pcall(GetNumBindings)
     if not ok or type(n) ~= "number" or n < 1 or n ~= math.floor(n) then return nil end
-    local map = {}
+    local map, keys = {}, {}
     for i = 1, n do
         local okB, command = pcall(GetBinding, i)
         if not okB or type(command) ~= "string" or command == "" then return nil end
-        local keys = Game.KeysFor(command)
-        if not keys then return nil end
-        if #keys > 0 then map[command] = keys end
+        local list = Game.KeysFor(command)
+        if not list then return nil end
+        if #list > 0 then map[command] = list end
+        for _, k in ipairs(list) do keys[k] = true end
+    end
+    for _, k in ipairs(KEYS) do keys[k] = true end
+    for k in pairs(keys) do
+        local action = Game.CommandOf(k)
+        if action == nil then return nil end
+        if action then map["@" .. k] = action end
     end
     return map
 end

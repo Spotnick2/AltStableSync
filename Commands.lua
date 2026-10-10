@@ -441,13 +441,15 @@ function Commands.AwaitLoad(id, name)
         if ASS.Ready.IsReady() then
             ASS.Preview.Hide()
             local e = ASS.Catalog.Get(id)
-            if not e or e.deleted then Print(Copy("unknown-id")) return end
+            if not e or e.deleted or e.kind ~= "loadout" or e.class ~= PlayerClass() then
+                Print(Copy("unknown-id")) return
+            end
             if not ASS.Game.CharacterBindings() then
                 Print(("Character keybindings aren't on any more, so nothing was loaded. /altsync load %s to start again.")
                     :format(name))
                 return
             end
-            return Commands.load(id, Commands.STEP2)
+            return Commands.LoadEntry(e, Commands.STEP2)
         end
         if GetTime() >= deadline then
             waiting.lines[2] = ("Still waiting for character data. Run /altsync load %s when ready."):format(name)
@@ -459,10 +461,15 @@ function Commands.AwaitLoad(id, name)
     C_Timer.After(0.5, tick)
 end
 
--- `note`: a line shown first (step 2 of the #7 wizard).
-function Commands.load(arg, note)
+function Commands.load(arg)
     local entry, why = FindEntry(arg)
     if not entry then for _, l in ipairs(why) do Print(l) end return end
+    return Commands.LoadEntry(entry)
+end
+
+-- The Load preview for one catalog entry. `note`: a line shown first (step 2
+-- of the #7 wizard).
+function Commands.LoadEntry(entry, note)
     if type(entry.modules) ~= "table" then
         -- A deletion conflict copy stands for "deleted on the other account".
         Print("That entry has nothing to load. " .. Copy("conflict-copy")) return
@@ -474,12 +481,29 @@ function Commands.load(arg, note)
         -- afresh once the switch's UPDATE_BINDINGS has settled, with its own
         -- Load click.
         local id, name = entry.id, tostring(entry.name)
+        local lines, differ, shownKeys = Commands.SWITCH_LINES, ASS.Loadout.SwitchGuard()
+        if differ == false then
+            Print("An earlier switch to character keybindings stopped, and your keys can't be read now. Try again in a moment.")
+            return
+        elseif differ then
+            -- A stopped switch, and the keys differ from before it: say so,
+            -- and let the player choose these keys as the account ones.
+            lines = { "An earlier switch to character keybindings stopped. Your keys now differ from before it: "
+                .. differ .. ".", "OK saves your current keys as your account keybindings, replacing the ones "
+                .. "saved before, then gives this character its own copy. Cancel if they don't look right." }
+            for i = 2, #Commands.SWITCH_LINES do lines[#lines + 1] = Commands.SWITCH_LINES[i] end
+        end
+        local version = entry.version
         ASS.Preview.Show({
             title = ("Load %s: step 1 of 2"):format(name),
-            lines = Commands.SWITCH_LINES,
+            lines = lines,
             confirm = "OK",
             onConfirm = function()
-                local ok, why = ASS.Loadout.UseCharacterBindings()
+                -- The switch is for this load: only while the entry is the
+                -- version previewed (a sync may have replaced or deleted it).
+                local e = ASS.Catalog.Get(id)
+                if not e or e.deleted or e.version ~= version then Print(Copy("stale")) return end
+                local ok, why = ASS.Loadout.UseCharacterBindings(shownKeys)
                 if not ok then Print(why) return end
                 Commands.AwaitLoad(id, name)
             end,

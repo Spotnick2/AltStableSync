@@ -240,7 +240,8 @@ local function PlanKeys(plan, wantKeys)
         plan.blocked = KEYS_BLOCKED
         -- Offered only on a successful read of Account: a failed read is not
         -- a set to switch from.
-        if Game.BindingSet() == Enum.BindingSet.Account then plan.needsCharacterBindings = true end
+        local BS = Enum and Enum.BindingSet
+        if BS and Game.BindingSet() == BS.Account then plan.needsCharacterBindings = true end
         return
     end
     local want = {}
@@ -521,8 +522,9 @@ local SWITCH_STEPS = { "saving your account keybindings", "loading character key
                        "saving character keybindings" }
 
 local function SetName(set)
-    if set == Enum.BindingSet.Account then return "your account keybindings are active"
-    elseif set == Enum.BindingSet.Character then return "character keybindings are active" end
+    local BS = Enum and Enum.BindingSet or {}
+    if set ~= nil and set == BS.Account then return "your account keybindings are active"
+    elseif set ~= nil and set == BS.Character then return "character keybindings are active" end
     return "the active keybinding set couldn't be read"
 end
 
@@ -535,7 +537,15 @@ local function Differ(a, b)
             seen[cmd] = true
         end
     end
-    table.sort(names)
+    -- Commands first, then keys read by key ("@" .. key).
+    table.sort(names, function(x, y)
+        local kx, ky = x:sub(1, 1) == "@", y:sub(1, 1) == "@"
+        if kx ~= ky then return ky end
+        return x < y
+    end)
+    for i, name in ipairs(names) do
+        if name:sub(1, 1) == "@" then names[i] = "key " .. name:sub(2) end
+    end
     local n = #names
     while #names > 3 do names[#names] = nil end
     return table.concat(names, ", ") .. (n > 3 and (" and " .. (n - 3) .. " more") or "")
@@ -544,10 +554,27 @@ end
 Loadout.SWITCH_GUARDED = "An earlier switch to character keybindings stopped, and your keys differ from before it. "
     .. "Check your keybindings: switching now could save these keys as your account keybindings."
 
--- true, or nil plus the text to show.
-function Loadout.UseCharacterBindings()
+-- The guard's state for a preview: nil (none, or the keys are as before),
+-- false when unreadable, or the commands and keys that differ now (text)
+-- plus the keys read (the map an OK may accept).
+function Loadout.SwitchGuard()
+    local guard = ASS.char and ASS.char.bindingSwitch
+    if not guard then return nil end
+    local live = G().BindingMap()
+    if not live then return false end
+    if Serialize(live) == Serialize(guard.before) then return nil end
+    return Differ(guard.before, live), live
+end
+
+-- true, or nil plus the text to show. `accept`: the keys a confirmed
+-- preview showed as differing from before a stopped switch, which the player
+-- chose to make the account keys (Loadout.SwitchGuard). Accepted only while
+-- the keys are exactly those.
+function Loadout.UseCharacterBindings(accept)
     local Game = G()
-    local Account, Character = Enum.BindingSet.Account, Enum.BindingSet.Character
+    local BS = Enum and Enum.BindingSet
+    if not BS then return nil, "Couldn't read the keybinding sets. Nothing changed." end
+    local Account, Character = BS.Account, BS.Character
     local blocked = Loadout.Blocked()
     if blocked then return nil, blocked end
     if Game.BindingSet() ~= Account then
@@ -557,24 +584,40 @@ function Loadout.UseCharacterBindings()
     if not live then return nil, "Couldn't read the key bindings. Nothing changed." end
     local char = ASS.char
     local guard = char.bindingSwitch
-    if guard and Serialize(live) ~= Serialize(guard.before) then return nil, Loadout.SWITCH_GUARDED end
+    if guard and Serialize(live) ~= Serialize(guard.before) then
+        if not accept or Serialize(live) ~= Serialize(accept) then return nil, Loadout.SWITCH_GUARDED end
+        guard.before = ASS.Catalog.Copy(live)       -- the player's explicit choice, previewed
+    end
     if not guard then
         guard = { before = ASS.Catalog.Copy(live), when = time and time() or nil }
         char.bindingSwitch = guard
     end
     local before = guard.before
+    local accountSaved = false
 
     local function stop(i, problem, now)
-        guard.at = SWITCH_STEPS[i]
-        local text = ("Stopped while %s: %s. WoW reports that %s. The loadout wasn't loaded."):format(
-            SWITCH_STEPS[i], problem, SetName(Game.BindingSet()))
         -- `now`: the map just read, false when that read failed, nil to read it here.
         if now == nil then now = Game.BindingMap() end
-        if not now then
+        local reloaded
+        -- The account keys were just saved as `before`; if the keys in memory
+        -- are no longer those while Account is still active, anything that
+        -- saves the current set (Blizzard's Keybindings window, another
+        -- addon) would save them over the account keys. Reload the saved
+        -- account keys: the same set, not a switch.
+        if accountSaved and (not now or Serialize(now) ~= Serialize(before)) and Game.BindingSet() == Account then
+            local ok, ret = pcall(LoadBindings, Account)
+            now = Game.BindingMap()
+            reloaded = ok and ret ~= false and now and Serialize(now) == Serialize(before)
+        end
+        local text = ("Stopped while %s: %s. WoW reports that %s. The loadout wasn't loaded."):format(
+            SWITCH_STEPS[i], problem, SetName(Game.BindingSet()))
+        if reloaded then
+            text = text .. " Your saved account keybindings were reloaded, so your keys are as before."
+        elseif not now then
             text = text .. " Your keys couldn't be read, so it isn't known whether they are as before."
         elseif Serialize(now) ~= Serialize(before) then
             text = text .. " Your keys differ from before: " .. Differ(before, now) .. ". "
-                .. "Check them before trying again; switching again is refused while they differ."
+                .. "Check them before trying again; switching again asks first while they differ."
         end
         return nil, text
     end
@@ -591,6 +634,7 @@ function Loadout.UseCharacterBindings()
         local now = Game.BindingMap()
         if not now then return stop(i, "couldn't read the keys to check them", false) end
         if Serialize(now) ~= Serialize(before) then return stop(i, "the keys changed", now) end
+        if i == 1 then accountSaved = true end
     end
     if Game.BindingSet() ~= Character then return stop(3, "character keybindings didn't turn on") end
     char.bindingSwitch = nil

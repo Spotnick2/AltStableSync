@@ -36,12 +36,13 @@ end)
 -- true, or false plus why (for the "Waiting for character data." copy).
 function Ready.IsReady()
     if not state.entered then return false, "not in the world yet" end
-    local book = ASS.Game.Spellbook()
-    if next(book.byId) == nil then return false, "spellbook not loaded" end
+    -- The cheap check first: a waiting caller (#7's step 2) polls this.
     local since = math.max(state.enteredAt or 0, state.lastUpdate or 0)
     if GetTime() - since < QUIET then
         return false, "macros or bindings still loading"
     end
+    local book = ASS.Game.Spellbook()
+    if next(book.byId) == nil then return false, "spellbook not loaded" end
     return true
 end
 
