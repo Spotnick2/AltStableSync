@@ -737,6 +737,9 @@ function Loadout.Merge(rec, current, characterBindings, drop)
         else
             actions[slot], src[slot] = Copy(c), "C"
             outSet[slot] = true
+            -- Another rank of the same spell keeps the entry's mark too: the
+            -- capture may lack it only because its book read failed.
+            if SameFamily(b, c) and b.class == true then actions[slot].class = true end
         end
         if keepA then
             adv[slot], advSrc[slot] = Copy(a), "A"

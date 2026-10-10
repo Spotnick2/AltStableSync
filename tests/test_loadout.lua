@@ -2125,6 +2125,18 @@ do
         local o = L.Merge(r, { actions = { [2] = { kind = "spell", id = 2, name = "Y", policy = "highest", class = true } }, bindings = {} }, true)
         return o and tostring(o.modules.actions[2].class)
     end)(), "nil")
+    -- A saved rank edit of a marked spell keeps the mark, even when the
+    -- capture has none (its book item unreadable); another spell doesn't.
+    local function rankEdit(cName)
+        local x = { kind = "spell", id = 2050, name = "Lesser Heal", policy = "exact", class = true }
+        local r = { baseline = { cover = FULL, actions = { [2] = x } }, after = { cover = FULL, actions = { [2] = A.Catalog.Copy(x) } } }
+        local o = L.Merge(r, { actions = { [2] = { kind = "spell", id = 2052, name = cName, policy = "exact" } }, bindings = {} }, true)
+        return o and o.modules.actions[2]
+    end
+    local o = rankEdit("Lesser Heal")
+    eq("#48: rank edit saved", o and o.id, 2052)
+    eq("#48: rank edit keeps the mark", o and o.class, true)
+    eq("#48: another spell isn't marked", tostring((rankEdit("Renew") or {}).class), "nil")
 end
 
 do

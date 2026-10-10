@@ -362,7 +362,7 @@ kind (`AltStableSyncChar.loaded`) with the applied/skipped result.
 | Supported, observable, changed | Save the current value (after preview) |
 | Inherited entry was unresolvable, and the slot was not deliberately replaced | Keep the inherited entry |
 | The load kept the slot free (emptied, or already empty) for an action this character can't use | Keep the inherited entry **whatever the slot holds now**: the client puts a newly learned spell in the first empty slot (#46). The Save preview, its no-op message and Save As say "holds X now: not saved". It holds until a Load places the action there; `save drop` saves the slot empty and compares with what is there |
-| A kept spell captured again from a class tab | Gains `class = true` (one Save, "Marks N class spells"); a capture without the mark never removes it |
+| A kept spell captured again from a class tab | Gains `class = true` (one Save, "Marks N class spells"); a capture without the mark never removes it, including when another rank of the same spell is saved there |
 | Same family on a low alt, policy "highest known" | Keep "highest known"; don't freeze the low ID. A rank update (a hunter bar after training, or the new rank dragged in) is no change |
 | Deliberate downrank | Keep the exact rank |
 | Inherited addon absent, or field unreadable | Keep the prior payload |
