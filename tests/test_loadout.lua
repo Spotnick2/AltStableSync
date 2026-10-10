@@ -2515,7 +2515,43 @@ do
     eq("#7: click binding: reloaded", G.keys["CTRL-1"], "CLICK Bar:RightButton")
     local m = A.Game.BindingMap()
     eq("#7: click binding read by key", m and m["@CTRL-1"], "CLICK Bar:RightButton")
-    eq("#7: click binding not a listed command", m and m["CLICK Bar:RightButton"], nil)
+    eq("#7: click binding read by command too", m and m["CLICK Bar:RightButton"] and m["CLICK Bar:RightButton"][1], "CTRL-1")
+
+    -- Inputs beyond the keyboard: mouse button 6, a META chord, a gamepad
+    -- button; and a custom command's key outside every list, found through
+    -- the command itself.
+    local stock = { ["1"] = "ACTIONBUTTON2", ["2"] = "ACTIONBUTTON1", ["SHIFT-2"] = "MOVEFORWARD" }
+    local function storeWith(extra)
+        local t = A.Catalog.Copy(stock)
+        for k, v in pairs(extra) do t[k] = v end
+        return t
+    end
+    for _, case in ipairs({
+        { "mouse button 6", "BUTTON6" }, { "META chord", "ALT-META-Q" }, { "gamepad", "SHIFT-PAD3" },
+    }) do
+        local key = case[2]
+        s = offer({ bindingSet = 1, charStore = storeWith({ [key] = "CLICK Bar:LeftButton" }) })
+        G.keys[key] = "CLICK Bar:RightButton"
+        s.onConfirm()
+        eq("#7: " .. case[1] .. ": no Character save", calls(), "SaveBindings,LoadBindings,LoadBindings")
+        eq("#7: " .. case[1] .. ": key kept", G.keys[key], "CLICK Bar:RightButton")
+    end
+    s = offer({ bindingSet = 1, charStore = storeWith({ BUTTON7 = "CLICK Bar:LeftButton", ODDKEY = "JUMP" }) })
+    G.keys.BUTTON7, G.keys.ODDKEY = "CLICK Bar:LeftButton", "CLICK Bar:LeftButton"
+    m = A.Game.BindingMap()
+    eq("#7: a custom command's other key found", m and table.concat(m["CLICK Bar:LeftButton"], ","), "BUTTON7,ODDKEY")
+    eq("#7: and read by key too", m and m["@ODDKEY"], "CLICK Bar:LeftButton")
+    s.onConfirm()
+    eq("#7: off-list key change caught", calls(), "SaveBindings,LoadBindings,LoadBindings")
+
+    -- Combat with keys that differ after the account save: no reload in combat.
+    s = offer({ bindingSet = 1, charStore = { ["1"] = "JUMP" } })
+    G.combatAfter = 2                       -- after SaveBindings(Account) and LoadBindings(Character)
+    s.onConfirm()
+    G.combat = false
+    eq("#7: combat + changed keys: no reload", calls(), "SaveBindings,LoadBindings")
+    check("#7: combat + changed keys: said so", chat():find("weren't reloaded", 1, true) ~= nil, chat())
+    check("#7: combat + changed keys: guard kept", A.char.bindingSwitch ~= nil)
 
     -- A guard whose keys differ (an account save that failed after a key
     -- changed). Reinitialised (a reload): the guard came from SavedVariables

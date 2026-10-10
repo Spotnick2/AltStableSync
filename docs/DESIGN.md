@@ -327,14 +327,19 @@ Only an explicit confirmation click writes game state.
        with this character's, so every call requires the set to read Account (it does until the
        last call, measured) and no combat.
      - The full binding map is read before, and after each call before the next: every command in
-       the binding list with all its keys, plus what every modifier combination of the keyboard and
-       mouse keys does, so keys bound by click (bar addons' `CLICK ...`) are compared too.
+       the binding list with all its keys, plus what every ALT/CTRL/SHIFT/META chord of the keyboard,
+       mouse buttons 1-31, the wheel and the gamepad does, so keys bound by click (bar addons'
+       `CLICK ...`) are compared too; each custom command found that way is read by command as well,
+       so its other keys count. A custom binding only on an input outside that list stays out of
+       reach (no client call lists bound keys); it would need a Character store that differs
+       there, which the measured case doesn't have.
        Unreadable or different stops there, so changed keys are never saved. Success is the set
        reading Character with the map unchanged. A thrown error or a `false` return is a failure.
      - After a stop with the account keys already saved, while Account is still active and the keys
        in memory are no longer those, the saved account keys are reloaded (`LoadBindings(Account)`,
        the same set, not a switch): otherwise Blizzard's Keybindings window or another addon saving
-       the current set would write them over the account keys. The reload is verified and reported.
+       the current set would write them over the account keys. The reload is verified and reported;
+       in combat it doesn't run, and the report says so.
        There is no other rollback: going back is the player's untick in Settings.
      - `AltStableSyncChar.bindingSwitch` is written before the first call and removed only after a
        verified success. While it exists, a new attempt runs only if the keys are exactly as before

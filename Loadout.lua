@@ -604,13 +604,22 @@ function Loadout.UseCharacterBindings(accept)
         -- saves the current set (Blizzard's Keybindings window, another
         -- addon) would save them over the account keys. Reload the saved
         -- account keys: the same set, not a switch.
+        local inCombat
         if accountSaved and (not now or Serialize(now) ~= Serialize(before)) and Game.BindingSet() == Account then
-            local ok, ret = pcall(LoadBindings, Account)
-            now = Game.BindingMap()
-            reloaded = ok and ret ~= false and now and Serialize(now) == Serialize(before)
+            -- Out of combat only, like every write.
+            if InCombatLockdown() then
+                inCombat = true
+            else
+                local ok, ret = pcall(LoadBindings, Account)
+                now = Game.BindingMap()
+                reloaded = ok and ret ~= false and now and Serialize(now) == Serialize(before)
+            end
         end
         local text = ("Stopped while %s: %s. WoW reports that %s. The loadout wasn't loaded."):format(
             SWITCH_STEPS[i], problem, SetName(Game.BindingSet()))
+        if inCombat then
+            text = text .. " Combat started, so your saved account keybindings weren't reloaded."
+        end
         if reloaded then
             text = text .. " Your saved account keybindings were reloaded, so your keys are as before."
         elseif not now then

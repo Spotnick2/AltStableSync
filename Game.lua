@@ -302,40 +302,80 @@ end
 -- Keys checked by what they do (#7): the binding list (GetBinding) holds
 -- only the commands from Bindings.xml, not keys an addon bound with
 -- SetBindingClick/Macro/Spell/Item ("CLICK ...", "MACRO ..."), which bar
--- addons use. Every modifier combination of these keys is read by key.
+-- addons use. Every modifier chord of these inputs is read by key: the
+-- keyboard, mouse buttons 1-31 and the wheel (Blizzard's BindingUtil range),
+-- and the gamepad. Each custom command found that way is then read by
+-- command too, so its keys outside this list are compared as well.
 local KEY_BASES = { "SPACE", "TAB", "ESCAPE", "BACKSPACE", "ENTER", "INSERT", "DELETE", "HOME", "END",
-    "PAGEUP", "PAGEDOWN", "UP", "DOWN", "LEFT", "RIGHT", "CAPSLOCK", "NUMLOCK", "PRINTSCREEN",
-    "`", "-", "=", "[", "]", "\\", ";", "'", ",", ".", "/",
-    "BUTTON3", "BUTTON4", "BUTTON5", "MOUSEWHEELUP", "MOUSEWHEELDOWN",
-    "NUMPADPLUS", "NUMPADMINUS", "NUMPADMULTIPLY", "NUMPADDIVIDE", "NUMPADDECIMAL" }
+    "PAGEUP", "PAGEDOWN", "UP", "DOWN", "LEFT", "RIGHT", "CAPSLOCK", "NUMLOCK", "SCROLLLOCK", "PAUSE",
+    "PRINTSCREEN", "`", "-", "=", "[", "]", "\\", ";", "'", ",", ".", "/",
+    "MOUSEWHEELUP", "MOUSEWHEELDOWN",
+    "NUMPADPLUS", "NUMPADMINUS", "NUMPADMULTIPLY", "NUMPADDIVIDE", "NUMPADDECIMAL", "NUMPADENTER",
+    "PADDUP", "PADDRIGHT", "PADDDOWN", "PADDLEFT", "PADLSTICK", "PADRSTICK", "PADLSHOULDER",
+    "PADRSHOULDER", "PADLTRIGGER", "PADRTRIGGER", "PADFORWARD", "PADBACK", "PADSYSTEM", "PADSOCIAL",
+    "PADLSTICKUP", "PADLSTICKRIGHT", "PADLSTICKDOWN", "PADLSTICKLEFT",
+    "PADRSTICKUP", "PADRSTICKRIGHT", "PADRSTICKDOWN", "PADRSTICKLEFT" }
 for c = 65, 90 do KEY_BASES[#KEY_BASES + 1] = string.char(c) end
 for i = 0, 9 do KEY_BASES[#KEY_BASES + 1] = tostring(i); KEY_BASES[#KEY_BASES + 1] = "NUMPAD" .. i end
-for i = 1, 12 do KEY_BASES[#KEY_BASES + 1] = "F" .. i end
-local MODIFIERS = { "", "SHIFT-", "CTRL-", "ALT-", "CTRL-SHIFT-", "ALT-SHIFT-", "ALT-CTRL-", "ALT-CTRL-SHIFT-" }
+for i = 1, 24 do KEY_BASES[#KEY_BASES + 1] = "F" .. i end
+for i = 1, 31 do KEY_BASES[#KEY_BASES + 1] = "BUTTON" .. i end
+for i = 1, 6 do KEY_BASES[#KEY_BASES + 1] = "PAD" .. i end
+for i = 1, 4 do KEY_BASES[#KEY_BASES + 1] = "PADPADDLE" .. i end
+-- Every chord of ALT, CTRL, SHIFT, META, in the client's order.
+local MODIFIERS = {}
+for mask = 0, 15 do
+    local m = ""
+    if mask % 2 >= 1 then m = m .. "ALT-" end
+    if mask % 4 >= 2 then m = m .. "CTRL-" end
+    if mask % 8 >= 4 then m = m .. "SHIFT-" end
+    if mask >= 8 then m = m .. "META-" end
+    MODIFIERS[#MODIFIERS + 1] = m
+end
 local KEYS = {}
 for _, m in ipairs(MODIFIERS) do for _, k in ipairs(KEY_BASES) do KEYS[#KEYS + 1] = m .. k end end
 Game.KEYS = KEYS
 
 -- Every bound command with all its keys (command -> list), plus what each
 -- of those keys and of Game.KEYS does ("@" .. key -> action) (#7). nil when
--- any read fails: an incomplete map can't prove the keys were kept.
+-- any read fails: an incomplete map can't prove the keys were kept. A custom
+-- binding only on an input outside Game.KEYS stays out of reach: no client
+-- call lists bound keys.
 function Game.BindingMap()
     local ok, n = pcall(GetNumBindings)
     if not ok or type(n) ~= "number" or n < 1 or n ~= math.floor(n) then return nil end
-    local map, keys = {}, {}
+    -- `queue`: keys still to read by key; `seen`: queued once each.
+    local map, queue, seen, listed = {}, {}, {}, {}
+    local function enqueue(k)
+        if not seen[k] then seen[k] = true; queue[#queue + 1] = k end
+    end
+    local function addCommand(command)
+        local list = Game.KeysFor(command)
+        if not list then return false end
+        if #list > 0 then map[command] = list end
+        for _, k in ipairs(list) do enqueue(k) end
+        return true
+    end
     for i = 1, n do
         local okB, command = pcall(GetBinding, i)
         if not okB or type(command) ~= "string" or command == "" then return nil end
-        local list = Game.KeysFor(command)
-        if not list then return nil end
-        if #list > 0 then map[command] = list end
-        for _, k in ipairs(list) do keys[k] = true end
+        listed[command] = true
+        if not addCommand(command) then return nil end
     end
-    for _, k in ipairs(KEYS) do keys[k] = true end
-    for k in pairs(keys) do
+    for _, k in ipairs(KEYS) do enqueue(k) end
+    -- A custom command found by key adds its other keys to the queue.
+    local i = 1
+    while queue[i] do
+        local k = queue[i]
+        i = i + 1
         local action = Game.CommandOf(k)
         if action == nil then return nil end
-        if action then map["@" .. k] = action end
+        if action then
+            map["@" .. k] = action
+            if not listed[action] then
+                listed[action] = true
+                if not addCommand(action) then return nil end
+            end
+        end
     end
     return map
 end

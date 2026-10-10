@@ -109,7 +109,8 @@ There was **no `ADDON_ACTION_BLOCKED`/`FORBIDDEN`** during the run.
   untick deletes it), what a reload restores after a partial switch, and `LoadBindings(Account)`
   while Account is active (the stop path's reload; Blizzard's Keybindings Cancel does the same).
   `GetBinding(i)` lists only Bindings.xml commands: keys bound with `SetBindingClick` and the like
-  are read with `GetBindingAction(key)` over every modifier combination.
+  are read with `GetBindingAction(key)` over every ALT/CTRL/SHIFT/META chord of the keyboard, mouse
+  buttons 1-31 (Blizzard's `BindingUtil` range), the wheel and the gamepad.
 
 ### CVars
 - `cameraDistanceMaxZoomFactor`: `GetCVarInfo` returned `"1", "1.000000", isStoredServerAccount = true, false, false, false, false`.
