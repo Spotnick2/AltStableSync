@@ -149,6 +149,22 @@ Event counts: UPDATE_BINDINGS ×5, UPDATE_MACROS ×6, ACTIONBAR_SLOT_CHANGED ×2
 - **Consequence for #17/#18:** the envelope is small. A whole profile fits well under LibAccountSync's 16 KB.
 - **Measured with real loadouts on 70291 (#5, 2026-10-09):** the largest of 5 saved entries, covering every bar, encodes to **1,508 bytes** on the wire (envelope plus id and version).
 
+## Build 1.60.1.70338 (2026-10-11) - client update, covered by in-game use
+
+The client was built on Oct 9, 2026, interface 16001, `WOW_PROJECT_ID` 18.
+
+**Dump diff against 70334** (`Compare-Dumps.ps1`): the documented surface is **identical**: 6604
+functions, 1810 events, 798 tables, 7530 widget methods and 5421 namespace functions. Only the `_G`
+walks changed (+35 -0 globals, +247 -66 namespace candidates), which is other addons' noise.
+
+**Behaviour.** The `/run` lines of the 70334 section weren't re-run. The surface they cover was
+used on 70338 instead (owner, 2026-10-10/11, both accounts): Load, Save and Save As of real
+loadouts on hunters, including keys under Character bindings (#52: pet keys saved on one account,
+loaded on the other); catalog sync between the two accounts; and the `/syncprobe pet` runs in the
+"Pet bar (#47)" section (action and pet-bar cursor round trips, spellbook pickup).
+
+**Verdict:** nothing this addon depends on changed. `MEASURED_ON_BUILD` is now 70338.
+
 ## Build 1.60.1.70334 (2026-10-10) - client update, re-checked by hand
 
 The client was built on Oct 9, 2026, interface 16001.
