@@ -80,8 +80,11 @@ they were, and `/altsync status` shows it.
 ## Bars, stances and forms
 
 A loadout's actions cover Action Bars 1–8 (both pages of Action Bar 1) and the four stance/form pages,
-hidden bars included (measured on 70291, #5). Its **keys** still cover Action Bar 1's buttons only
-(`ACTIONBUTTON1–12`); keys for the other bars come with #7. Stance and form pages are written by slot whatever form the
+hidden bars included (measured on 70291, #5). Its **keys** cover Action Bar 1's buttons
+(`ACTIONBUTTON1–12`) and the pet bar's (`BONUSACTIONBUTTON1–10`, "Pet bar button 1–10" in the preview,
+#47); keys for the other bars come with #7. Saving a loadout made before the pet keys adds this
+character's pet keys and lists them as added. If the last Load was by a build without them, Save keeps
+the loadout's pet keys and says to load it again first. Stance and form pages are written by slot whatever form the
 character is in; changing form never saves or loads anything. The preview names them "Stance/form
 page 1–4" until a character with forms measures which is which (`/syncprobe bars <label>` in each
 form).

@@ -22,6 +22,17 @@
                                    e.g. "bear" or "page2" (each label is kept separately)
         /syncprobe bars write <n>  #5: write a test spell into slot n ONLY if it is empty, read it
                                    back, take it off again, verify slot and cursor are empty
+        /syncprobe pet [label]     #47: pet family/name/GUID, pet bar 1-10, pet spellbook, autocast,
+                                   BONUSACTIONBUTTON keys; compares with the last read of the same
+                                   pet and the same family (dismiss/resummon, swap, full exit)
+        /syncprobe pet swap <a> <b>  swap two filled pet slots by code, read back, swap back
+        /syncprobe pet write <n> [book]  put a pet ability into EMPTY pet slot n, read back, remove it
+        /syncprobe pet move <j> <i>  move filled slot j into EMPTY slot i (two calls), back, then
+                                   pick j up and put it straight back
+        /syncprobe pet readd <n>   take the ability in slot n off the bar and put it back from the
+                                   pet spellbook; autocast before/after (run with autocast ON and OFF)
+        /syncprobe pet autocast <n> [book]  toggle autocast on slot n, read it, toggle it back
+                                   (book: through C_SpellBook.SetSpellBookItemAutoCastEnabled)
         /syncprobe macro           create the test character macro (restart test)
         /syncprobe bind            bind CTRL-SHIFT-F11 in the CHARACTER binding set (restart test)
         /syncprobe cvar            write a marker CVar (restart test)
@@ -677,6 +688,402 @@ function P.bars(rest)
 end
 
 ----------------------------------------------------------------------------
+-- Pet bar (#47): what identifies a pet and its abilities, whether the
+-- server keeps the bar per pet, and whether code can move pet actions.
+-- Read-only except "swap", "write" and "autocast", which undo themselves
+-- and verify the undo.
+----------------------------------------------------------------------------
+
+local PET_BANK = Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Pet
+local PET_SLOTS = 10
+
+local function PetSlot(i)
+    local ok, name, texture, isToken, isActive, acAllowed, acEnabled, spellID = pcall(GetPetActionInfo, i)
+    if not ok or name == nil then return nil end
+    return { name = name, texture = texture, token = isToken and true or false, active = isActive,
+             acAllowed = acAllowed and true or false, acEnabled = acEnabled and true or false,
+             spellID = spellID }
+end
+
+local function SlotSig(s)
+    if not s then return "-" end
+    return ("%s|%s|%s|ac=%s"):format(tostring(s.name), tostring(s.token), tostring(s.spellID), tostring(s.acEnabled))
+end
+
+local function PetBar()
+    local bar = {}
+    for i = 1, PET_SLOTS do bar[i] = SlotSig(PetSlot(i)) end
+    return bar
+end
+
+local function PetKey()
+    local okF, fname, fid = pcall(UnitCreatureFamily, "pet")
+    local okN, pname = pcall(UnitName, "pet")
+    return okF and fid or nil, okF and fname or nil, okN and pname or nil
+end
+
+local function CursorPet()
+    local ok, kind, a = pcall(GetCursorInfo)
+    if not ok then return "THREW" end
+    return kind, a
+end
+
+local function PetRead(label)
+    Section("pet read  (" .. tostring(label) .. ")")
+    Call("UnitExists(\"pet\")", UnitExists, "pet")
+    Call("UnitName(\"pet\")", UnitName, "pet")
+    Call("UnitCreatureFamily(\"pet\")", UnitCreatureFamily, "pet")
+    Call("UnitCreatureType(\"pet\")", UnitCreatureType, "pet")
+    Call("UnitGUID(\"pet\")", UnitGUID, "pet")
+    Call("UnitLevel(\"pet\")", UnitLevel, "pet")
+    Call("PetHasActionBar()", PetHasActionBar)
+    Call("HasPetUI()", HasPetUI)
+    Call("C_SpellBook.HasPetSpells()", C_SpellBook and C_SpellBook.HasPetSpells)
+    Call("C_PetInfo.GetPetTalentTree()", C_PetInfo and C_PetInfo.GetPetTalentTree)
+    Call("GetLocale()", GetLocale)
+
+    Record(" ")
+    Record("-- pet bar: GetPetActionInfo(i) = name, texture, isToken, isActive, acAllowed, acEnabled, spellID, ...")
+    for i = 1, PET_SLOTS do
+        Call(("GetPetActionInfo(%d)"):format(i), GetPetActionInfo, i)
+        local s = PetSlot(i)
+        if s and s.spellID then
+            Call(("  FindBaseSpellByID(%s)"):format(s.spellID), FindBaseSpellByID, s.spellID)
+            Call(("  C_Spell.GetSpellName(%s)"):format(s.spellID), C_Spell and C_Spell.GetSpellName, s.spellID)
+            Call(("  C_Spell.GetSpellSubtext(%s)"):format(s.spellID), C_Spell and C_Spell.GetSpellSubtext, s.spellID)
+        end
+        Call(("  C_ActionBar.IsAutoCastPetAction(%d)"):format(i), C_ActionBar and C_ActionBar.IsAutoCastPetAction, i)
+        Call(("  GetBindingKey(BONUSACTIONBUTTON%d)"):format(i), GetBindingKey, "BONUSACTIONBUTTON" .. i)
+        local b = _G["PetActionButton" .. i]
+        Record(("  %-42s %s"):format("PetActionButton" .. i, b and ("exists, action " .. ValStr(b.action or (b.GetID and b:GetID()))) or "ABSENT"))
+    end
+
+    Record(" ")
+    Record("-- pet spellbook (bank " .. ValStr(PET_BANK) .. ")")
+    local okN, n = pcall(C_SpellBook.HasPetSpells)
+    if PET_BANK and okN and type(n) == "number" then
+        for i = 1, n do
+            local okI, info = pcall(C_SpellBook.GetSpellBookItemInfo, i, PET_BANK)
+            if okI and type(info) == "table" then
+                Record(("  book %2d  %-24s sub=%-10s spell=%s action=%s type=%s passive=%s"):format(i,
+                    tostring(info.name), ValStr(info.subName), tostring(info.spellID), tostring(info.actionID),
+                    tostring(info.itemType), tostring(info.isPassive)))
+                if info.actionID then
+                    Call(("    C_PetInfo.GetSpellForPetAction(%s)"):format(info.actionID),
+                        C_PetInfo and C_PetInfo.GetSpellForPetAction, info.actionID)
+                end
+                Call("    GetSpellBookItemAutoCast", C_SpellBook.GetSpellBookItemAutoCast, i, PET_BANK)
+            else
+                Record(("  book %2d  THREW/none: %s"):format(i, ValStr(info)))
+            end
+        end
+    else
+        Record("  no pet spells (HasPetSpells " .. ValStr(n) .. ")")
+    end
+
+    -- Persistence: compare with the last read of this same pet (by GUID-less key:
+    -- family + pet name), and with the last read of the same family.
+    local fid, fname, pname = PetKey()
+    if fid or fname then
+        local db = CharDB()
+        db.pet = db.pet or { byPet = {}, byFamily = {} }
+        local bar = PetBar()
+        local petKey = tostring(fid or fname) .. ":" .. tostring(pname)
+        local function compare(what, prev)
+            if not prev then Record(("%-44s first read"):format(what)); return end
+            local diffs = {}
+            for i = 1, PET_SLOTS do
+                if prev.bar[i] ~= bar[i] then diffs[#diffs + 1] = ("slot %d: %s -> %s"):format(i, prev.bar[i], bar[i]) end
+            end
+            Record(("%-44s %s (last read %s, pet %s, build %s)"):format(what,
+                #diffs == 0 and "SAME" or (#diffs .. " slot(s) differ"), prev.at, tostring(prev.pet), tostring(prev.build)))
+            for _, d in ipairs(diffs) do Record("    " .. d) end
+        end
+        Record(" ")
+        compare("vs last read of THIS pet", db.pet.byPet[petKey])
+        compare("vs last read of this FAMILY", db.pet.byFamily[tostring(fid or fname)])
+        local snap = { at = Stamp(), build = Build(), pet = pname, family = fname, bar = bar }
+        db.pet.byPet[petKey] = snap
+        db.pet.byFamily[tostring(fid or fname)] = snap
+    end
+end
+
+-- Swap two filled pet slots with PickupPetAction, read back, swap back.
+local function PetSwap(a, b)
+    Section(("pet swap  (slots %s and %s, then back)"):format(tostring(a), tostring(b)))
+    if not (a and b and a ~= b and a >= 1 and b >= 1 and a <= PET_SLOTS and b <= PET_SLOTS) then
+        Record("usage: /syncprobe pet swap <a> <b>   two different FILLED slots 1-10"); return
+    end
+    if InCombatLockdown() then Record("out of combat only"); return end
+    if GetCursorInfo() then Record("cursor is not empty - put it down and rerun"); return end
+    if not (PetSlot(a) and PetSlot(b)) then Record("both slots must be filled; nothing moved"); return end
+    local before = PetBar()
+    local mark = #blocked
+    local function swap(step)
+        Call(step .. " PickupPetAction(" .. a .. ")", PickupPetAction, a)
+        Record(("  %-42s %s %s"):format("cursor", ValStr((CursorPet())), ValStr(select(2, CursorPet()))))
+        Call(step .. " PickupPetAction(" .. b .. ")", PickupPetAction, b)
+        Record(("  %-42s %s %s"):format("cursor", ValStr((CursorPet())), ValStr(select(2, CursorPet()))))
+        Call(step .. " PickupPetAction(" .. a .. ")", PickupPetAction, a)
+        return not GetCursorInfo()
+    end
+    local clean1 = swap("1.")
+    local mid = PetBar()
+    local swapped = mid[a] == before[b] and mid[b] == before[a]
+    Record(("%-44s %s; cursor empty: %s"):format("after swap", swapped and "SWAPPED" or "NOT swapped", tostring(clean1)))
+    for i = 1, PET_SLOTS do if mid[i] ~= before[i] then Record(("    slot %d: %s -> %s"):format(i, before[i], mid[i])) end end
+    if not clean1 then
+        Record("cursor still holds something - NOT continuing; drop it into the empty pet slot by hand")
+        Record(("%-44s %s"):format("ADDON_ACTION_BLOCKED/FORBIDDEN", TaintSince(mark)))
+        return
+    end
+    if swapped then
+        local clean2 = swap("2.")
+        local after = PetBar()
+        local same = true
+        for i = 1, PET_SLOTS do if after[i] ~= before[i] then same = false end end
+        Record(("%-44s %s; cursor empty: %s"):format("after swap back", same and "OK - bar as before" or "DIFFERS - check by hand", tostring(clean2)))
+    end
+    Record(("%-44s %s"):format("ADDON_ACTION_BLOCKED/FORBIDDEN", TaintSince(mark)))
+end
+
+-- Place a pet spellbook ability into an EMPTY pet slot, read back, remove it.
+local function PetWrite(slot, bookIndex)
+    Section(("pet write  (slot %s, EMPTY only)"):format(tostring(slot)))
+    if not (slot and slot >= 1 and slot <= PET_SLOTS) then
+        Record("usage: /syncprobe pet write <empty slot 1-10> [pet book index]"); return
+    end
+    if InCombatLockdown() then Record("out of combat only"); return end
+    if GetCursorInfo() then Record("cursor is not empty - put it down and rerun"); return end
+    if PetSlot(slot) then Record("slot " .. slot .. " is not empty; nothing written"); return end
+    if not PET_BANK then Record("Enum.SpellBookSpellBank.Pet absent"); return end
+    local okN, n = pcall(C_SpellBook.HasPetSpells)
+    if not okN or type(n) ~= "number" or n < 1 then Record("no pet spells"); return end
+    local pick
+    for i = 1, n do
+        local okI, info = pcall(C_SpellBook.GetSpellBookItemInfo, i, PET_BANK)
+        if okI and type(info) == "table" and (bookIndex == nil or i == bookIndex) and not info.isPassive then
+            pick = { index = i, name = info.name, spellID = info.spellID }; break
+        end
+    end
+    if not pick then Record("no matching non-passive pet book entry"); return end
+    Record(("%-44s book %d %q spell %s"):format("picking", pick.index, tostring(pick.name), tostring(pick.spellID)))
+    local before = PetBar()
+    local mark = #blocked
+    Call("C_SpellBook.PickupSpellBookItem(i, Pet)", C_SpellBook.PickupSpellBookItem, pick.index, PET_BANK)
+    Record(("  %-42s %s %s"):format("cursor", ValStr((CursorPet())), ValStr(select(2, CursorPet()))))
+    if not GetCursorInfo() then
+        Record("nothing on the cursor - stopped, nothing written")
+        Record(("%-44s %s"):format("ADDON_ACTION_BLOCKED/FORBIDDEN", TaintSince(mark)))
+        return
+    end
+    Call("PickupPetAction(slot) [place]", PickupPetAction, slot)
+    local leftover = GetCursorInfo()
+    local mid = PetBar()
+    Record(("%-44s %s; cursor after place: %s"):format("slot now", mid[slot], ValStr(leftover)))
+    for i = 1, PET_SLOTS do
+        if i ~= slot and mid[i] ~= before[i] then Record(("    ALSO changed slot %d: %s -> %s"):format(i, before[i], mid[i])) end
+    end
+    if leftover then ClearCursor() end
+    if PetSlot(slot) then
+        Call("PickupPetAction(slot) [take off]", PickupPetAction, slot)
+        Record(("  %-42s %s %s"):format("cursor", ValStr((CursorPet())), ValStr(select(2, CursorPet()))))
+        ClearCursor()
+    end
+    local after = PetBar()
+    local same = true
+    for i = 1, PET_SLOTS do if after[i] ~= before[i] then same = false end end
+    Record(("%-44s %s; cursor empty: %s"):format("after removal", same and "OK - bar as before" or "DIFFERS - check by hand",
+        tostring(not GetCursorInfo())))
+    Record(("%-44s %s"):format("ADDON_ACTION_BLOCKED/FORBIDDEN", TaintSince(mark)))
+end
+
+-- Move a filled slot into an EMPTY one with two calls, read back, move it back.
+-- Then pick the same slot up and put it straight back (the recovery step).
+local function PetMove(from, to)
+    Section(("pet move  (slot %s into EMPTY slot %s, then back)"):format(tostring(from), tostring(to)))
+    if not (from and to and from ~= to and from >= 1 and to >= 1 and from <= PET_SLOTS and to <= PET_SLOTS) then
+        Record("usage: /syncprobe pet move <filled slot> <empty slot>"); return
+    end
+    if InCombatLockdown() then Record("out of combat only"); return end
+    if GetCursorInfo() then Record("cursor is not empty - put it down and rerun"); return end
+    if not PetSlot(from) then Record("slot " .. from .. " is empty; nothing moved"); return end
+    if PetSlot(to) then Record("slot " .. to .. " is not empty; nothing moved"); return end
+    local before = PetBar()
+    local mark = #blocked
+    local function cursor(label)
+        Record(("  %-42s %s %s"):format("cursor " .. label, ValStr((CursorPet())), ValStr(select(2, CursorPet()))))
+    end
+    local function stop(msg)
+        Record(msg .. " - stopped; if the cursor holds something, drop it into the empty pet slot by hand")
+        Record(("%-44s %s"):format("ADDON_ACTION_BLOCKED/FORBIDDEN", TaintSince(mark)))
+    end
+    -- 1. The two-call move.
+    Call("PickupPetAction(from)", PickupPetAction, from); cursor("after pickup")
+    Call("PickupPetAction(to)", PickupPetAction, to); cursor("after drop")
+    local mid = PetBar()
+    local moved = mid[to] == before[from] and mid[from] == "-" and not GetCursorInfo()
+    Record(("%-44s %s"):format("move into empty slot", moved and "MOVED (source empty, cursor empty)" or "NOT as expected"))
+    for i = 1, PET_SLOTS do if mid[i] ~= before[i] then Record(("    slot %d: %s -> %s"):format(i, before[i], mid[i])) end end
+    if GetCursorInfo() then return stop("cursor not empty after the move") end
+    -- 2. Move it back the same way.
+    if moved then
+        Call("PickupPetAction(to) [back]", PickupPetAction, to); cursor("after pickup")
+        Call("PickupPetAction(from) [back]", PickupPetAction, from); cursor("after drop")
+        if GetCursorInfo() then return stop("cursor not empty after moving back") end
+    end
+    -- 3. Put back into its own slot: pick up `from`, drop on `from`.
+    local mid2 = PetBar()
+    Call("PickupPetAction(from) [lift]", PickupPetAction, from); cursor("after lift")
+    Call("PickupPetAction(from) [put back]", PickupPetAction, from); cursor("after put back")
+    local after = PetBar()
+    local same = true
+    for i = 1, PET_SLOTS do if after[i] ~= before[i] then same = false end end
+    Record(("%-44s %s"):format("put back into its own slot", mid2[from] == after[from] and not GetCursorInfo() and "OK" or "NOT as expected"))
+    Record(("%-44s %s; cursor empty: %s"):format("bar at the end", same and "OK - as before" or "DIFFERS - check by hand", tostring(not GetCursorInfo())))
+    for i = 1, PET_SLOTS do if after[i] ~= before[i] then Record(("    slot %d: %s -> %s"):format(i, before[i], after[i])) end end
+    Record(("%-44s %s"):format("ADDON_ACTION_BLOCKED/FORBIDDEN", TaintSince(mark)))
+end
+
+-- Remove an autocast ability from slot n and put it back from the pet
+-- spellbook: does its autocast state survive? Run once with autocast ON and
+-- once with it OFF (right-click the button to change it by hand first).
+local function PetReadd(slot)
+    Section(("pet readd  (slot %s: remove, put back from the book, autocast before/after)"):format(tostring(slot)))
+    if not (slot and slot >= 1 and slot <= PET_SLOTS) then Record("usage: /syncprobe pet readd <slot 1-10>"); return end
+    if InCombatLockdown() then Record("out of combat only"); return end
+    if GetCursorInfo() then Record("cursor is not empty - put it down and rerun"); return end
+    local s = PetSlot(slot)
+    if not (s and s.spellID and s.acAllowed) then Record("slot " .. slot .. " needs an ability that can autocast"); return end
+    local okN, n = pcall(C_SpellBook.HasPetSpells)
+    local index
+    for i = 1, (okN and type(n) == "number") and n or 0 do
+        local okI, info = pcall(C_SpellBook.GetSpellBookItemInfo, i, PET_BANK)
+        if okI and type(info) == "table" and info.spellID == s.spellID then index = i end
+    end
+    if not index then Record("no pet book entry with spell " .. tostring(s.spellID) .. "; nothing removed"); return end
+    local function book(label)
+        local ok, allowed, enabled = pcall(C_SpellBook.GetSpellBookItemAutoCast, index, PET_BANK)
+        Record(("%-44s allowed %s enabled %s"):format("book autocast " .. label, ValStr(ok and allowed), ValStr(ok and enabled)))
+        return ok and enabled
+    end
+    local before = PetBar()
+    local mark = #blocked
+    Record(("%-44s %s, book %d, slot autocast %s"):format("ability", tostring(s.name), index, tostring(s.acEnabled)))
+    local was = book("before")
+    -- Each step is checked before the next write; a failure stops with the
+    -- cursor as it is and says how to put the bar back.
+    local function stop(msg)
+        Record(msg)
+        Record(("%-44s %s"):format("ADDON_ACTION_BLOCKED/FORBIDDEN", TaintSince(mark)))
+        SlashCmdList.ALTSTABLESYNCPROBE("copy")
+    end
+    local function cursor()
+        local kind, id = CursorPet()
+        Record(("  %-42s %s %s"):format("cursor", ValStr(kind), ValStr(id)))
+        return kind, id
+    end
+    -- 1. Remove: the slot must be empty and the cursor must hold this ability.
+    Call("PickupPetAction(slot) [remove]", PickupPetAction, slot)
+    local kind, id = cursor()
+    Record(("%-44s %s"):format("slot after remove", PetBar()[slot]))
+    if PetSlot(slot) or kind ~= "petaction" or id ~= s.spellID then
+        return stop(("remove NOT as expected - stopped. If the cursor holds something, drop it into slot %d; "
+            .. "if slot %d is empty, drag %s from the pet spellbook into it"):format(slot, slot, tostring(s.name)))
+    end
+    pcall(ClearCursor)
+    if GetCursorInfo() then
+        return stop(("cursor didn't clear - stopped; drop it into slot %d"):format(slot))
+    end
+    book("while off the bar")
+    -- 2. Pick it up from the book.
+    Call("C_SpellBook.PickupSpellBookItem(book, Pet)", C_SpellBook.PickupSpellBookItem, index, PET_BANK)
+    kind = cursor()
+    if kind ~= "petaction" then
+        return stop(("book pickup NOT as expected - stopped. Slot %d is empty: drag %s from the pet spellbook "
+            .. "into it%s"):format(slot, tostring(s.name), kind and ", after putting down what the cursor holds" or ""))
+    end
+    -- 3. Put it back: the slot must hold this ability and the cursor be empty.
+    Call("PickupPetAction(slot) [put back]", PickupPetAction, slot)
+    local back = PetSlot(slot)
+    if GetCursorInfo() or not (back and back.spellID == s.spellID) then
+        return stop(("put-back NOT as expected (slot %d: %s) - stopped. Drop what the cursor holds into slot %d, "
+            .. "or drag %s from the pet spellbook into it"):format(slot, SlotSig(back), slot, tostring(s.name)))
+    end
+    Record(("%-44s %s"):format("slot right after", PetBar()[slot]))
+    book("right after")
+    C_Timer.After(1, function()
+        local after = PetBar()
+        local now = book("1 s after")
+        Record(("%-44s %s"):format("slot 1 s after", after[slot]))
+        local same = true
+        for i = 1, PET_SLOTS do if after[i] ~= before[i] then same = false end end
+        Record(("%-44s %s"):format("autocast survived", now == was and "YES" or "NO - check the button"))
+        Record(("%-44s %s"):format("bar", same and "OK - as before" or "DIFFERS - check by hand"))
+        Record(("%-44s %s"):format("ADDON_ACTION_BLOCKED/FORBIDDEN", TaintSince(mark)))
+        SlashCmdList.ALTSTABLESYNCPROBE("copy")
+    end)
+end
+
+-- Toggle autocast on one slot, read it now and a second later, toggle back.
+-- "book": the same toggle through the pet spellbook entry with this slot's spell.
+local function PetAutocast(slot, how)
+    Section(("pet autocast  (slot %s, toggled and back)"):format(tostring(slot)))
+    if not (slot and slot >= 1 and slot <= PET_SLOTS) then Record("usage: /syncprobe pet autocast <slot 1-10>"); return end
+    if InCombatLockdown() then Record("out of combat only"); return end
+    local s = PetSlot(slot)
+    if not (s and s.acAllowed) then Record("slot " .. slot .. " has no autocast ability"); return end
+    local was = s.acEnabled
+    local mark = #blocked
+    Record(("%-44s %s"):format("autocast before", tostring(was)))
+    local toggle
+    if how == "book" then
+        local okN, n = pcall(C_SpellBook.HasPetSpells)
+        local index
+        for i = 1, (okN and type(n) == "number") and n or 0 do
+            local okI, info = pcall(C_SpellBook.GetSpellBookItemInfo, i, PET_BANK)
+            if okI and type(info) == "table" and info.spellID == s.spellID then index = i end
+        end
+        if not index then Record("no pet book entry with spell " .. tostring(s.spellID)); return end
+        Record(("%-44s book %d"):format("via C_SpellBook, entry", index))
+        toggle = function(label)
+            Call("SetSpellBookItemAutoCastEnabled" .. label, C_SpellBook.SetSpellBookItemAutoCastEnabled,
+                index, PET_BANK, not (PetSlot(slot) or {}).acEnabled)
+        end
+    else
+        toggle = function(label) Call("TogglePetAutocast(slot)" .. label, TogglePetAutocast, slot) end
+    end
+    toggle("")
+    Record(("%-44s %s"):format("right after toggle", tostring((PetSlot(slot) or {}).acEnabled)))
+    C_Timer.After(1, function()
+        local now = (PetSlot(slot) or {}).acEnabled
+        Record(("%-44s %s"):format("1 s after toggle", tostring(now)))
+        if now ~= was then
+            toggle(" [back]")
+        end
+        C_Timer.After(1, function()
+            local back = (PetSlot(slot) or {}).acEnabled
+            Record(("%-44s %s (%s)"):format("1 s after toggling back", tostring(back), back == was and "OK - as before" or "DIFFERS - check by hand"))
+            Record(("%-44s %s"):format("ADDON_ACTION_BLOCKED/FORBIDDEN", TaintSince(mark)))
+            SlashCmdList.ALTSTABLESYNCPROBE("copy")
+        end)
+    end)
+end
+
+-- Returns the label this run is kept under.
+function P.pet(rest)
+    local sub, a, b = (rest or ""):match("^%s*(%S*)%s*(%S*)%s*(%S*)")
+    if sub == "swap" then PetSwap(tonumber(a), tonumber(b)); return "pet swap" end
+    if sub == "write" then PetWrite(tonumber(a), tonumber(b)); return "pet write" end
+    if sub == "move" then PetMove(tonumber(a), tonumber(b)); return "pet move" end
+    if sub == "readd" then PetReadd(tonumber(a)); return "pet readd " .. tostring((PetSlot(tonumber(a) or 0) or {}).acEnabled) end
+    if sub == "autocast" then PetAutocast(tonumber(a), b); return "pet autocast " .. tostring(b) end
+    local label = sub ~= "" and sub or (select(3, PetKey()) or "nopet")
+    PetRead(label)
+    return "pet " .. label
+end
+
+----------------------------------------------------------------------------
 -- Restart tests: macro, binding, CVar. Each records a marker ONLY after the
 -- write is verified; /syncprobe restart reads it after a FULL EXIT;
 -- /syncprobe clean undoes only what the probe recorded, verifies each undo,
@@ -973,7 +1380,7 @@ SlashCmdList.ALTSTABLESYNCPROBE = function(msg)
     elseif P[cmd] then
         Run(cmd)
     else
-        Out("/syncprobe [client|actions|ranks|login|editmode|encoding] | place | bars [label|write <n>] | macro | bind | cvar | restart | clean | copy")
+        Out("/syncprobe [client|actions|ranks|login|editmode|encoding] | place | bars [label|write <n>] | pet [swap a b|move j i|write n|readd n|autocast n] | macro | bind | cvar | restart | clean | copy")
         return
     end
     Persist(label or cmd)

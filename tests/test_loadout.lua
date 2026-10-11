@@ -2699,4 +2699,103 @@ do
     eq("#7: failure leaves the unsaved flag", A.char.bindingsUnsaved, true)
 end
 
+-- #47 PR A: the pet bar's keys (BONUSACTIONBUTTON1-10) travel with a loadout.
+do
+    local PET = "BONUSACTIONBUTTON1"
+    boot(); ready(); alt()
+    G.keys["CTRL-1"] = PET
+    local cap = L.Capture()
+    eq("#47: capture has the pet key", cap.bindings[PET] and cap.bindings[PET][1], "CTRL-1")
+    eq("#47: capture lists every pet button", cap.bindings.BONUSACTIONBUTTON10 and #cap.bindings.BONUSACTIONBUTTON10, 0)
+    eq("#47: label", A.Game.CommandLabel("BONUSACTIONBUTTON10"), "Pet bar button 10")
+    eq("#47: other commands keep their name", A.Game.CommandLabel("ACTIONBUTTON3"), "ACTIONBUTTON3")
+
+    -- Load sets a pet key under Character bindings, named in the preview.
+    local e = custom({ bindings = { [PET] = { "CTRL-1" } } })
+    alt({ keys = {} })
+    local plan = L.Plan(e)
+    local text = table.concat(A.Commands.Describe(plan), "\n")
+    check("#47: preview names the pet button", text:find("CTRL-1: unbound -> Pet bar button 1", 1, true) ~= nil, text)
+    L.Load(e, plan)
+    eq("#47: pet key loaded", G.keys["CTRL-1"], PET)
+    -- Account bindings: blocked like the main bar's keys.
+    alt({ keys = {}, bindingSet = 1 })
+    plan = L.Plan(e)
+    check("#47: blocked under Account bindings", (plan.blocked or ""):find("character%-specific") ~= nil, tostring(plan.blocked))
+    -- An entry that binds one key to a main and a pet button doesn't load its keys.
+    local dup = custom({ bindings = { ACTIONBUTTON1 = { "CTRL-1" }, [PET] = { "CTRL-1" } } })
+    alt({ keys = {} })
+    check("#47: duplicate in the entry: keys blocked", (L.Plan(dup).keysBlocked or ""):find("CTRL-1 twice", 1, true) ~= nil)
+
+    -- Merge, pure. B has keys but no pet commands (saved before this build).
+    local main = { ACTIONBUTTON1 = { "1" } }
+    local function mrec(b, a) return { baseline = { cover = FULL, actions = {}, bindings = b },
+                                       after = { cover = FULL, actions = {}, bindings = a } } end
+    local function cur(keys, actions) return { actions = actions or {}, macros = {}, bindings = keys } end
+    local out = L.Merge(mrec(main, { ACTIONBUTTON1 = { "1" }, [PET] = { "CTRL-1" } }),
+                        cur({ ACTIONBUTTON1 = { "1" }, [PET] = { "CTRL-1" } }), true)
+    eq("#47 old entry: pet key added", out and out.modules.bindings[PET] and out.modules.bindings[PET][1], "CTRL-1")
+    eq("#47 old entry: listed as added", out and out.keysAdded[1], PET)
+    eq("#47 old entry: not listed as changed", out and #out.keysChanged, 0)
+    check("#47 old entry: not a no-op", out and not out.noop)
+    -- Same, from a comparison taken by an older build (no pet command in A).
+    out = L.Merge(mrec(main, { ACTIONBUTTON1 = { "1" } }), cur({ ACTIONBUTTON1 = { "1" }, [PET] = { "CTRL-1" } }), true)
+    eq("#47 old entry, old A: pet key added", out and out.modules.bindings[PET] and out.modules.bindings[PET][1], "CTRL-1")
+    eq("#47 old entry, old A: comparison advances", out and out.advanced.bindings[PET] and out.advanced.bindings[PET][1], "CTRL-1")
+    -- An unbound pet button adds nothing: an unchanged old entry stays a no-op.
+    out = L.Merge(mrec(main, { ACTIONBUTTON1 = { "1" } }), cur({ ACTIONBUTTON1 = { "1" }, [PET] = {} }), true)
+    check("#47 old entry, no pet keys: no-op", out and out.noop)
+    eq("#47 old entry, no pet keys: nothing added", out and out.modules.bindings[PET], nil)
+    -- An entry with no keys at all stays keyless.
+    out = L.Merge({ baseline = { cover = FULL, actions = {} }, after = { cover = FULL, actions = {}, bindings = { [PET] = { "CTRL-1" } } } },
+                  cur({ [PET] = { "CTRL-1" } }), true)
+    check("#47 keyless entry: no-op", out and out.noop)
+
+    -- B has the pet key, A doesn't (loaded by an older build): B kept, noted,
+    -- and the comparison stays absent across two Saves.
+    local bP = { ACTIONBUTTON1 = { "1" }, [PET] = { "CTRL-1" } }
+    local r1 = mrec(bP, { ACTIONBUTTON1 = { "1" } })
+    out = L.Merge(r1, cur({ ACTIONBUTTON1 = { "1" }, [PET] = { "ALT-1" } }, { [1] = { kind = "item", id = 5 } }), true)
+    eq("#47 old A: B's pet key kept", out and out.modules.bindings[PET][1], "CTRL-1")
+    eq("#47 old A: the bar edit saved", out and out.modules.actions[1] and out.modules.actions[1].id, 5)
+    check("#47 old A: noted", out and out.notes[1] and out.notes[1]:find("1 key differs", 1, true) ~= nil, out and out.notes[1])
+    eq("#47 old A: comparison stays absent", out and out.advanced.bindings[PET], nil)
+    local r2 = { baseline = { cover = FULL, actions = out.modules.actions, bindings = out.modules.bindings },
+                 after = { cover = FULL, actions = out.advanced.actions, bindings = out.advanced.bindings } }
+    out = L.Merge(r2, cur({ ACTIONBUTTON1 = { "1" }, [PET] = { "ALT-2" } }, { [1] = { kind = "item", id = 5 } }), true)
+    eq("#47 second Save: B's pet key kept", out and out.modules.bindings[PET][1], "CTRL-1")
+    check("#47 second Save: noted again", out and out.notes[1] and out.notes[1]:find("1 key differs", 1, true) ~= nil, out and out.notes[1])
+    eq("#47 second Save: still no comparison", out and out.advanced.bindings[PET], nil)
+    -- Unchanged pet key with an old A: no note.
+    out = L.Merge(r1, cur({ ACTIONBUTTON1 = { "1" }, [PET] = { "CTRL-1" } }), true)
+    check("#47 old A, unchanged: no-op, no note", out and out.noop and #out.notes == 0)
+
+    -- The usual comparison once A has the pet command.
+    out = L.Merge(mrec(bP, bP), cur({ ACTIONBUTTON1 = { "1" }, [PET] = { "ALT-1" } }), true)
+    eq("#47 compared: C saved", out and out.modules.bindings[PET][1], "ALT-1")
+    eq("#47 compared: listed as changed", out and out.keysChanged[1], PET)
+    out = L.Merge(mrec(bP, { ACTIONBUTTON1 = { "1" }, [PET] = { "ALT-1" } }), cur({ ACTIONBUTTON1 = { "1" }, [PET] = { "ALT-1" } }), true)
+    eq("#47 compared: unchanged since the load keeps B", out and out.modules.bindings[PET][1], "CTRL-1")
+    -- One key on a main and a pet button in the merged map: refused.
+    local why
+    out, why = L.Merge(mrec(bP, bP), cur({ ACTIONBUTTON1 = { "CTRL-1" }, [PET] = { "CTRL-1" } }), true)
+    eq("#47 main and pet share a key: refused", out, nil)
+    check("#47 main and pet share a key: says so", tostring(why):find("CTRL-1 would be bound twice", 1, true) ~= nil, why)
+
+    -- Through Save: an entry saved before this build, loaded now, then Save.
+    loadedAlt()
+    for _, b in ipairs({ A.Catalog.Get(entry.id).modules.bindings, rec().baseline.bindings }) do
+        for i = 1, 10 do b["BONUSACTIONBUTTON" .. i] = nil end
+    end
+    G.keys["CTRL-1"] = PET
+    A._shown = nil
+    A.Commands.save("")
+    text = table.concat(A._shown and A._shown.lines or {}, "\n")
+    check("#47 save preview: addition shown", text:find("Adds 1 key this loadout didn't have yet:", 1, true) ~= nil, text)
+    check("#47 save preview: pet button named", text:find("Pet bar button 1: CTRL-1", 1, true) ~= nil, text)
+    A._shown.onConfirm()
+    eq("#47 save: pet key in the entry", A.Catalog.Get(entry.id).modules.bindings[PET][1], "CTRL-1")
+    G.keys["CTRL-1"] = nil
+end
+
 finish("test_loadout")

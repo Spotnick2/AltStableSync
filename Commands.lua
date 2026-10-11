@@ -147,7 +147,8 @@ function Commands.Describe(plan)
     for k, v in pairs(plan.keys) do keys[#keys + 1] = { k = k, v = v } end
     table.sort(keys, function(a, b) return a.k < b.k end)
     for _, kv in ipairs(keys) do
-        lines[#lines + 1] = ("  %s: %s -> %s"):format(kv.k, kv.v.from or "unbound", kv.v.to or "unbound")
+        lines[#lines + 1] = ("  %s: %s -> %s"):format(kv.k, kv.v.from and ASS.Game.CommandLabel(kv.v.from) or "unbound",
+            kv.v.to and ASS.Game.CommandLabel(kv.v.to) or "unbound")
     end
     items = {}
     for _, s in ipairs(plan.skips) do items[#items + 1] = { slot = s.slot, text = "left unchanged: " .. tostring(s.reason) } end
@@ -327,9 +328,16 @@ function Commands.save(arg)
         items[#items + 1] = { slot = slot, text = text }
     end
     BySlot(lines, items)
+    local Game = ASS.Game
     for _, cmd in ipairs(m.keysChanged) do
         local keys = m.modules.bindings and m.modules.bindings[cmd] or {}
-        lines[#lines + 1] = ("  %s: %s"):format(cmd, #keys > 0 and table.concat(keys, ", ") or "unbound")
+        lines[#lines + 1] = ("  %s: %s"):format(Game.CommandLabel(cmd), #keys > 0 and table.concat(keys, ", ") or "unbound")
+    end
+    if #(m.keysAdded or {}) > 0 then
+        lines[#lines + 1] = ("Adds %s this loadout didn't have yet:"):format(Plural(#m.keysAdded, "key"))
+        for _, cmd in ipairs(m.keysAdded) do
+            lines[#lines + 1] = ("  %s: %s"):format(Game.CommandLabel(cmd), table.concat(m.modules.bindings[cmd], ", "))
+        end
     end
     if #m.kept > 0 then
         lines[#lines + 1] = ("Keeping %s this character can't use:"):format(Plural(#m.kept, "entry"):gsub("entrys", "entries"))

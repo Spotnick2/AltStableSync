@@ -4,7 +4,7 @@
 -- The agreed slice scope is issue #4's "Agreed slice scope" comment; the rules
 -- are docs/DESIGN.md's safety model. In short:
 --   - target set: the measured action slots (Game.SLOT_RANGES, #5), the
---     bindings of ACTIONBUTTON1-12, and the character macros those slots need;
+--     bindings of ACTIONBUTTON1-12 and the pet bar's BONUSACTIONBUTTON1-10, and the character macros those slots need;
 --   - Plan only reads; Load and Restore write, and only after the player
 --     confirmed a preview of exactly the plan that is applied: the whole plan
 --     is compared at confirmation, and any difference refuses;
@@ -947,7 +947,7 @@ function Loadout.Merge(rec, current, characterBindings, drop)
     -- Keys: compared only against Character keys taken at a load (or a fresh
     -- Save As) under Character bindings; a Save never sets the comparison.
     local bB, aB, cB = B.bindings, A.bindings, current.bindings or {}
-    local notes, bindings, advB, keysChanged = {}, nil, nil, {}
+    local notes, bindings, advB, keysChanged, keysAdded = {}, nil, nil, {}, {}
     local function differs()
         for _, cmd in ipairs(Game.COMMANDS) do
             if not SameKeys(cB[cmd], bB and bB[cmd]) then return true end
@@ -969,13 +969,33 @@ function Loadout.Merge(rec, current, characterBindings, drop)
         for cmd, keys in pairs(bB or {}) do
             if not known[cmd] then bindings[cmd] = Copy(keys) end
         end
+        local uncompared = 0
         for _, cmd in ipairs(Game.COMMANDS) do
-            if SameKeys(cB[cmd], aB[cmd]) then
-                bindings[cmd] = Copy(bB and bB[cmd])
+            local b = bB and bB[cmd]
+            if bB and b == nil then
+                -- The entry has keys but predates the command (the pet bar,
+                -- #47): this character's keys are added. An entry with no
+                -- keys at all takes the comparison below.
+                if not SameKeys(cB[cmd], nil) then
+                    bindings[cmd] = Copy(cB[cmd])
+                    keysAdded[#keysAdded + 1] = cmd
+                end
+            elseif aB[cmd] == nil then
+                -- Loaded by a build that didn't compare it: B stays, and so
+                -- does the missing comparison, until a Load takes one.
+                bindings[cmd], advB[cmd] = Copy(b), nil
+                if not SameKeys(cB[cmd], b) then uncompared = uncompared + 1 end
+            elseif SameKeys(cB[cmd], aB[cmd]) then
+                bindings[cmd] = Copy(b)
             else
                 bindings[cmd] = Copy(cB[cmd])
-                if not SameKeys(cB[cmd], bB and bB[cmd]) then keysChanged[#keysChanged + 1] = cmd end
+                if not SameKeys(cB[cmd], b) then keysChanged[#keysChanged + 1] = cmd end
             end
+        end
+        if uncompared > 0 then
+            notes[#notes + 1] = (uncompared == 1
+                and "1 key differs from the loadout but wasn't loaded by this version, so it isn't saved: load the loadout again to save it."
+                or ("%d keys differ from the loadout but weren't loaded by this version, so they aren't saved: load the loadout again to save them."):format(uncompared))
         end
         for cmd in pairs(bindings) do cmds[#cmds + 1] = cmd end
         table.sort(cmds)
@@ -1022,7 +1042,7 @@ function Loadout.Merge(rec, current, characterBindings, drop)
         modules = out,
         noop = Serialize(out) == Serialize(B),
         kept = kept, dropped = dropped, notes = notes,
-        changed = changed, keysChanged = keysChanged,
+        changed = changed, keysChanged = keysChanged, keysAdded = keysAdded,
         unavailable = unavailable,
         advanced = { actions = adv, macros = advMacros, bindings = advB, cover = Cover.FromSet(advSet) },
     }
