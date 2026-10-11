@@ -5,7 +5,7 @@
 -- removed Classic global is left undefined here, so code that calls one fails
 -- in the tests the way it fails in game. When a shape is in question, check
 -- docs/forever-api-notes.md (measured) and the API dump in
--- C:\Projects\References (declared). Stub fidelity is part of the review
+-- C:\Projects\WoW\References (declared). Stub fidelity is part of the review
 -- surface, not scaffolding.
 --
 -- Driven through the global WoW table:
