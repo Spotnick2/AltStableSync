@@ -1,8 +1,8 @@
 # Forever API notes — AltStableSync
 
 Facts **measured on the client** that this addon depends on. Declared shapes come from the dump
-(`C:\Projects\References\forever-api-<version>.<build>.md`); addon-agnostic findings belong in the
-canonical `C:\Projects\References\PORTING-TBC-TO-FOREVER.md`, not here.
+(`C:\Projects\WoW\References\forever-api-<version>.<build>.md`); addon-agnostic findings belong in the
+canonical `C:\Projects\WoW\References\PORTING-TBC-TO-FOREVER.md`, not here.
 
 `MEASURED_ON_BUILD` in `Core.lua` names the build this file describes: **70291**. The 70245 measurements below were
 re-checked on 70291 (see its section).
@@ -268,6 +268,36 @@ a warrior, a druid and a rogue. None of them had a second stance, a form or stea
 read or written. **Not measured yet:** which form or stance uses which of pages 7–10 (no character
 had one); the preview names them "Stance/form page 1–4". A druid, warrior or rogue that gets its form
 or stealth can confirm with `/syncprobe bars <label>` in that form.
+
+### Pet bar (#47, 2026-10-10, build 70338)
+
+Measured with `/syncprobe pet` (`Tools/AltStableSyncProbe`), out of combat, on two hunters with a bear
+each (one per account) and two warlocks with an imp each. No other family or demon was available.
+**Not measured:** other demons (Voidwalker, Succubus/Incubus, Felhunter), other hunter families, and a
+stable swap between two pets of one hunter.
+
+| Question | Measured |
+|---|---|
+| Pet type | `UnitCreatureFamily("pet")` → `"Bear", 4` and `"Imp", 23` on every character. The name is localised; **the id is the key**. |
+| Pet identity | `UnitGUID("pet")` changes on every summon and every login (`Pet-0-4615-1-548-…-0100334699` → `…-0200334699` → `Pet-0-4621-1-50543-…`): **never a key**. |
+| A slot | `GetPetActionInfo(i)`, i = 1–10 → name, texture, isToken, isActive, autoCastAllowed, autoCastEnabled, spellID, checksRange, inRange. An empty slot returns nothing or `nil` with `false` flags. |
+| Commands and stances | isToken = 1 and a fixed name: `PET_ACTION_ATTACK`, `PET_ACTION_FOLLOW`, `PET_ACTION_MOVE_TO`, `PET_MODE_ASSIST`, `PET_MODE_DEFENSIVEASSIST`, `PET_MODE_PASSIVE` (the default layout: 1–3 and 8–10, on all four). Aggressive, Attack, Stay and the others are pet spellbook entries with no spell id. |
+| Abilities | Localised name plus spell id; **each rank has its own id** and `FindBaseSpellByID` returns the id itself (Growl rank 1 2649 / rank 2 14916; Firebolt rank 1 3110 / rank 3 7800). |
+| Pets of one family differ | Bear: Growl + Claw + Bite vs Growl only. Imp level 18: Firebolt, Blood Pact, Phase Shift, Fire Shield vs level 4: Firebolt only. |
+| Pet spellbook | `C_SpellBook.HasPetSpells()` → count, `"PET"`; entries through `GetSpellBookItemInfo(i, Enum.SpellBookSpellBank.Pet)` (bank 1), sorted by name, passives included (Great Stamina, Natural Armor). |
+| Move by code | `PickupPetAction(a)`, `PickupPetAction(b)`, `PickupPetAction(a)` swaps two slots; the cursor reports `"petaction", <spell id>` (`2` for a stance); swapped back exactly, cursor empty, **no `ADDON_ACTION_BLOCKED`/`FORBIDDEN`** (bear and imp). |
+| Place from the book | `C_SpellBook.PickupSpellBookItem(i, Pet)` then `PickupPetAction(empty slot)`: placed (a stance, Aggressive), taken off again with `PickupPetAction` + `ClearCursor`, nothing blocked. |
+| Move into an empty slot (2026-10-11) | `PickupPetAction(j)`, `PickupPetAction(empty i)` moves a command (Attack, slot 1 → 7): source empty, cursor empty; moved back the same way; picking a slot up and dropping it on the same slot puts it back. The cursor reports `"petaction", 2` for a command as for a stance, so the cursor can't tell what it holds. Nothing blocked. |
+| Remove and re-place from the book (2026-10-11) | Growl (14916) taken off with `PickupPetAction` + `ClearCursor`, then `C_SpellBook.PickupSpellBookItem(book, Pet)` + `PickupPetAction(slot)`: back in its slot, and **its autocast survived both ways** (on → on, off → off, 1 s later too; the spellbook keeps the state while it is off the bar). Nothing blocked. |
+| Autocast | **Protected.** `TogglePetAutocast(slot)` and `C_SpellBook.SetSpellBookItemAutoCastEnabled` both raise `ADDON_ACTION_FORBIDDEN`; the state doesn't change. |
+| Keys | `BONUSACTIONBUTTON1–10` (here CTRL-1 … CTRL-0); `PetActionButton1–10` show pet slots 1–10. |
+| Persistence | The game keeps **each pet's own bar**: a hand-arranged bar came back unchanged after a dismiss and resummon, and after a full client exit (bear and imp). |
+
+**Consequence for #47:** the game already remembers a pet's bar on the character that owns it. What a
+loadout adds is the cross-character copy, keyed by family id; abilities match by spell across ranks,
+commands and stances by name; autocast stays as it is and the preview says so. Moves into empty slots
+and remove/re-place from the book both work and keep autocast, so a load can rearrange, empty and fill
+pet slots (measured on one bear; the ability move was measured as a swap only).
 
 ## Still open
 
