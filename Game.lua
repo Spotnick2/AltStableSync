@@ -411,3 +411,93 @@ function Game.Cursor()
     end
     return { kind = "unsupported", what = tostring(kind) }
 end
+
+------------------------------------------------------------
+-- The pet bar (#47, measured on 70338, docs/forever-api-notes.md "Pet bar")
+------------------------------------------------------------
+
+Game.PET_SLOTS = 10
+local PET_BANK = (Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Pet) or 1
+Game.PET_BANK = PET_BANK
+
+-- The pet that is out with a pet bar: { guid, family = id, familyName, name };
+-- nil when there is none, false when one is out but can't be read. The family
+-- id is the key (the name is localised); the GUID changes on every summon.
+function Game.Pet()
+    local ok, exists = pcall(UnitExists, "pet")
+    if not ok then return false end
+    if not exists then return nil end
+    local okB, hasBar = pcall(PetHasActionBar)
+    if not okB then return false end
+    if not hasBar then return nil end
+    local okF, familyName, family = pcall(UnitCreatureFamily, "pet")
+    local okG, guid = pcall(UnitGUID, "pet")
+    local okN, name = pcall(UnitName, "pet")
+    if not (okF and okG and okN) or type(family) ~= "number" or type(guid) ~= "string" or guid == ""
+        or type(name) ~= "string" or name == "" then
+        return false
+    end
+    return { guid = guid, family = family, familyName = tostring(familyName or family), name = name }
+end
+
+-- One pet slot: nil (empty) | { kind = "token", token } (a command or stance)
+-- | { kind = "spell", id, name } | { kind = "unreadable" }.
+function Game.PetSlot(i)
+    local ok, name, _, isToken, _, _, _, spellID = pcall(GetPetActionInfo, i)
+    if not ok then return { kind = "unreadable" } end
+    if name == nil then return nil end
+    if type(name) ~= "string" or name == "" then return { kind = "unreadable" } end
+    if isToken then return { kind = "token", token = name } end
+    if type(spellID) == "number" and spellID > 0 then return { kind = "spell", id = spellID, name = name } end
+    return { kind = "unreadable" }
+end
+
+-- The ten slots (false for an empty one), or nil when any slot can't be read.
+function Game.PetBar()
+    local bar = {}
+    for i = 1, Game.PET_SLOTS do
+        local s = Game.PetSlot(i)
+        if s and s.kind == "unreadable" then return nil end
+        bar[i] = s or false
+    end
+    return bar
+end
+
+-- Two pet slots hold the same thing: commands by token, abilities by id.
+function Game.SamePetSlot(a, b)
+    if not a or not b then return not a and not b end
+    if a.kind ~= b.kind then return false end
+    if a.kind == "token" then return a.token == b.token end
+    return a.id == b.id
+end
+
+-- The pet's abilities: { byId = { [id] = { index, name } }, byName = { [name]
+-- = { {id, index}, ... } }, complete }. One rank per ability (the pet's own);
+-- stances and passives aren't placeable abilities. `complete` is false when
+-- any read failed: then a missing ability isn't proof of absence.
+function Game.PetBook()
+    local book = { byId = {}, byName = {}, complete = true }
+    local ok, n = pcall(C_SpellBook.HasPetSpells)
+    if not ok or type(n) ~= "number" then book.complete = false return book end
+    for i = 1, n do
+        local okI, info = pcall(C_SpellBook.GetSpellBookItemInfo, i, PET_BANK)
+        if not okI or type(info) ~= "table" then
+            book.complete = false
+        elseif type(info.spellID) == "number" and type(info.name) == "string" and not info.isPassive then
+            book.byId[info.spellID] = { index = i, name = info.name }
+            local list = book.byName[info.name] or {}
+            list[#list + 1] = { id = info.spellID, index = i }
+            book.byName[info.name] = list
+        end
+    end
+    return book
+end
+
+-- What the cursor holds, raw: kind and first value; "unreadable" when the
+-- read fails. A pet action reads "petaction", <spell id> (a small number for
+-- a command or stance, measured), so only the kind identifies it.
+function Game.CursorRaw()
+    local ok, kind, a = pcall(GetCursorInfo)
+    if not ok then return "unreadable" end
+    return kind, a
+end

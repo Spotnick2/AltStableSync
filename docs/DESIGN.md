@@ -140,7 +140,7 @@ bus.
 
 ```lua
 AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
-  schema = 6,                       -- #27 1 -> 2, #28 2 -> 3, #5 3 -> 4, #46 4 -> 5, #7 5 -> 6; an unknown or newer schema is refused untouched
+  schema = 7,                       -- #27 1 -> 2, #28 2 -> 3, #5 3 -> 4, #46 4 -> 5, #7 5 -> 6, #47 6 -> 7; an unknown or newer schema is refused untouched
   presets = {
     [id] = {
       id = "loadout-a1b2c3d4e5f6-12",          -- kind-writer-seq: never collides across accounts or copies
@@ -156,6 +156,8 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
       modules = { actions = {...}, bindings = {...}, macros = {...},    -- loadout
                   cover = { {1, 120}, {145, 180} } }  -- the action slots captured (#5); 1-12 for older entries
                   -- a spell action from a class spellbook tab carries class = true (#46, schema 5)
+                  -- pet = { [familyId] = { family, locale, slots = { [1..10] = { kind = "token", token }
+                  --         | { kind = "spell", id, name } | false } } }: a pet bar per pet family (#47, schema 7)
              or { editmode = {...}, cvars = {...} },                    -- UI setup
       previous = { of = version, modules, updated },  -- LOCAL "undo my last Save": the content before the Save
                                                -- that produced version `of`; never sent, untouched by sync
@@ -166,7 +168,8 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
   backups = { [guid] = {                       -- exact runtime snapshots; each snapshot carries
                                                -- createdMacros = { {index, name, body}, ... }: the
                                                -- character macros the operation it preceded created
-      ring = { <up to 10, oldest evicted> },
+      ring = { <up to 10, oldest evicted> },  -- a snapshot of a pet bar write also holds
+                                               -- pet = { family, familyName, guid, name, slots } (#47)
       firstSeen = <snapshot>,                  -- pinned forever
       operation = <snapshot> | nil,            -- the interrupted operation's original backup;
   } },                                         -- pinned until it completes or is abandoned
@@ -174,13 +177,15 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
 }
 
 AltStableSyncChar = {               -- per character
-  schema = 6,                       -- same number as the DB; an unknown or newer one is refused untouched
+  schema = 7,                       -- same number as the DB; an unknown or newer one is refused untouched
   lastSelected = { ui = id, loadout = { category = "discipline", id = id } },
   loaded = {                        -- ONE baseline per kind: the last Load/Apply, or a Save/Save As (#28)
     ui = { id, version, baseline = <modules as loaded>, result = {...} },
     loadout = { id, version, baseline = <modules as loaded or saved>,
                 after = <a capture right after a COMPLETED load, or as of the last Save> | nil,
                         -- after.bindings only when taken under Character bindings
+                        -- after.pet = { [familyId] = { family, locale, slots, unavailable = { [slot] = reason } } }:
+                        -- the pet out at that Load only (#47); none when its pet part couldn't be planned
                 unavailable = { [slot] = reason },   -- baseline entries this character couldn't use
                 result = { changed, created, keys, skips = { {slot, reason} }, failed, at } | { noop, skips } },
   },
@@ -219,6 +224,23 @@ AltStableSyncLAS = <LibAccountSync store only>   -- declared ONLY by AltStableSy
   warns before a plain capture. A valid cover is ascending and canonical: adjacent ranges are merged,
   so one slot set has one spelling. Slots outside this build's set are listed by Load and Restore
   ("not supported on this build"), never written, and don't keep a backup "partial".
+- **Schema 6 → 7** (#47) only stamps the number: 7 adds the optional `modules.pet`, a backup's `pet`
+  and the record's `after.pet`. The wire schema moves 3 → 4 with it, so a schema-6 build never
+  receives an entry with a pet bar by sync.
+- **The pet bar** (#47, `Pet.lua`). A Load changes only the bar of the pet that is out, from its
+  family's layout; nothing happens on summon. Abilities match by id, else by name in the same game
+  language (another rank of the same ability); one the pet doesn't have empties its slot and is
+  recorded as unavailable. Commands and stances are moved, never removed, since an addon can't put
+  one back; autocast is never set (protected, and kept by the game across a re-place). The planner
+  freezes every slot it can't reach and simulates the ten slots: moves and swaps, then removals of
+  abilities the pet's book has, then placements from the book into empty slots. The executor
+  guards every call (combat, the same pet GUID), reads each op back, and on a failure drops the
+  payload back into the slot its op emptied or leaves it on the cursor and names the slot; it never
+  clears a pet payload except in a planned removal. Restore needs the backup's pet (family and name)
+  out. Save: the family not out keeps the entry's layout; the family out is merged slot by slot like
+  the main bars (a slot the Load couldn't fill keeps the entry's; a new rank of the same ability is
+  no change); an entry without it gets it added; no comparison, another game language or an
+  unreadable bar keeps the entry's, with a note.
 - **Coverage moves with the values.** Save outside the comparison's cover keeps B and says how many
   such slots differ ("load it again to save them"); outside the entry's cover it takes a readable C,
   so the first Save over a 1-12 entry adds the other bars, and an unreadable slot never gains cover.

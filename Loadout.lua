@@ -60,7 +60,7 @@ end
 ------------------------------------------------------------
 
 -- modules = { actions = {[slot] = ...}, bindings = {[cmd] = {key, ...}}, macros = {[name] = {body, icon}},
---             cover = the slot ranges captured (#5) }
+--             cover = the slot ranges captured (#5), pet = {[familyId] = layout} (#47, Pet.lua) }
 function Loadout.Capture()
     local Game = G()
     local book = Game.Spellbook()
@@ -118,7 +118,11 @@ function Loadout.Capture()
         if not keys then return nil, "Couldn't read the key bindings; try again." end
         bindings[cmd] = keys
     end
-    return { actions = actions, bindings = bindings, macros = macros, cover = ASS.Catalog.Copy(Game.SLOT_RANGES) }
+    -- The pet bar of the pet that is out (#47): nil when none is, false when
+    -- it can't be read.
+    local pet = ASS.Pet.Capture()
+    return { actions = actions, bindings = bindings, macros = macros, cover = ASS.Catalog.Copy(Game.SLOT_RANGES),
+             pet = pet }
 end
 
 ------------------------------------------------------------
@@ -205,10 +209,13 @@ end
 -- can use what the loadout has there.
 local function Finish(plan)
     plan.noop = #plan.actions == 0 and #plan.creates == 0 and next(plan.keys) == nil and not plan.resave
+        and not (plan.pet and #plan.pet.ops > 0)
+    -- The pet part holds the pet GUID, its bar now, the ops, the final bar
+    -- and the skips: another pet, or a changed bar, refuses the confirm.
     plan.fingerprint = Serialize({ v = plan.version, w = plan.which, a = plan.actions, c = plan.creates,
                                    k = plan.keys, kb = plan.keysBlocked or false, s = plan.skips,
                                    wt = plan.waiting or {}, r = plan.resave or false,
-                                   u = plan.unavailable or {}, b = plan.blocked or false })
+                                   u = plan.unavailable or {}, b = plan.blocked or false, p = plan.pet or false })
     return plan
 end
 
@@ -342,8 +349,10 @@ function Loadout.Plan(entry)
         end
     end
     if modules.bindings then PlanKeys(plan, modules.bindings) end
+    -- The pet bar of the pet that is out, from its family's layout (#47).
+    plan.pet = ASS.Pet.PlanLoad(modules.pet)
     if Unsaved() and Game.CharacterBindings() then plan.resave = true end
-    if plan.blocked then plan.actions, plan.creates, plan.keys, plan.resave = {}, {}, {}, nil end
+    if plan.blocked then plan.actions, plan.creates, plan.keys, plan.resave, plan.pet = {}, {}, {}, nil, nil end
     return Finish(plan)
 end
 
@@ -375,6 +384,10 @@ local function Snapshot(plan, reason)
         if cmd == nil then return nil end           -- unreadable: no backup, so no writes
         snap.keys[key] = cmd
     end
+    if plan.pet and #plan.pet.ops > 0 then
+        snap.pet = ASS.Pet.Snapshot(plan.pet)
+        if not snap.pet then return nil end
+    end
     return snap
 end
 
@@ -382,7 +395,7 @@ end
 -- Returns result = { changed, created, keys, failed = reason|nil, at }.
 local function Execute(plan, snap)
     local Game = G()
-    local result = { changed = 0, created = 0, keys = 0 }
+    local result = { changed = 0, created = 0, keys = 0, pet = 0 }
     local function fail(why, at) result.failed, result.at = why, at; return result end
     -- An action-phase failure. The cursor was empty when the operation began
     -- (Blocked refuses otherwise) and it runs within one frame, so anything on
@@ -461,6 +474,14 @@ local function Execute(plan, snap)
         result.changed = result.changed + 1
     end
     if #plan.actions > 0 and not Game.CursorEmpty() then return bail("cursor not empty after the actions", "actions") end
+
+    -- 2b. The pet bar (#47). Its own executor: a pet payload is never
+    -- cleared on failure (bail() would); it goes back, or stays and is named.
+    if plan.pet and #plan.pet.ops > 0 then
+        local n, why, at = ASS.Pet.Execute(plan.pet)
+        if not n then return fail(why, at) end
+        result.pet = n
+    end
 
     -- 3. Bindings: the final map, each key once, guarded each time; read back
     -- whole before saving; on any failure (saving included) rolled back in
@@ -693,6 +714,21 @@ function Loadout.Load(entry, shown, abandon)
             -- Keys are compared only against Character keys: under Account
             -- bindings this character's own keys aren't what we read.
             if not G().CharacterBindings() then after.bindings = nil end
+            -- The pet bar's comparison, for the family out only, with the
+            -- slots this load couldn't fill (#47). None when the pet part
+            -- couldn't be planned: Save then asks for another load.
+            local pp = plan.pet
+            if type(after.pet) ~= "table" or (pp and pp.failed) then
+                after.pet = nil
+            elseif pp and pp.layout then
+                local fam, layout = next(after.pet)
+                if fam == pp.family then
+                    local u = {}
+                    for slot, why in pairs(pp.absent or {}) do u[slot] = why end
+                    for _, s in ipairs(pp.skips) do u[s.slot] = s.reason end
+                    layout.unavailable = next(u) and u or nil
+                end
+            end
             -- Every slot where the load couldn't place the loadout's action:
             -- left as it was, already empty, or emptied (#46).
             unavailable = {}
@@ -1017,6 +1053,10 @@ function Loadout.Merge(rec, current, characterBindings, drop)
         return t
     end
     out.actions, out.macros, out.bindings = orNil(actions, B.actions), orNil(macros, B.macros), orNil(bindings, B.bindings)
+    -- The pet bar of the family out (#47, Pet.Merge); other families as B has them.
+    local petOut, petAdv, petInfo = ASS.Pet.Merge(B.pet, A.pet, current.pet, drop)
+    out.pet = petOut
+    for _, n in ipairs(petInfo.notes) do notes[#notes + 1] = n end
     out.cover = Cover.FromSet(outSet)
     -- Slots this Save adds to the entry's cover, and how many hold an action.
     if marked > 0 then
@@ -1041,10 +1081,11 @@ function Loadout.Merge(rec, current, characterBindings, drop)
         ignored = ignored, marked = marked,
         modules = out,
         noop = Serialize(out) == Serialize(B),
+        pet = petInfo,
         kept = kept, dropped = dropped, notes = notes,
         changed = changed, keysChanged = keysChanged, keysAdded = keysAdded,
         unavailable = unavailable,
-        advanced = { actions = adv, macros = advMacros, bindings = advB, cover = Cover.FromSet(advSet) },
+        advanced = { actions = adv, macros = advMacros, bindings = advB, cover = Cover.FromSet(advSet), pet = petAdv },
     }
 end
 
@@ -1112,6 +1153,7 @@ function Loadout.PlanSaveAs()
         end
         why = merr
     end
+    if current.pet == false then current.pet = nil end
     local after = Copy(current)
     if not G().CharacterBindings() then after.bindings = nil end
     return { modules = current, after = after, unavailable = {}, kept = {}, notes = {}, lossy = rec ~= nil, why = why }
@@ -1199,14 +1241,17 @@ function Loadout.PlanRestore(which)
         end
     end
     plan.kept = snap.createdMacros or {}
+    -- The pet bar: only with the backup's pet out (family and name, #47).
+    plan.pet = ASS.Pet.PlanRestore(snap.pet)
     if Unsaved() and Game.CharacterBindings() then plan.resave = true end
-    if plan.blocked then plan.actions, plan.keys, plan.resave = {}, {}, nil end
+    if plan.blocked then plan.actions, plan.keys, plan.resave, plan.pet = {}, {}, nil, nil end
     return Finish(plan)
 end
 
 -- Is everything the snapshot asks for back (nothing unavailable or blocked)?
 local function Complete(plan, result)
     return not (result and result.failed) and #plan.unavailable == 0 and not plan.keysBlocked
+        and not (plan.pet and (plan.pet.missing or #plan.pet.skips > 0))
 end
 
 function Loadout.Restore(which, shown)
@@ -1228,6 +1273,7 @@ function Loadout.Restore(which, shown)
     end
     result.unavailable, result.kept, result.skips = plan.unavailable, plan.kept, plan.skips
     result.keysBlocked = plan.keysBlocked
+    result.petPlan = plan.pet
     result.partial = not Complete(plan, result) or nil
     -- The pinned operation is released only when it is fully restored.
     if which == "op" and Complete(plan, result) then

@@ -410,7 +410,7 @@ do
     local a, b = account("Alpha", "aaaaaaaaaaaa"), account("Beta", "bbbbbbbbbbbb")
     use(b)
     local before = C.Copy(b.db.presets)
-    local cbor = C_EncodingUtil.SerializeCBOR({ s = 3, e = { id = "loadout-zzz-1", version = "zzz:1" } })
+    local cbor = C_EncodingUtil.SerializeCBOR({ s = Env.SCHEMA, e = { id = "loadout-zzz-1", version = "zzz:1" } })
     local newer = "ASE1:" .. Env.Adler32(cbor) .. ":" .. C_EncodingUtil.EncodeBase64(C_EncodingUtil.CompressString(cbor))
     b.sync.Receive("ENT\nloadout-zzz-1\nzzz:1\n" .. newer, { guid = a.guid, name = "Alpha", realm = "Elegia" })
     b.sync.Receive("ENT\nloadout-zzz-1\nzzz:1\nASE1:00000000:00", { guid = a.guid, name = "Alpha" })
@@ -849,7 +849,7 @@ do
         local lib, inst = fakeLib(messages)
         LibStub = function(name, silent) if name == "LibAccountSync-1.0" then return lib end end
         if disabledCore then AltStableSyncDB = { schema = 99 } end
-        for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Envelope.lua", "Game.lua", "Backups.lua",
+        for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Envelope.lua", "Game.lua", "Pet.lua", "Backups.lua",
                              "Ready.lua", "Loadout.lua", "Preview.lua", "Commands.lua" }) do
             assert(loadfile(f))("AltStableSync", {})
         end

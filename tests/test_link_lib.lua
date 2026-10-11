@@ -57,7 +57,7 @@ UnitClass = function() return "Priest", "PRIEST" end
 LibStub = nil
 -- The core addon, as the client loads it (its TOC order).
 dofile("Libs/LibStub/LibStub.lua")
-for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Envelope.lua", "Game.lua", "Backups.lua",
+for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Envelope.lua", "Game.lua", "Pet.lua", "Backups.lua",
                      "Ready.lua", "Loadout.lua", "Preview.lua", "Commands.lua" }) do
     assert(loadfile(f))("AltStableSync", {})
 end

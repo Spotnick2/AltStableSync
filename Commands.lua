@@ -102,10 +102,38 @@ local function BySlot(lines, items)
     end
 end
 
+-- The pet bar part of a preview (#47).
+local function PetLines(out, pp)
+    if not pp then return end
+    local Pet = ASS.Pet
+    if pp.missing then
+        out[#out + 1] = ("Pet bar: not restored (%s)."):format(pp.missing)
+    elseif pp.note then
+        if pp.note ~= "no pet out" then out[#out + 1] = ("Pet bar: not changed (%s)."):format(pp.note) end
+    else
+        local changes = Pet.Changes(pp)
+        out[#out + 1] = ("Pet bar (%s %s): %s change. Autocast stays as the game has it.")
+            :format(tostring(pp.familyName), tostring(pp.petName), Plural(#changes, "slot"))
+        for _, c in ipairs(changes) do
+            -- What the loadout has there, when this pet doesn't have it.
+            local why = pp.absent and pp.absent[c.slot]
+            out[#out + 1] = ("  pet slot %d: %s -> %s%s"):format(c.slot, Pet.Describe(c.from), Pet.Describe(c.to),
+                why and (" (" .. tostring(pp.wanted and pp.wanted[c.slot]) .. ": " .. why .. ")") or "")
+        end
+        for _, s in ipairs(pp.skips) do
+            out[#out + 1] = ("  pet slot %d left unchanged: %s"):format(s.slot, tostring(s.reason))
+        end
+    end
+    if pp.others and #pp.others > 0 then
+        out[#out + 1] = ("Pet bars kept for other pets: %s (loaded only with one of them out)."):format(table.concat(pp.others, ", "))
+    end
+end
+
 -- The preview's lines for a plan (pure; tested).
 function Commands.Describe(plan)
     local lines = {}
     if plan.blocked then return { plan.blocked } end
+    local pp = plan.pet
     -- Slots that stay empty until this character can use what the loadout
     -- has there (#46): listed, never counted as changes.
     local function Waiting(out)
@@ -117,12 +145,14 @@ function Commands.Describe(plan)
         end
         BySlot(out, items)
     end
-    if plan.noop and not plan.keysBlocked and #(plan.unavailable or {}) == 0 and #plan.skips == 0 then
+    if plan.noop and not plan.keysBlocked and #(plan.unavailable or {}) == 0 and #plan.skips == 0
+        and not (pp and (pp.missing or #pp.skips > 0)) then
         local out = { "Already matches the selected settings." }
         if plan.kind == "restore" and #(plan.kept or {}) > 0 then
             out[#out + 1] = ("Kept: %s that load created (not deleted)."):format(Plural(#plan.kept, "macro"))
         end
         Waiting(out)
+        if pp and (pp.note or pp.others and #pp.others > 0) then PetLines(out, pp) end
         return out
     end
     local nKeys = 0
@@ -160,6 +190,7 @@ function Commands.Describe(plan)
         BySlot(lines, items)
     end
     Waiting(lines)
+    PetLines(lines, pp)
     if plan.kind == "restore" and #(plan.kept or {}) > 0 then
         lines[#lines + 1] = ("Kept: %s that load created (not deleted)."):format(Plural(#plan.kept, "macro"))
     end
@@ -176,8 +207,10 @@ local function Report(kind, result, err, plan)
         return
     end
     local waiting = plan and #(plan.waiting or {}) or 0
-    if result.noop and not result.partial and #(result.skips or {}) > 0 then
-        Print(("Nothing applied: %d left unchanged (see the preview's list)."):format(#result.skips))
+    local pp = plan and plan.pet or result.petPlan
+    local petSkips = pp and #(pp.skips or {}) or 0
+    if result.noop and not result.partial and #(result.skips or {}) + petSkips > 0 then
+        Print(("Nothing applied: %d left unchanged (see the preview's list)."):format(#(result.skips or {}) + petSkips))
         return
     end
     if result.noop and not result.partial and waiting > 0 then
@@ -194,7 +227,7 @@ local function Report(kind, result, err, plan)
         Print("Nothing could be restored: see the preview's list. The backup is kept.")
         return
     end
-    local skipped = #(result.skips or {}) + #(result.unavailable or {})
+    local skipped = #(result.skips or {}) + #(result.unavailable or {}) + petSkips
     if result.failed then
         local next_ = kind == "load"
             and "Use /altsync restore op to undo, or load again to abandon it."
@@ -203,13 +236,15 @@ local function Report(kind, result, err, plan)
             :format(result.failed, tostring(result.at), result.changed, result.keys, next_))
         return
     end
+    local petChanged = (result.pet or 0) > 0 and #ASS.Pet.Changes(pp) or 0
     local emptied = 0
     if kind == "load" and plan then
         for _, op in ipairs(plan.actions) do if op.target == nil then emptied = emptied + 1 end end
     end
     local msg = ("%s: %d slots%s, %d keys%s."):format(kind == "load" and "Loaded" or "Restored",
         result.changed, emptied > 0 and (" (" .. emptied .. " emptied)") or "",
-        result.keys, result.created > 0 and (", " .. result.created .. " macros created") or "")
+        result.keys, (result.created > 0 and (", " .. result.created .. " macros created") or "")
+            .. (petChanged > 0 and (", " .. Plural(petChanged, "pet slot")) or ""))
     if skipped > 0 then msg = msg .. " " .. skipped .. " left unchanged (see the preview's list)." end
     if result.partial then msg = msg .. " Partial: some entries couldn't be restored exactly; the backup is kept." end
     Print(msg)
@@ -353,6 +388,28 @@ function Commands.save(arg)
         BySlot(lines, items)
     end
     Ignored(lines, m.ignored, m.modules.actions)
+    -- The pet bar of the pet that is out (#47).
+    local pi, Pet = m.pet or {}, ASS.Pet
+    if pi.added then lines[#lines + 1] = ("Adds the %s pet bar this loadout didn't have yet."):format(pi.added) end
+    if #(pi.changed or {}) > 0 then
+        lines[#lines + 1] = ("Pet bar (%s): %s change:"):format(tostring(pi.family), Plural(#pi.changed, "slot"))
+        for _, c in ipairs(pi.changed) do
+            lines[#lines + 1] = ("  pet slot %d: %s -> %s"):format(c.slot, Pet.Describe(c.was), Pet.Describe(c.now))
+        end
+    end
+    if #(pi.kept or {}) > 0 then
+        lines[#lines + 1] = ("Keeping %s this pet couldn't take at the load:"):format(Plural(#pi.kept, "pet slot"))
+        for _, k in ipairs(pi.kept) do
+            lines[#lines + 1] = ("  pet slot %d: %s (%s)"):format(k.slot, Pet.Describe(k.want), tostring(k.reason))
+        end
+        if not drop then lines[#lines + 1] = "To leave them out instead: /altsync save drop" end
+    end
+    if #(pi.dropped or {}) > 0 then
+        lines[#lines + 1] = "Won't be kept (a later Load empties these pet slots):"
+        for _, k in ipairs(pi.dropped) do
+            lines[#lines + 1] = ("  pet slot %d: %s (%s)"):format(k.slot, Pet.Describe(k.want), tostring(k.reason))
+        end
+    end
     for _, n in ipairs(m.notes) do lines[#lines + 1] = n end
     lines[#lines + 1] = "Other characters keep their current setup until they load this version."
     ASS.Preview.Show({
