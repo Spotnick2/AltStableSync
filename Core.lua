@@ -113,7 +113,7 @@ end
 
 -- The client build docs/forever-api-notes.md was measured on. A different
 -- build says so once at login (see the client-update skill).
-local MEASURED_ON_BUILD = "70334"
+local MEASURED_ON_BUILD = "70338"
 ASS.MEASURED_ON_BUILD = MEASURED_ON_BUILD
 
 -- The DB fields that must be tables. One list serves both the validation and
