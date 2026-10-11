@@ -33,8 +33,12 @@ local function GoodSlot(s)
     if s == false then return true end
     if type(s) ~= "table" then return false end
     if s.kind == "token" then return type(s.token) == "string" and s.token ~= "" end
+    -- An ability needs a positive whole id and its name: anything less
+    -- can't be told from "this pet doesn't have it", so the layout is
+    -- damaged and never loaded (Codex on #54).
     if s.kind == "spell" then
-        return type(s.id) == "number" and (s.name == nil or type(s.name) == "string")
+        return type(s.id) == "number" and s.id > 0 and s.id == math.floor(s.id)
+            and type(s.name) == "string" and s.name ~= ""
     end
     return false
 end
@@ -375,7 +379,11 @@ function Pet.Execute(pp)
             local kind, id = Game.CursorRaw()
             if kind ~= "petaction" or id ~= op.item.id or not is(i, nil) then return stop("pickup failed", i, i) end
             -- The one ClearCursor of a pet payload: an ability the pet's book
-            -- has, taken off on purpose (it can be placed back).
+            -- has, taken off on purpose (it can be placed back). Guarded like
+            -- a call: combat or another pet since the pickup stops with the
+            -- payload kept (Codex on #54).
+            why = guard()
+            if why then return stop(why, i, i) end
             pcall(ClearCursor)
             if not empty() then return stop("cursor stuck", i, i) end
         elseif op.op == "place" then

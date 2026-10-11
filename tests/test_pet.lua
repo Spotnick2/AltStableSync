@@ -117,6 +117,12 @@ do
     check("valid: nine slots is damaged", not P.Valid(bad))
     bad.slots[10] = { kind = "spell", id = "x" }
     check("valid: a bad slot is damaged", not P.Valid(bad))
+    -- An ability needs a positive whole id and a name (Codex on #54).
+    for _, s in ipairs({ { kind = "spell", id = 0, name = "Growl" }, { kind = "spell", id = 2649.5, name = "Growl" },
+                         { kind = "spell", id = 2649 }, { kind = "spell", id = 2649, name = "" } }) do
+        bad.slots[10] = s
+        check("valid: damaged spell " .. tostring(s.id) .. "/" .. tostring(s.name), not P.Valid(bad))
+    end
 end
 
 ------------------------------------------------------------
@@ -323,6 +329,16 @@ do
     hunter(bearB())
     plan = L.Plan(eDmg)
     check("damaged: no ops", #plan.pet.ops == 0 and plan.pet.note == "the saved Bear pet bar is damaged")
+    -- An ability with id 0 and no name never empties the slot it's in.
+    local zero = A.Catalog.Copy(entry.modules)
+    zero.pet[4].slots[6] = { kind = "spell", id = 0 }
+    local eZero = assert(A.Catalog.Create("loadout", { class = "HUNTER", category = "general", name = "Zero" }, zero))
+    hunter(bearB())
+    plan = L.Plan(eZero)
+    check("id 0: damaged, no ops", #plan.pet.ops == 0 and plan.pet.note == "the saved Bear pet bar is damaged")
+    G.calls = {}
+    L.Load(eZero, plan)
+    eq("id 0: Growl still in slot 6", G.pet.bar[6] and G.pet.bar[6].spell, 2649)
 end
 
 ------------------------------------------------------------
@@ -443,6 +459,23 @@ do
     eq("remove fails: no ClearCursor", count("ClearCursor"), 0)
     eq("remove fails: Cower still there", G.pet.bar[7] and G.pet.bar[7].spell, 1742)
     G.petFault = nil
+
+    -- Combat begins with the removal's pickup: the planned clear doesn't run,
+    -- the ability stays on the cursor, and the load stays interrupted.
+    saveBearA()
+    hunter(bearB({ bar = { [1] = T(ATTACK), [2] = T(FOLLOW), [3] = T(MOVE), [4] = S(2649), [5] = S(1082), [7] = S(1742),
+                          [8] = T(ASSIST), [9] = T(DEF), [10] = T(PASSIVE) } }))
+    plan = L.Plan(entry)
+    G.combatAfter = 1
+    G.calls = {}
+    r = L.Load(entry, plan)
+    check("combat at removal: stopped", r and r.failed ~= nil)
+    eq("combat at removal: no ClearCursor", count("ClearCursor"), 0)
+    eq("combat at removal: Cower kept on the cursor", G.cursor and G.cursor.item.spell, 1742)
+    check("combat at removal: names the slot", tostring(r and r.failed):find("drop it into pet slot 7", 1, true) ~= nil,
+          tostring(r and r.failed))
+    check("combat at removal: backup pinned", A.Backups.Operation() ~= nil)
+    eq("combat at removal: nothing blocked", #G.blocked, 0)
 
     -- A client that drops somewhere else: each op is read back, and the run
     -- stops at that op.
