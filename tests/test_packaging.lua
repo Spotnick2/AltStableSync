@@ -45,6 +45,7 @@ local REQUIRED = {
     "Catalog.lua",
     "Envelope.lua",
     "Game.lua",
+    "Pet.lua",
     "Backups.lua",
     "Ready.lua",
     "Loadout.lua",

@@ -22,6 +22,17 @@
 --   WoW.game.blocked           -- protected calls attempted IN COMBAT (each also raises, like
 --                                 the client's ADDON_ACTION_BLOCKED); must stay empty
 --   WoW.relaunch()             -- a full exit: macro bodies gain the server newline
+--
+-- The pet (#47, measured on 70338): setup{ pet = { family = 4, familyName = "Bear",
+-- name, guid, bar = { [i] = { token = "PET_ACTION_ATTACK" } | { spell = id } },
+-- book = { { id, name } | { name } (a stance, no id) } } }. GetPetActionInfo
+-- gives name, texture, isToken, ..., spellID; PickupPetAction lifts, drops
+-- and swaps like PickupAction; the cursor reads "petaction", <spell id> (2
+-- for a command or stance); the pet book is bank 1. Faults:
+--   WoW.game.petFault = function(name, n) -> "error" | "noop" | "after-error"
+--     for the n-th pet call (PickupPetAction / PickupSpellBookItem)
+--   WoW.game.onPetCall = function(name, n)  -- e.g. a resummon between calls
+--   WoW.game.afterPetCall = function(n)       -- after the n-th call acted (a client that misplaces)
 ------------------------------------------------------------
 
 local G = {}
@@ -57,6 +68,17 @@ function G.setup(opts)
     G.numBindings, G.bindingFails, G.bindFault, G.keyFails, G.emptyCommand = nil, nil, nil, nil, nil
     G.actionFails = nil
     G.timers = {}
+    G.locale = opts.locale or "enUS"
+    G.pet = nil
+    if opts.pet then
+        local o = opts.pet
+        G.pet = { family = o.family or 4, familyName = o.familyName or "Bear", name = o.name or "Tarthosuk",
+                  guid = o.guid or "Pet-0-1", hasBar = o.hasBar ~= false, bar = {}, book = copy(o.book or {}) }
+        for i, a in pairs(o.bar or {}) do
+            G.pet.bar[i] = a.token and { token = a.token } or { spell = a.spell, autocast = a.autocast }
+        end
+    end
+    G.petCalls, G.petFault, G.onPetCall, G.afterPetCall, G.petReadFails, G.petBookFails = 0, nil, nil, nil, nil, nil
     -- macros: { name, icon, body, char = bool, shows = spellID }
     G.account, G.char = {}, {}
     for _, m in ipairs(opts.macros or {}) do
@@ -127,9 +149,24 @@ end
 
 local CLASS_NAMES = { PRIEST = "Priest", DRUID = "Druid", MAGE = "Mage", WARRIOR = "Warrior", HUNTER = "Hunter" }
 function UnitClass() return CLASS_NAMES[G.class] or G.class, G.class, 5 end
-function UnitGUID() return G.guid end
+function UnitGUID(unit)
+    if unit == "pet" then return G.pet and G.pet.guid end
+    return G.guid
+end
 function UnitFullName() return "Karuzo", "Elegia" end
-function UnitName() return "Karuzo", "Elegia" end
+function UnitName(unit)
+    if unit == "pet" then return G.pet and G.pet.name end
+    return "Karuzo", "Elegia"
+end
+function UnitExists(unit)
+    if unit == "pet" then return G.pet ~= nil end
+    return true
+end
+function UnitCreatureFamily(unit)
+    if unit == "pet" and G.pet then return G.pet.familyName, G.pet.family end
+end
+function PetHasActionBar() return G.pet ~= nil and G.pet.hasBar end
+function GetLocale() return G.locale end
 function InCombatLockdown() return G.combat end
 
 Enum = Enum or {}
@@ -177,7 +214,13 @@ C_SpellBook = {
         if line == 1 then return { name = "General", itemIndexOffset = 0, numSpellBookItems = nGeneral } end
         if line == 2 then return { name = "Class", itemIndexOffset = nGeneral, numSpellBookItems = #G.spells - nGeneral } end
     end,
-    GetSpellBookItemInfo = function(i)
+    GetSpellBookItemInfo = function(i, bank)
+        if bank == Enum.SpellBookSpellBank.Pet then
+            if G.petBookFails then error("pet book read failed", 2) end
+            local b = G.pet and G.pet.book[i]
+            if not b then return nil end
+            return { spellID = b.id, name = b.name, isPassive = b.passive or false, itemType = Enum.SpellBookItemType.PetAction }
+        end
         local s = G.spells[i]
         if not s then return nil end
         return { spellID = s.id, name = s.name, subName = s.sub or "", actionID = s.id, isPassive = s.passive or false,
@@ -185,6 +228,16 @@ C_SpellBook = {
     end,
     IsSpellBookItemLowRank = function(i) local s = G.spells[i]; return s and s.low or false end,
     IsSpellKnown = function(id) return knownId(id) end,
+    HasPetSpells = function()
+        if not G.pet then return nil end
+        return #G.pet.book, "PET"
+    end,
+    PickupSpellBookItem = function(i, bank)
+        if G.petCallFault("PickupSpellBookItem") then return end
+        local b = bank == Enum.SpellBookSpellBank.Pet and G.pet and G.pet.book[i]
+        if b and b.id then G.cursor = { kind = "petaction", item = { spell = b.id } } end
+        G.petCallAfter()
+    end,
 }
 
 ------------------------------------------------------------
@@ -210,6 +263,7 @@ function GetCursorInfo()
     if c.kind == "item" then return "item", c.id, "|cffffffff|Hitem:" .. c.id .. "|h[item]|h|r" end
     if c.kind == "macro" then return "macro", G.indexOf(c.ref) end
     if c.kind == "flyout" then return "flyout", c.id end
+    if c.kind == "petaction" then return "petaction", c.item.spell or 2 end
 end
 
 function ClearCursor() mutate("ClearCursor"); G.cursor = nil end
@@ -265,6 +319,54 @@ function PickupAction(slot)
         G.actions[slot] = nil
         G.cursor = actionAsCursor(a)
     end
+end
+
+------------------------------------------------------------
+-- The pet bar (#47)
+------------------------------------------------------------
+
+local function petSpellName(id)
+    for _, b in ipairs(G.pet and G.pet.book or {}) do if b.id == id then return b.name end end
+    return "Spell " .. tostring(id)
+end
+
+function GetPetActionInfo(i)
+    if G.petReadFails then error("GetPetActionInfo failed", 2) end
+    local a = G.pet and G.pet.bar[i]
+    if not a then return nil end
+    if a.token then return a.token, 1, true, false, false, false, nil end
+    return petSpellName(a.spell), 1, false, false, true, a.autocast or false, a.spell
+end
+
+-- A pet call: counted, maybe faulted. Returns true when the call does nothing.
+local pending
+function G.petCallFault(name)
+    mutate(name, true)
+    G.petCalls = G.petCalls + 1
+    if G.onPetCall then G.onPetCall(name, G.petCalls) end
+    local f = G.petFault and G.petFault(name, G.petCalls)
+    if f == "error" then error(name .. " failed", 3) end
+    pending = f == "after-error" and name or nil
+    return f == "noop"
+end
+function G.petCallAfter()
+    if G.afterPetCall then G.afterPetCall(G.petCalls) end
+    if pending then local n = pending; pending = nil; error(n .. " failed after acting", 3) end
+end
+
+function PickupPetAction(i)
+    if G.petCallFault("PickupPetAction") then return end
+    local bar = G.pet and G.pet.bar
+    if not bar then return end
+    local a = bar[i]
+    if G.cursor and G.cursor.kind == "petaction" then
+        bar[i] = copy(G.cursor.item)
+        G.cursor = a and { kind = "petaction", item = a } or nil
+    elseif not G.cursor and a then
+        bar[i] = nil
+        G.cursor = { kind = "petaction", item = a }
+    end
+    G.petCallAfter()
 end
 
 ------------------------------------------------------------

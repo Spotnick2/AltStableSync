@@ -18,8 +18,10 @@ ASS.Envelope = Envelope
 
 local PREFIX = "ASE1:"
 -- 2 (#5): loadouts carry `cover`, and a 1-12 build must never receive or
--- edit a wider entry, so every message kind moved to 2 together.
-local SCHEMA = 3
+-- edit a wider entry, so every message kind moved to 2 together. 4 (#47):
+-- loadouts may carry a pet bar per pet family; a schema-6 build never
+-- receives one.
+local SCHEMA = 4
 Envelope.SCHEMA = SCHEMA
 
 -- Adler-32 in plain Lua 5.1 arithmetic (no bit library needed).

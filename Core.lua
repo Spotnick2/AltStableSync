@@ -30,9 +30,11 @@ local ADDON_NAME = "AltStableSync"
 -- modules and loaded record: what the 1-12 builds captured; and 4 -> 5
 -- (#46), which only stamps the number: 5 adds the optional `class = true` on
 -- spell actions from the class spellbook tabs; and 5 -> 6 (#7), a stamp too:
--- 6 adds the optional per-character `bindingSwitch` guard. There is no
+-- 6 adds the optional per-character `bindingSwitch` guard; and 6 -> 7
+-- (#47), a stamp too: 7 adds the optional `pet` module (a pet bar per pet
+-- family), backups' `pet` and the loaded record's `after.pet`. There is no
 -- migration framework.
-local SCHEMA = 6
+local SCHEMA = 7
 ASS.SCHEMA = SCHEMA
 
 ------------------------------------------------------------
@@ -167,7 +169,8 @@ local function Validate(db, char)
             return "AltStableSyncDB.backups is a " .. type(db.backups) .. ", not a table"
         end
         dbAction = "upgrade1"
-    elseif db.schema ~= SCHEMA and db.schema ~= 2 and db.schema ~= 3 and db.schema ~= 4 and db.schema ~= 5 then
+    elseif db.schema ~= SCHEMA and db.schema ~= 2 and db.schema ~= 3 and db.schema ~= 4 and db.schema ~= 5
+        and db.schema ~= 6 then
         return WrongSchema("saved data", db.schema)
     else
         for _, field in ipairs(DB_TABLES) do
@@ -189,7 +192,8 @@ local function Validate(db, char)
         return "AltStableSyncChar is a " .. type(char) .. ", not a table"
     elseif char.schema == nil then
         return "AltStableSyncChar has data but no schema"
-    elseif char.schema ~= SCHEMA and char.schema ~= 2 and char.schema ~= 3 and char.schema ~= 4 and char.schema ~= 5 then
+    elseif char.schema ~= SCHEMA and char.schema ~= 2 and char.schema ~= 3 and char.schema ~= 4 and char.schema ~= 5
+        and char.schema ~= 6 then
         return WrongSchema("character data", char.schema)
     elseif char.loaded ~= nil and type(char.loaded) ~= "table" then
         return "AltStableSyncChar.loaded is a " .. type(char.loaded) .. ", not a table"

@@ -33,7 +33,7 @@ local MAIN_MACROS = {
 
 local function boot()
     WoW.reset()
-    for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Game.lua", "Backups.lua",
+    for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Game.lua", "Pet.lua", "Backups.lua",
                          "Ready.lua", "Loadout.lua", "Commands.lua" }) do
         assert(loadfile(f))("AltStableSync", {})
     end
@@ -2562,7 +2562,7 @@ do
     G.bindFault = nil
     local db, ch = AltStableSyncDB, AltStableSyncChar
     WoW.reset()
-    for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Game.lua", "Backups.lua",
+    for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Game.lua", "Pet.lua", "Backups.lua",
                          "Ready.lua", "Loadout.lua", "Commands.lua" }) do
         assert(loadfile(f))("AltStableSync", {})
     end

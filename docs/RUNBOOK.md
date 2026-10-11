@@ -89,6 +89,13 @@ character is in; changing form never saves or loads anything. The preview names 
 page 1–4" until a character with forms measures which is which (`/syncprobe bars <label>` in each
 form).
 
+**The pet bar** (#47): a loadout keeps one pet bar per pet family (Bear, Imp, ...). A Load changes
+only the bar of the pet that is out, and nothing happens when another pet is summoned: load again
+with that pet out. Abilities match across ranks; one this pet doesn't have empties its slot, and the
+loadout keeps it for pets that do. Attack, Follow, the stances and the other commands are moved,
+never removed. Autocast stays as the game has it. If a pet bar write stops, the message says which
+pet slot to drop the cursor into. Restoring a backup's pet bar needs the same pet out.
+
 A loadout saved before this version covers Action Bar 1 only. The first `/altsync save` over it
 after a load adds the other bars ("Adds N slots this loadout didn't cover yet"); the next one is
 "Already saved".
