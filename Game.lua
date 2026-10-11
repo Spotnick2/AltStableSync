@@ -59,8 +59,18 @@ function Game.SlotLabel(slot)
     return "Slot " .. tostring(slot), nil
 end
 
+-- The commands a loadout carries keys for: the main bar's twelve buttons
+-- and the pet bar's ten (#47).
 Game.COMMANDS = {}
 for i = 1, 12 do Game.COMMANDS[i] = "ACTIONBUTTON" .. i end
+for i = 1, 10 do Game.COMMANDS[12 + i] = "BONUSACTIONBUTTON" .. i end
+
+-- A command as a preview names it.
+function Game.CommandLabel(cmd)
+    local n = type(cmd) == "string" and cmd:match("^BONUSACTIONBUTTON(%d+)$")
+    if n then return "Pet bar button " .. n end
+    return tostring(cmd)
+end
 
 local CHAR_FIRST = 121
 
