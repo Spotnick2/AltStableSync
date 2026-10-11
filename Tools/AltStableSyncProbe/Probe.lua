@@ -971,15 +971,45 @@ local function PetReadd(slot)
     local mark = #blocked
     Record(("%-44s %s, book %d, slot autocast %s"):format("ability", tostring(s.name), index, tostring(s.acEnabled)))
     local was = book("before")
+    -- Each step is checked before the next write; a failure stops with the
+    -- cursor as it is and says how to put the bar back.
+    local function stop(msg)
+        Record(msg)
+        Record(("%-44s %s"):format("ADDON_ACTION_BLOCKED/FORBIDDEN", TaintSince(mark)))
+        SlashCmdList.ALTSTABLESYNCPROBE("copy")
+    end
+    local function cursor()
+        local kind, id = CursorPet()
+        Record(("  %-42s %s %s"):format("cursor", ValStr(kind), ValStr(id)))
+        return kind, id
+    end
+    -- 1. Remove: the slot must be empty and the cursor must hold this ability.
     Call("PickupPetAction(slot) [remove]", PickupPetAction, slot)
-    Record(("  %-42s %s %s"):format("cursor", ValStr((CursorPet())), ValStr(select(2, CursorPet()))))
-    pcall(ClearCursor)
+    local kind, id = cursor()
     Record(("%-44s %s"):format("slot after remove", PetBar()[slot]))
+    if PetSlot(slot) or kind ~= "petaction" or id ~= s.spellID then
+        return stop(("remove NOT as expected - stopped. If the cursor holds something, drop it into slot %d; "
+            .. "if slot %d is empty, drag %s from the pet spellbook into it"):format(slot, slot, tostring(s.name)))
+    end
+    pcall(ClearCursor)
+    if GetCursorInfo() then
+        return stop(("cursor didn't clear - stopped; drop it into slot %d"):format(slot))
+    end
     book("while off the bar")
+    -- 2. Pick it up from the book.
     Call("C_SpellBook.PickupSpellBookItem(book, Pet)", C_SpellBook.PickupSpellBookItem, index, PET_BANK)
+    kind = cursor()
+    if kind ~= "petaction" then
+        return stop(("book pickup NOT as expected - stopped. Slot %d is empty: drag %s from the pet spellbook "
+            .. "into it%s"):format(slot, tostring(s.name), kind and ", after putting down what the cursor holds" or ""))
+    end
+    -- 3. Put it back: the slot must hold this ability and the cursor be empty.
     Call("PickupPetAction(slot) [put back]", PickupPetAction, slot)
-    local leftover = GetCursorInfo()
-    if leftover then Record("cursor still holds something after the put-back - drop it into slot " .. slot .. " by hand") end
+    local back = PetSlot(slot)
+    if GetCursorInfo() or not (back and back.spellID == s.spellID) then
+        return stop(("put-back NOT as expected (slot %d: %s) - stopped. Drop what the cursor holds into slot %d, "
+            .. "or drag %s from the pet spellbook into it"):format(slot, SlotSig(back), slot, tostring(s.name)))
+    end
     Record(("%-44s %s"):format("slot right after", PetBar()[slot]))
     book("right after")
     C_Timer.After(1, function()
