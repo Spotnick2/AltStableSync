@@ -579,10 +579,8 @@ function Commands.AwaitLoad(id, name, opts)
         if ASS.Preview.Shown() ~= waiting then return end      -- cancelled or replaced
         if ASS.Ready.IsReady() then
             ASS.Preview.Hide()
-            local e = ASS.Catalog.Get(id)
-            if not e or e.deleted or e.kind ~= "loadout" or e.class ~= PlayerClass() then
-                Print(Copy("unknown-id")) return
-            end
+            local e = Commands.Own(id)
+            if not e then Print(Copy("unknown-id")) return end
             if not ASS.Game.CharacterBindings() then
                 Print(("Character keybindings aren't on any more, so nothing was loaded. /altsync load %s to start again.")
                     :format(name))

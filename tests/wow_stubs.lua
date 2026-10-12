@@ -114,6 +114,10 @@ function Widget:GetName() return self.name end
 function Widget:CreateFontString() return NewWidget("FontString", nil, self) end
 function Widget:CreateTexture() return NewWidget("Texture", nil, self) end
 function Widget:GetStringHeight() return 12 end
+function Widget:SetHeight(h) self.height = h end
+function Widget:GetHeight() return self.height end
+function Widget:SetSize(w, h) self.width, self.height = w, h end
+function Widget:GetWidth() return self.width end
 function Widget:GetVerticalScrollRange() return 0 end
 function Widget:GetVerticalScroll() return 0 end
 local function noop() end

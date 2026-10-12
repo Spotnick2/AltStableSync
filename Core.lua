@@ -290,6 +290,11 @@ end
 local function SlashHandler(msg)
     local cmd, rest = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
     cmd = (cmd or ""):lower()
+    -- The window shows the refused or uninitialised state itself (#9).
+    if cmd == "" and ASS.Panel then
+        ASS.Panel.Toggle()
+        return
+    end
     if ASS.disabled then
         Print("disabled: " .. ASS.disabled)
         return
@@ -298,9 +303,7 @@ local function SlashHandler(msg)
         Print("not initialised yet (SavedVariables not loaded)")
         return
     end
-    if cmd == "" and ASS.Panel then
-        ASS.Panel.Toggle()                                   -- the window (#9)
-    elseif cmd == "" or cmd == "status" then
+    if cmd == "" or cmd == "status" then
         local version = C_AddOns and C_AddOns.GetAddOnMetadata
             and C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version") or "?"
         local live = 0

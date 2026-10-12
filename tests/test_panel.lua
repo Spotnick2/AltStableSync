@@ -77,7 +77,8 @@ local function create(name, category, modules)
         modules or capture()))
 end
 
-local function tick(dt) P._Frame().scripts.OnUpdate(P._Frame(), dt or 0.6) end
+-- One model tick (1 s); tick(5.1) also runs the save status's slow poll.
+local function tick(dt) P._Frame().scripts.OnUpdate(P._Frame(), dt or 1.1) end
 local function shown() return A.Preview.Shown() end
 local function previewFrame() return _G.AltStableSyncPreview end
 local function confirm() return previewFrame().confirm:Click() end
@@ -268,7 +269,7 @@ do
     cancel()
     eq("cancelled Load: target unchanged", target(), raid.id)
     G.actions[10] = { kind = "spell", id = 2060 }
-    tick(1.1)
+    tick(5.1)
     W.save:Click()
     eq("Save names the target, not the browsed entry", shown() and shown().title, "Update Raid Healing?")
     cancel()
@@ -287,7 +288,7 @@ do
     G.combat, G.combatAfter = false, nil
     check("failed Load: it did fail", A.char.loaded.loadout.after == nil)
     eq("failed Load: the record names the partly loaded entry", target(), quest.id)
-    tick(1.1)
+    tick(5.1)
     check("failed Load: Save refused, with the reason", not W.save:IsEnabled()
         and (W.save.why or ""):find("No usable comparison", 1, true) ~= nil, W.save.why)
     eq("failed Load: Raid Healing untouched", A.Catalog.Get(raid.id).version, raid.version)
@@ -369,12 +370,12 @@ do
     A.Catalog.Upsert({ id = a.id, version = "ffffffffffff:11", parent = a.version, ancestors = { a.version },
         kind = "loadout", class = "PRIEST", category = "general", name = "Everyday",
         modules = { actions = {}, cover = { { 1, 12 } } } }, "Other")
-    tick(1.1)
+    tick(5.1)
     check("target changed: said", W.target:GetText():find("changed since you loaded it", 1, true) ~= nil, W.target:GetText())
     check("target changed: Save off, with the reason", not W.save:IsEnabled() and (W.save.why or ""):find("changed since you loaded", 1, true) ~= nil)
     A.Catalog.Upsert({ id = a.id, version = "ffffffffffff:12", parent = "ffffffffffff:11", ancestors = { a.version, "ffffffffffff:11" },
         kind = "loadout", class = "PRIEST", category = "general", name = "Everyday", deleted = true }, "Other")
-    tick(1.1)
+    tick(5.1)
     check("target deleted: said", W.target:GetText():find("(removed)", 1, true) ~= nil, W.target:GetText())
     check("target deleted: Save off", not W.save:IsEnabled())
     check("target deleted: Save As on", W.saveAs:IsEnabled())
@@ -488,7 +489,7 @@ do
     WoW.fire("PLAYER_ENTERING_WORLD", true, false)
     local a = create("Everyday")
     P.Show()
-    check("not ready: Load off, with the reason", not W.load:IsEnabled() and W.load.why == "Waiting for character data.")
+    check("not ready: Load off, with the reason", not W.load:IsEnabled() and (W.load.why or ""):find("Waiting for character data", 1, true) ~= nil, W.load.why)
     check("not ready: said", W.status:GetText():find("Waiting for character data", 1, true) ~= nil, W.status:GetText())
     WoW.clock = WoW.clock + 10                               -- ready by the quiet time alone
     tick()
@@ -496,19 +497,19 @@ do
 
     G.actions[9] = { kind = "spell", id = 2060 }
     A.Loadout.Load(a, A.Loadout.Plan(a))
-    tick(1.1)
+    tick(5.1)
     eq("save status: no changes", W.saveStatus:GetText(), "No unsaved changes.")
     G.cursor = { kind = "item", id = 5512 }
-    tick(1.1)
+    tick(5.1)
     check("cursor: Save refused, said", W.saveStatus:GetText():find("cursor", 1, true) ~= nil, W.saveStatus:GetText())
     check("cursor: Save off", not W.save:IsEnabled())
     G.cursor = nil                                           -- nothing else changes
-    tick(1.1)
+    tick(5.1)
     eq("cursor cleared: back", W.saveStatus:GetText(), "No unsaved changes.")
     check("no changes: Save off, says why", not W.save:IsEnabled() and W.save.why == "No unsaved changes.")
     check("no changes: Save As stays on", W.saveAs:IsEnabled())
     G.actions[10] = { kind = "spell", id = 2060 }
-    tick(1.1)
+    tick(5.1)
     check("a change: Save on", W.save:IsEnabled())
     check("a change: said", W.saveStatus:GetText():find("Unsaved: 1 slot", 1, true) ~= nil, W.saveStatus:GetText())
 
@@ -534,7 +535,7 @@ do
 
     -- Combat: writes wait; managing the list doesn't.
     G.combat = true
-    tick(1.1)
+    tick(5.1)
     check("combat: Load off", not W.load:IsEnabled())
     check("combat: Save off", not W.save:IsEnabled())
     check("combat: Save As off", not W.saveAs:IsEnabled())
@@ -582,7 +583,7 @@ do
     A.disabled = "schema 99 is newer than this version"
     local before = persisted()
     P.Show()
-    tick(1.1)
+    tick(5.1)
     check("refused: says so", W.blocked:IsShown() and W.blocked:GetText():find("Unsupported version", 1, true) ~= nil)
     check("refused: no view", not W.views.loadouts:IsShown())
     eq("refused: nothing written", persisted(), before)
@@ -616,6 +617,152 @@ do
     cancel()
     eq("#7: still account keybindings", G.bindingSet, 1)
     P.Hide()
+end
+
+------------------------------------------------------------
+-- Code review on #60
+------------------------------------------------------------
+
+-- The unsaved line counts everything Merge counts, never "0 slots and 0 keys".
+do
+    boot(); main(); ready()
+    local a = create("Everyday")
+    A.char.loaded = { loadout = { id = a.id, version = a.version } }
+    local plan = A.Loadout.PlanSave
+    A.Loadout.PlanSave = function() return { noop = false, changed = {}, keysChanged = {}, keysAdded = { "X" } } end
+    eq("unsaved: an added key counts", P.SaveStatus().text, "Unsaved: 1 key changed.")
+    A.Loadout.PlanSave = function() return { noop = false, changed = {}, keysChanged = {}, pet = { changed = { 1 } } } end
+    eq("unsaved: the pet bar counts", P.SaveStatus().text, "Unsaved: the pet bar changed.")
+    A.Loadout.PlanSave = function() return { noop = false, changed = {}, keysChanged = {} } end
+    eq("unsaved: nothing countable still says so", P.SaveStatus().text, "Unsaved changes: Save shows them.")
+    check("unsaved: Save on", P.SaveStatus().ok)
+    A.Loadout.PlanSave = plan
+end
+
+-- The Backups view keeps its own height, whatever the contents box last was.
+do
+    boot(); main(); ready()
+    create("Everyday")
+    P.Show()
+    pick(W.cat, "shadow")                                    -- an empty category: a short box
+    local short = P._Frame():GetHeight()
+    W.backupsLink:Click()
+    local backups = P._Frame():GetHeight()
+    check("backups height: not the short Loadouts height", backups > short, short .. " / " .. tostring(backups))
+    W.backupsLink:Click()
+    P.Hide()
+end
+
+-- Escape closes only the topmost: the panel leaves UISpecialFrames while a
+-- preview, the dialog or a list is open.
+do
+    boot(); main(); ready()
+    local a = create("Everyday")
+    local function special()
+        for _, n in ipairs(UISpecialFrames) do if n == "AltStableSyncPanel" then return true end end
+        return false
+    end
+    P.Show()
+    WoW.tick(0.1)                                            -- rejoining waits a frame
+    check("escape: the panel alone is a target", special())
+    W.load:Click()
+    check("escape: not while a preview is open", not special())
+    cancel()
+    check("escape: not in the same frame as the closing Escape", not special())
+    WoW.tick(0.1)
+    check("escape: back a frame later", special())
+    W.saveAs:Click()
+    check("escape: not while the dialog is open", not special())
+    dialog().cancel:Click()
+    WoW.tick(0.1)
+    check("escape: back after the dialog", special())
+    W.cat:Click()
+    check("escape: not while a list is open", not special())
+    W.cat:Click()
+    WoW.tick(0.1)
+    check("escape: back after the list", special())
+    P.Hide()
+end
+
+-- /altsync opens the blocked view on a refused schema.
+do
+    boot(); main(); ready()
+    A.disabled = "schema 99 is newer than this version"
+    A.SlashHandler("")
+    check("refused: /altsync opens the panel", P._Frame() and P._Frame():IsShown())
+    check("refused: it says why", W.blocked:IsShown() and W.blocked:GetText():find("Unsupported version", 1, true) ~= nil)
+    A.SlashHandler("")
+    A.disabled = nil
+end
+
+-- Each opening starts on the save target.
+do
+    boot(); main(); ready()
+    local a = create("Everyday")
+    local b = create("Holy raid", "holy")
+    A.char.loaded = { loadout = { id = a.id, version = a.version } }
+    P.Show()
+    browse(b)
+    W.backupsLink:Click()
+    P.Hide()
+    P.Show()
+    eq("reopen: on the save target", W.entry.label:GetText(), "Everyday")
+    check("reopen: on Loadouts", W.views.loadouts:IsShown() and not W.views.backups:IsShown())
+    P.Hide()
+end
+
+-- Something on the cursor: the write buttons are off and say why, as the flows would.
+do
+    boot(); main(); ready()
+    local a = create("Everyday")
+    P.Show()
+    G.cursor = { kind = "item", id = 5512 }
+    tick()
+    check("cursor: Load off", not W.load:IsEnabled())
+    check("cursor: says why", (W.load.why or ""):find("cursor", 1, true) ~= nil, W.load.why)
+    check("cursor: Save As off", not W.saveAs:IsEnabled())
+    G.cursor = nil
+    tick()
+    check("cursor: back on", W.load:IsEnabled())
+    P.Hide()
+end
+
+-- A conflict copy with no sender: never "from nil".
+do
+    boot(); main(); ready()
+    local mine = create("Mine")
+    A.Catalog.Upsert({ id = mine.id, version = "ffffffffffff:5", ancestors = {}, kind = "loadout", class = "PRIEST",
+        category = "general", name = "Mine", modules = { actions = {}, cover = { { 1, 12 } } } }, "Other")
+    local copy = A.Catalog.Conflicts()[1]
+    copy.conflict.from = nil
+    P.Show()
+    browse(copy)
+    W.manage:Click()
+    local texts = {}
+    for _, b in ipairs(W.menu.items) do if b:IsShown() then texts[#texts + 1] = b.text:GetText() end end
+    check("no sender: no nil", not table.concat(texts, "|"):find("nil", 1, true), table.concat(texts, "|"))
+    check("no sender: your other account", table.concat(texts, "|"):find("your other account", 1, true) ~= nil)
+    W.manage:Click()
+    P.Hide()
+end
+
+-- The save status follows events, not only the slow poll.
+do
+    boot(); main(); ready()
+    local a = create("Everyday")
+    G.actions[9] = { kind = "spell", id = 2060 }
+    A.Loadout.Load(a, A.Loadout.Plan(a))
+    P.Show()
+    tick(0.01)
+    eq("events: no changes", W.saveStatus:GetText(), "No unsaved changes.")
+    G.actions[10] = { kind = "spell", id = 2060 }
+    tick(1.1)
+    eq("events: no event, no poll yet: unchanged", W.saveStatus:GetText(), "No unsaved changes.")
+    WoW.fire("ACTIONBAR_SLOT_CHANGED", 10)
+    tick(0.01)
+    check("events: a slot change shows at once", W.saveStatus:GetText():find("Unsaved: 1 slot", 1, true) ~= nil, W.saveStatus:GetText())
+    P.Hide()
+    check("events: hidden, no longer registered", not P._Frame().events.ACTIONBAR_SLOT_CHANGED)
 end
 
 finish("test_panel")

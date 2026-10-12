@@ -548,7 +548,7 @@ not take a save of them.
   setup (gold underline on the active one), and a quieter **Backups…** link.
 - **Loadouts:** a **Category** picker and a **Saved loadout** picker, our own popup lists (Forever
   documents no dropdown API; no Blizzard menus). Categories show their counts; a category a newer build
-  sent shows under its raw key. The window opens on the save target. Each entry shows every marker that
+  sent shows under its raw key. Each opening starts on the save target. Each entry shows every marker that
   applies: save target (or "older version"), conflict, conflict copy, sync status.
 - **Saved contents** of the browsed entry, at once, each row as tall as its lines; under them "Saved
   Oct 12, 10:52 by Karuzo-Macphisto" (the full time on hover): Action bars (saved actions), Keybindings (saved
@@ -559,7 +559,8 @@ not take a save of them.
 - **Load…** (the primary button; "Review changes before loading") and **Manage…** (Rename…, Delete…;
   for a conflict copy, **Resolve…** with the keep / use-theirs choices, then the resolve preview).
 - **Save this character:** "Save target: Raid Healing - Holy", "Browsing another loadout doesn't change
-  this target." when browsing elsewhere, a live status (a fresh `PlanSave` once a second while open:
+  this target." when browsing elsewhere, a live status (a fresh `PlanSave` while open, when the bars,
+  keys, macros, cursor or combat change, after a catalog write, and every 5 s as a net:
   "No unsaved changes" only when that comparison found none, and Save is then off; else why Save can't
   run), **Save…** and **Save As…** (always available out of combat). A deleted or changed target is said, and Save stays off with the reason; it is never
   redirected to the browsed entry.
@@ -574,7 +575,9 @@ not take a save of them.
   saved-setup picker; a Layout / Preferences / Addons summary; Apply, Save, Save As.
 - **Footer:** the last command's message (refusals included), else the state, else the Link
   availability ("Other account online": availability only, never "in sync").
-- **Buttons:** primary, secondary and disabled look different; a disabled button says why on hover.
+- **Buttons:** primary, secondary and disabled look different; a disabled button says why on hover
+  (the reason is `Loadout.Blocked`'s: combat, readiness, something on the cursor).
+- **Escape** closes only the topmost: a preview, the name dialog or a list first, then the panel.
 - **After a load:** "Loaded Everyday. Changes stay on this character until you save."
 - **Save** names its target explicitly ("Update Everyday?" … "Other characters keep their current
   setup until they load this version").

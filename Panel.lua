@@ -33,7 +33,12 @@ ASS.Panel = Panel
 Panel.view = "loadouts"
 Panel.sel = { category = nil, id = nil, snap = nil, noDefault = false }
 
-local REFRESH, SAVE_REFRESH = 0.5, 1      -- seconds, only while the panel is shown
+-- Seconds, only while the panel is shown. The save status is recomputed when
+-- the bars, keys, macros, cursor or combat change (and after a catalog
+-- write); the slow poll only catches what no event announces.
+local REFRESH, SAVE_REFRESH = 1, 5
+local SAVE_EVENTS = { "ACTIONBAR_SLOT_CHANGED", "UPDATE_BINDINGS", "UPDATE_MACROS", "CURSOR_CHANGED",
+                      "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "PET_BAR_UPDATE" }
 local MESSAGE_SECONDS = 20                -- how long a command's message stays in the footer
 
 local function PlayerClass()
@@ -110,7 +115,8 @@ local function Marks(e, rec, copiesOf)
         marks[#marks + 1] = rec.version == e.version and "save target" or "save target, older version"
     end
     if type(e.conflict) == "table" then
-        marks[#marks + 1] = e.conflict.deletion and "conflict: deleted there" or "conflict copy"
+        marks[#marks + 1] = e.conflict.deletion and ("conflict: deleted on " .. tostring(e.conflict.from or "your other account"))
+            or "conflict copy"
     end
     if copiesOf[e.id] then marks[#marks + 1] = "conflict" end
     local st = EntryStatus(e)
@@ -174,10 +180,8 @@ function Panel.Model(sel)
     end
 
     -- What is browsed. An entry that disappeared is said, not replaced.
-    local selected = sel.id and ASS.Catalog.Get(sel.id)
-    if sel.id and not (selected and not selected.deleted and selected.kind == "loadout" and selected.class == class) then
-        m.selectionGone, selected = true, nil
-    end
+    local selected = sel.id and ASS.Commands.Own(sel.id)
+    if sel.id and not selected then m.selectionGone = true end
     local category = sel.category
     if not (category and label[category]) then
         category = (selected and tostring(selected.category)) or (targetEntry and tostring(targetEntry.category))
@@ -255,8 +259,18 @@ function Panel.SaveStatus()
     if not ok then return { ok = false, text = "Can't check for changes right now." } end
     if not m then return { ok = false, text = tostring(err) } end
     if m.noop then return { ok = false, noop = true, text = "No unsaved changes." } end
-    return { ok = true, text = ("Unsaved: %s and %s changed."):format(Plural(#(m.changed or {}), "slot"),
-        Plural(#(m.keysChanged or {}), "key")) }
+    -- Everything Merge counts as a change: slots (a character macro's text or
+    -- icon counts there), keys changed or added, slots it now covers, the pet
+    -- bar. Anything else it found still says so.
+    local parts = {}
+    local slots, keys = #(m.changed or {}), #(m.keysChanged or {}) + #(m.keysAdded or {})
+    if slots > 0 then parts[#parts + 1] = Plural(slots, "slot") end
+    if keys > 0 then parts[#parts + 1] = Plural(keys, "key") end
+    if (m.added or 0) > 0 then parts[#parts + 1] = Plural(m.added, "new slot") end
+    local pet = type(m.pet) == "table" and m.pet or {}
+    if #(pet.changed or {}) > 0 or pet.added then parts[#parts + 1] = "the pet bar" end
+    if #parts == 0 then return { ok = true, text = "Unsaved changes: Save shows them." } end
+    return { ok = true, text = "Unsaved: " .. table.concat(parts, ", ") .. " changed." }
 end
 
 -- Save As's default category: the save target's, else General. Never the
@@ -381,6 +395,8 @@ local function Menu()
     end
     mf.items = {}
     mf:Hide()
+    mf:SetScript("OnShow", function() Panel.SyncEscape() end)
+    mf:SetScript("OnHide", function() Panel.SyncEscape() end)
     tinsert(UISpecialFrames, "AltStableSyncMenu")
     W.menu = mf
     return mf
@@ -423,6 +439,36 @@ local function OpenMenu(owner, items, onPick)
 end
 
 local function CloseMenu() if W.menu then W.menu:Hide() end end
+
+local function Special(name, on)
+    for i = #UISpecialFrames, 1, -1 do
+        if UISpecialFrames[i] == name then
+            if on then return end
+            table.remove(UISpecialFrames, i)
+        end
+    end
+    if on then tinsert(UISpecialFrames, name) end
+end
+
+-- The panel is an Escape target only when nothing of ours is open above it.
+-- Rejoining waits a frame, so the Escape that closed a preview doesn't reach
+-- the panel through the list it is still walking.
+function Panel.SyncEscape()
+    local p = _G.AltStableSyncPreview
+    local over = (p and p:IsShown()) or (W.dialog and W.dialog:IsShown()) or (W.menu and W.menu:IsShown())
+    if over then
+        Special("AltStableSyncPanel", false)
+    elseif C_Timer and C_Timer.After then
+        C_Timer.After(0, function()
+            local p2 = _G.AltStableSyncPreview
+            local still = (p2 and p2:IsShown()) or (W.dialog and W.dialog:IsShown()) or (W.menu and W.menu:IsShown())
+            Special("AltStableSyncPanel", not still)
+        end)
+    else
+        Special("AltStableSyncPanel", true)
+    end
+end
+if ASS.Preview then ASS.Preview.onVisibility = function() Panel.SyncEscape() end end
 
 -- A picker: a field showing the current choice, left-aligned, with a
 -- dropdown chevron; a click opens its list. p.label holds the value.
@@ -488,7 +534,8 @@ local function Dialog()
     d.review = GButton(d, "Review...", 120, "primary")
     d.review:SetPoint("RIGHT", d.cancel, "LEFT", -8, 0)
     d.cancel:SetScript("OnClick", function() d:Hide() end)
-    d:SetScript("OnHide", function() CloseMenu() end)
+    d:SetScript("OnShow", function() Panel.SyncEscape() end)
+    d:SetScript("OnHide", function() CloseMenu(); Panel.SyncEscape() end)
     -- The check: an untouched or blank box just keeps Review off; the red
     -- text comes only for a typed name that won't work, or a Review attempt.
     function d.Check(showEmpty)
@@ -567,16 +614,16 @@ end
 -- The window
 ------------------------------------------------------------
 
-function Panel.CanWrite()
-    local okR, ready = pcall(function() return ASS.Ready.IsReady() end)
-    return okR and ready and not (InCombatLockdown and InCombatLockdown()) and true or false
+-- Whether a write can start now, and why not: Loadout.Blocked's own answer
+-- (combat, readiness, something on the cursor), so the buttons and the
+-- flows agree.
+function Panel.WhyNot()
+    local ok, why = pcall(function() return ASS.Loadout.Blocked() end)
+    if not ok then return "Not available now." end
+    return why
 end
 
-function Panel.WhyNot()
-    local okR, ready = pcall(function() return ASS.Ready.IsReady() end)
-    if not (okR and ready) then return "Waiting for character data." end
-    if InCombatLockdown and InCombatLockdown() then return "Not in combat: try again when it ends." end
-end
+function Panel.CanWrite() return Panel.WhyNot() == nil end
 
 local function ShowView(view)
     Panel.view = view
@@ -676,9 +723,10 @@ local function BuildLoadouts(v)
         if not e then return end
         if e.conflict then
             local c = e.conflict
+            local from = tostring(c.from or "your other account")
             OpenMenu(self, {
                 { text = c.deletion and "Keep it..." or "Keep this account's version...", value = "mine" },
-                { text = c.deletion and "Delete it here too..." or ("Use the version from " .. tostring(c.from) .. "..."), value = "theirs" },
+                { text = c.deletion and "Delete it here too..." or ("Use the version from " .. from .. "..."), value = "theirs" },
             }, function(choice) Cmd().ResolveCopy(e.id, choice) end)
         else
             OpenMenu(self, { { text = "Rename...", value = "rename" }, { text = "Delete...", value = "delete" } },
@@ -748,7 +796,7 @@ local function BuildBackups(v)
     intro:SetPoint("TOPLEFT", 0, 0)
     intro:SetText("Taken before every load and restore. Restore puts this character's bars, keys and macros back exactly.")
     local sc = CreateFrame("ScrollFrame", nil, v)
-    sc:SetSize(w, 300)
+    sc:SetSize(w, 260)
     sc:SetPoint("TOPLEFT", 0, -36)
     local child = CreateFrame("Frame", nil, sc)
     child:SetSize(w, 10)
@@ -762,7 +810,7 @@ local function BuildBackups(v)
     W.backupEmpty = Text(v, "GameFontHighlightSmall", w, MUTED)
     W.backupEmpty:SetPoint("TOPLEFT", 6, -42)
     W.restore = GButton(v, "Restore...", 140, "primary")
-    W.restore:SetPoint("TOPLEFT", 0, -386)
+    W.restore:SetPoint("BOTTOMLEFT", 0, 10)
     W.restore:SetScript("OnClick", function()
         local slot = Panel.SlotOf(Panel.sel.snap)
         if not slot then
@@ -796,23 +844,14 @@ local function Build()
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving)
     f:SetScript("OnDragStop", f.StopMovingOrSizing)
-    local Glass = LibStub and LibStub("LibGlass-1.0", true)
-    if Glass and Glass.New then
-        local okG, inst = pcall(Glass.New, Glass)
-        if okG and inst and inst.Apply then pcall(inst.Apply, f, "large") end
-    elseif f.SetBackdrop then
-        f:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-                        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-                        tile = true, tileSize = 32, edgeSize = 32,
-                        insets = { left = 11, right = 12, top = 12, bottom = 11 } })
-    end
+    ASS.Preview.Glass(f)
     -- Smoked glass under the text: the rim stays glass, the reading area
     -- doesn't show the world through it.
     local smoke = f:CreateTexture(nil, "BACKGROUND", nil, 7)
     smoke:SetPoint("TOPLEFT", 6, -6)
     smoke:SetPoint("BOTTOMRIGHT", -6, 6)
     smoke:SetColorTexture(0.02, 0.02, 0.035, 0.84)
-    tinsert(UISpecialFrames, "AltStableSyncPanel")
+    Panel.SyncEscape()
 
     W.title = Text(f, "GameFontNormalHuge", 300, GOLD)
     W.title:SetPoint("TOPLEFT", PAD, -16)
@@ -892,7 +931,18 @@ local function Build()
         if Panel.dirty or acc >= REFRESH then acc, Panel.dirty = 0, false; Panel.Refresh() end
         if Panel.saveDirty or saveAcc >= SAVE_REFRESH then saveAcc, Panel.saveDirty = 0, false; Panel.RefreshSave() end
     end)
-    f:SetScript("OnHide", function() CloseMenu() end)
+    -- Events only while shown: they mark the save status (and the model) dirty.
+    f:SetScript("OnEvent", function() Panel.dirty, Panel.saveDirty = true, true end)
+    f:SetScript("OnShow", function(self)
+        for _, e in ipairs(SAVE_EVENTS) do pcall(self.RegisterEvent, self, e) end
+    end)
+    f:SetScript("OnHide", function(self)
+        CloseMenu()
+        for _, e in ipairs(SAVE_EVENTS) do pcall(self.UnregisterEvent, self, e) end
+    end)
+    -- A new frame starts shown, and Show() on a shown frame fires no OnShow:
+    -- start hidden, so the first Show registers the events.
+    f:Hide()
     frame = f
     return f
 end
@@ -927,7 +977,8 @@ function Panel.Refresh()
     end
     W.backupsLink:Show()
     W.backupsLink:SetText(Panel.view == "backups" and "< Loadouts" or "Backups...")
-    local canWrite, whyNot = m.ready and not m.combat, Panel.WhyNot()
+    local whyNot = Panel.WhyNot()
+    local canWrite = whyNot == nil
 
     -- What is browsed: kept for the session.
     if m.selectionGone then Panel.sel.id, Panel.sel.noDefault = nil, true end
@@ -991,7 +1042,7 @@ function Panel.Refresh()
     W.manage:SetText(copy and "Resolve..." or "Manage...")
 
     -- The window fits its contents, so the footer keeps its own band.
-    if Panel.view == "loadouts" then frame:SetHeight(ABOVE_BOX + boxHeight + BELOW_BOX + FOOTER) end
+    frame:SetHeight(ABOVE_BOX + (Panel.view == "loadouts" and boxHeight or 152) + BELOW_BOX + FOOTER)
 
     -- Save this character.
     local t = m.target
@@ -1052,6 +1103,10 @@ end
 
 function Panel.Show()
     if not frame then Build() end
+    -- Each opening starts on the save target (docs/DESIGN.md), not on what
+    -- was browsed last time.
+    Panel.view = "loadouts"
+    Panel.sel = { category = nil, id = nil, snap = nil, noDefault = false }
     frame:Show()
     ShowView(Panel.view)
     Panel.RefreshSave()
