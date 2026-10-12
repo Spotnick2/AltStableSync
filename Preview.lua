@@ -2,7 +2,10 @@
 -- Preview.lua - our own confirmation frame (never a StaticPopup: it taints
 -- Blizzard's dialog pool, measured 70205)
 --
--- Preview.Show{ title, lines, confirm = "Load", onConfirm = fn, onCancel = fn }
+-- Preview.Show{ title, lines, confirm = "Load", onConfirm = fn, onCancel = fn,
+--               check = { text, checked, onToggle = fn(checked) } }
+-- `check`: one optional tick box ("Include character macros", #6). Ticking
+-- it writes nothing: onToggle shows a new preview of the changed plan.
 -- One frame, reused; parented to UIParent; Escape and Cancel close it without
 -- writing anything. onConfirm runs at most once per Show.
 -- Preview.Shown() is the options table on screen now, or nil.
@@ -70,6 +73,16 @@ local function Build()
     end
     f.cancel = button("Cancel", -20)
     f.confirm = button("Load", -140)
+    local check = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+    check:SetSize(24, 24)
+    check:SetPoint("BOTTOMLEFT", 16, 16)
+    check.label = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    check.label:SetPoint("LEFT", check, "RIGHT", 2, 0)
+    check:SetScript("OnClick", function(self)
+        local c = current and current.check
+        if c and c.onToggle then c.onToggle(self:GetChecked() and true or false) end
+    end)
+    f.check = check
     f:SetScript("OnHide", function(self)
         current = nil
         local cb = self.onCancel
@@ -95,6 +108,15 @@ function Preview.Show(opts)
     frame.confirm:SetText(opts.confirm or "Load")
     if opts.confirm == false then frame.confirm:Hide() else frame.confirm:Show() end
     frame.onConfirm, frame.onCancel = opts.onConfirm, opts.onCancel
+    if opts.check then
+        frame.check.label:SetText(opts.check.text or "")
+        frame.check:SetChecked(opts.check.checked and true or false)
+        frame.check:Show()
+        frame.check.label:Show()
+    else
+        frame.check:Hide()
+        frame.check.label:Hide()
+    end
     frame:Show()
     current = opts
 end

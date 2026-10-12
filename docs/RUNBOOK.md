@@ -77,6 +77,20 @@ usual load preview; click Load there. To go back, untick Character Specific Keyb
 keys). If the switch stops partway, it says why; it refuses to try again until the keys are as
 they were, and `/altsync status` shows it.
 
+## Macros
+
+A loadout carries the character macros its bars use. Loading it on a character that has a character
+macro of the same name with other text or another icon **updates that macro** (the preview lists
+it, with the first line that changes): every button that uses it, on any bar, then shows the new
+text. That is how a macro you changed and saved on one character reaches the others. `/altsync
+restore 1` puts the old text back, unless you have changed the macro again since (then it is left,
+and the restore says so).
+
+Account macros are never written. A loadout's macro is left out (its slots unchanged, listed) when
+an account macro has its name, when two macros share its name (rename one), or when you untick
+"Include character macros" in the Load preview (`/altsync load <name> nomacros` does the same).
+Macros a load created stay after a restore; delete them yourself if you don't want them.
+
 ## Bars, stances and forms
 
 A loadout's actions cover Action Bars 1–8 (both pages of Action Bar 1) and the four stance/form pages,

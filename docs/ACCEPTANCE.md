@@ -37,7 +37,7 @@
 | A23 | Cursor occupied before capture/apply | Refuse cursor-mutating work without touching payload |
 | A24 | Backup capture fails | Zero game-state writes |
 | A25 | Write read-back differs | Failure/partial report, no false success; original backup remains usable |
-| A26 | Restore after adaptive load | New backup first; original exact rank/keys/macros restored within supported scope; macros that load created are offered for removal, including after the load completed or was abandoned and the client was fully exited |
+| A26 | Restore after adaptive load | New backup first; original exact rank/keys/macros restored within supported scope; macros that load created are offered for removal, including after the load completed or was abandoned and the client was fully exited (**removal deferred by #6**: they are kept and listed; a character macro the load updated is put back) |
 | A27 | Exact snapshot value no longer exists | Report partial/unavailable; never adaptive substitution |
 | A28 | First UPDATE_MACROS contains account macros only | Capture/apply remains gated until measured readiness checks succeed |
 | A29 | Unknown/newer saved schema | Refuse with no rewrite, reset or best-effort parse |

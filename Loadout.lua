@@ -139,8 +139,11 @@ function Loadout.Blocked()
 end
 
 -- Resolve one wanted action against this character. Returns the target
--- action, or nil plus a skip reason; `create` marks a macro to create.
-local function Resolve(want, modules, book)
+-- action, or nil plus a skip reason; then `create` marks a macro to create,
+-- or `edit` = { from = { body, icon }, to = { body, icon } } a character
+-- macro of that name to update (#6). `opts.noCharMacros`: the player left
+-- character macros out, so their slots are left as they are.
+local function Resolve(want, modules, book, opts)
     local Game = G()
     if want.kind == "spell" then
         -- Absent only when the whole book read and the client says no by id
@@ -183,24 +186,41 @@ local function Resolve(want, modules, book)
             -- a different macro of that name is left alone.
             return nil, #matches == 0 and "account macro missing" or "account macro differs"
         end
+        if opts and opts.noCharMacros then return nil, "character macros not included" end
         local def = modules.macros and modules.macros[want.name]
         if not def then return nil, "macro definition missing" end
+        -- A body that isn't text is damage, never an instruction to blank a
+        -- macro (an empty string is a real, empty body).
+        if type(def.body) ~= "string" then return nil, "macro definition damaged" end
+        local body = Game.Normalize(def.body)
         if #matches == 0 then
-            local body = Game.Normalize(def.body)
             if #body > MACRO_MAX then return nil, "macro too long" end
             return { kind = "macro", name = want.name, body = body, scope = "char", icon = def.icon }, nil, true
         end
         local m = matches[1]
-        if #matches == 1 and m.scope == "char" and Game.Normalize(m.body) == Game.Normalize(def.body) then
-            return { kind = "macro", name = m.name, body = m.body, scope = "char" }
+        if #matches == 1 and m.scope == "char" then
+            if type(m.body) ~= "string" then return nil, "macros unreadable" end
+            -- No icon in the definition keeps this macro's own.
+            local icon = def.icon
+            if icon == nil then icon = m.icon end
+            if Game.Normalize(m.body) == body and icon == m.icon then
+                return { kind = "macro", name = m.name, body = m.body, scope = "char" }
+            end
+            -- One character macro of that name, with other text or icon:
+            -- updated to the loadout's (#6), previewed and backed up.
+            if #body > MACRO_MAX then return nil, "macro too long" end
+            return { kind = "macro", name = m.name, body = body, scope = "char" }, nil, nil,
+                { from = { body = m.body, icon = m.icon }, to = { body = body, icon = icon } }
         end
+        -- An account macro of that name, or several: never written.
         return nil, "macro name conflict"
     end
     return nil, "not supported yet"
 end
 
 -- plan = { kind = "load"|"restore", blocked, actions = {{slot, target, current, why}},
---          creates = {{name, body, icon}}, keys = {[key] = {to = cmd|false, from}},
+--          creates = {{name, body, icon}}, edits = {{name, from = {body, icon}, to = {body, icon}}} (#6),
+--          noCharMacros, keys = {[key] = {to = cmd|false, from}},
 --          keysBlocked, skips = {{slot, reason}}, waiting = {{slot, reason}} (load),
 --          unavailable (restore), noop, fingerprint }
 -- An action with no target empties its slot; `why` is the loadout's reason
@@ -208,11 +228,13 @@ end
 -- untouched; `waiting` are already empty and stay so until the character
 -- can use what the loadout has there.
 local function Finish(plan)
-    plan.noop = #plan.actions == 0 and #plan.creates == 0 and next(plan.keys) == nil and not plan.resave
-        and not (plan.pet and #plan.pet.ops > 0)
+    plan.edits = plan.edits or {}
+    plan.noop = #plan.actions == 0 and #plan.creates == 0 and #plan.edits == 0 and next(plan.keys) == nil
+        and not plan.resave and not (plan.pet and #plan.pet.ops > 0)
     -- The pet part holds the pet GUID, its bar now, the ops, the final bar
     -- and the skips: another pet, or a changed bar, refuses the confirm.
     plan.fingerprint = Serialize({ v = plan.version, w = plan.which, a = plan.actions, c = plan.creates,
+                                   e = plan.edits,
                                    k = plan.keys, kb = plan.keysBlocked or false, s = plan.skips,
                                    wt = plan.waiting or {}, r = plan.resave or false,
                                    u = plan.unavailable or {}, b = plan.blocked or false, p = plan.pet or false })
@@ -280,10 +302,12 @@ local function PlanKeys(plan, wantKeys)
     end
 end
 
-function Loadout.Plan(entry)
+-- `opts.noCharMacros`: "Include character macros" unticked (#6).
+function Loadout.Plan(entry, opts)
     local Game = G()
     local plan = { kind = "load", entryId = entry.id, version = entry.version, name = entry.name,
-                   actions = {}, creates = {}, keys = {}, skips = {}, waiting = {} }
+                   actions = {}, creates = {}, edits = {}, keys = {}, skips = {}, waiting = {},
+                   noCharMacros = (opts and opts.noCharMacros) and true or nil }
     if entry.kind ~= "loadout" then plan.blocked = "Not a loadout." return Finish(plan) end
     if entry.class ~= PlayerClass() then
         plan.blocked = "This loadout is for another class." return Finish(plan)
@@ -299,6 +323,16 @@ function Loadout.Plan(entry)
     local modules = entry.modules or {}
     local book = Game.Spellbook()
     local creating, charCount = {}, Game.CharMacroCount()
+    -- The bars as they will be after the planned updates (#6): a slot that
+    -- holds a character macro being updated already shows its new text.
+    local editing = {}
+    local function View(a)
+        local e = a and a.kind == "macro" and a.scope == "char" and editing[a.name]
+        if not e then return a end
+        local v = ASS.Catalog.Copy(a)
+        v.body, v.icon = e.to.body, e.to.icon
+        return v
+    end
     -- Slots this build doesn't read or write are listed, never applied.
     local outside = {}
     for slot in pairs(modules.actions or {}) do
@@ -316,9 +350,15 @@ function Loadout.Plan(entry)
         if ASS.Cover.Has(modules.cover, slot) then
             local want = modules.actions and modules.actions[slot]
             local current = Game.ActionAt(slot)
-            local target, why, create
-            if want then target, why, create = Resolve(want, modules, book) end
-            local same = Game.SameAction(current, target)
+            local target, why, create, edit
+            if want then target, why, create, edit = Resolve(want, modules, book, plan) end
+            -- One update per macro name, planned by the first slot that will
+            -- hold it (the slot's content can be put back).
+            if target and edit and not editing[target.name] and Game.Restorable(current, book) then
+                editing[target.name] = edit
+                plan.edits[#plan.edits + 1] = { name = target.name, from = edit.from, to = edit.to }
+            end
+            local same = Game.SameAction(View(current), target)
             if target and not same and create and not creating[target.name] and Game.Restorable(current, book) then
                 if charCount == nil then
                     target, why = nil, "macros unreadable"
@@ -352,7 +392,9 @@ function Loadout.Plan(entry)
     -- The pet bar of the pet that is out, from its family's layout (#47).
     plan.pet = ASS.Pet.PlanLoad(modules.pet)
     if Unsaved() and Game.CharacterBindings() then plan.resave = true end
-    if plan.blocked then plan.actions, plan.creates, plan.keys, plan.resave, plan.pet = {}, {}, {}, nil, nil end
+    if plan.blocked then
+        plan.actions, plan.creates, plan.edits, plan.keys, plan.resave, plan.pet = {}, {}, {}, {}, nil, nil
+    end
     return Finish(plan)
 end
 
@@ -387,6 +429,17 @@ local function Snapshot(plan, reason)
     if plan.pet and #plan.pet.ops > 0 then
         snap.pet = ASS.Pet.Snapshot(plan.pet)
         if not snap.pet then return nil end
+    end
+    -- The character macros the plan updates, as they are and as they will
+    -- be (#6). Written here, before Pin or PushRing copy the snapshot, so the
+    -- first-seen copy has them too; an update recorded but never made is
+    -- harmless (Restore finds the macro already as it was).
+    if #(plan.edits or {}) > 0 then
+        snap.editedMacros = {}
+        for _, e in ipairs(plan.edits) do
+            snap.editedMacros[#snap.editedMacros + 1] = { name = e.name, before = ASS.Catalog.Copy(e.from),
+                                                          after = ASS.Catalog.Copy(e.to) }
+        end
     end
     return snap
 end
@@ -431,6 +484,40 @@ local function Execute(plan, snap)
         result.created = result.created + 1
     end
 
+    -- 1b. Character macro updates (#6): each still exactly as the preview
+    -- saw it, looked up by name NOW (creation shifts indices), then read back.
+    local edited = {}
+    result.edited = 0
+    local function single(name)
+        local m = Game.MacrosNamed(name)
+        if not m or #m ~= 1 or m[1].scope ~= "char" or type(m[1].body) ~= "string" then return nil end
+        return m[1]
+    end
+    for _, e in ipairs(plan.edits or {}) do
+        local at = "macro " .. e.name
+        local m = single(e.name)
+        if not m or Game.Normalize(m.body) ~= Game.Normalize(e.from.body) or m.icon ~= e.from.icon then
+            return fail("macro changed since the preview", at)
+        end
+        local ok, why = call(false, EditMacro, m.index, e.name, e.to.icon, e.to.body)
+        if not ok then return fail(why, at) end
+        m = single(e.name)
+        if not m or Game.Normalize(m.body) ~= Game.Normalize(e.to.body) or m.icon ~= e.to.icon then
+            return fail("macro not updated", at)
+        end
+        edited[e.name] = e.to
+        result.edited = result.edited + 1
+    end
+    -- What a slot's snapshot content is now: a character macro updated above
+    -- shows its new text (the snapshot itself keeps the old, for restore).
+    local function expected(a)
+        local to = a and a.kind == "macro" and a.scope == "char" and edited[a.name]
+        if not to then return a end
+        local v = ASS.Catalog.Copy(a)
+        v.body, v.icon = to.body, to.icon
+        return v
+    end
+
     -- 2. Actions: pick up, check the cursor, place, handle the displaced
     -- action, read back. Macro indices are looked up NOW (creation shifts them).
     for _, op in ipairs(plan.actions) do
@@ -464,7 +551,7 @@ local function Execute(plan, snap)
             if t and Game.SameAction(held, t) and not Game.SameAction(Game.ActionAt(op.slot), t) then
                 return bail("place failed", at)      -- our pickup never landed
             end
-            if not Game.SameAction(held, snap.actions[op.slot] or nil) then
+            if not Game.SameAction(held, expected(snap.actions[op.slot] or nil)) then
                 return bail("unexpected item on cursor", at)
             end
             pcall(ClearCursor)
@@ -694,7 +781,7 @@ function Loadout.Load(entry, shown, abandon)
     local live = ASS.Catalog.Get(entry.id)
     if not live or live.deleted then return nil, "That loadout was deleted since the preview." end
     entry = live
-    local plan = Loadout.Plan(entry)
+    local plan = Loadout.Plan(entry, { noCharMacros = shown and shown.noCharMacros })
     if plan.blocked then return nil, plan.blocked end
     if plan.fingerprint ~= shown.fingerprint then return nil, "Something changed since the preview: review it again." end
     local pinned = ASS.Backups.Operation()
@@ -1184,17 +1271,51 @@ end
 function Loadout.PlanRestore(which)
     local Game = G()
     local snap = ASS.Backups.Get(which)
-    local plan = { kind = "restore", which = which, actions = {}, creates = {}, keys = {}, skips = {}, unavailable = {} }
+    local plan = { kind = "restore", which = which, actions = {}, creates = {}, edits = {}, keys = {}, skips = {},
+                   unavailable = {} }
     if not snap then plan.blocked = "No such backup." return Finish(plan) end
     plan.blocked = Loadout.Blocked()
     if plan.blocked then return Finish(plan) end
     local book = Game.Spellbook()
+    -- The character macros the backed-up operation updated (#6), each now:
+    -- as it was (already restored, or the update never ran): nothing to do;
+    -- as that operation left it: put back; anything else (edited again,
+    -- gone, two of that name): left as is, and the restore stays partial.
+    -- `view`: their text once this restore has run.
+    local view = {}
+    local edited = type(snap.editedMacros) == "table" and snap.editedMacros or {}
+    for i = #edited, 1, -1 do
+        local e = edited[i]
+        local m = Game.MacrosNamed(e.name)
+        local one = m and #m == 1 and m[1].scope == "char" and type(m[1].body) == "string" and m[1]
+        local function is(x)
+            return one and type(x) == "table" and type(x.body) == "string"
+                and Game.Normalize(one.body) == Game.Normalize(x.body) and one.icon == x.icon
+        end
+        if is(e.before) then
+            view[e.name] = e.before
+        elseif is(e.after) then
+            plan.edits[#plan.edits + 1] = { name = e.name, from = { body = one.body, icon = one.icon },
+                                            to = ASS.Catalog.Copy(e.before) }
+            view[e.name] = e.before
+        else
+            plan.unavailable[#plan.unavailable + 1] = { name = tostring(e.name),
+                reason = m == nil and "macros unreadable" or "changed since the load, left as is" }
+        end
+    end
+    local function View(a)
+        local v = a and a.kind == "macro" and a.scope == "char" and view[a.name]
+        if not v then return a end
+        local c = ASS.Catalog.Copy(a)
+        c.body, c.icon = v.body, v.icon
+        return c
+    end
     local slots = {}
     for slot in pairs(snap.actions or {}) do slots[#slots + 1] = slot end
     table.sort(slots)
     for _, slot in ipairs(slots) do
         local want = snap.actions[slot]
-        local current = Game.IS_SLOT[slot] and Game.ActionAt(slot)
+        local current = Game.IS_SLOT[slot] and View(Game.ActionAt(slot))
         local target, why
         if not Game.IS_SLOT[slot] then
             why = "not supported on this build"
@@ -1205,9 +1326,12 @@ function Loadout.PlanRestore(which)
         elseif want.kind == "item" then
             if Game.ItemCount(want.id) > 0 then target = { kind = "item", id = want.id } else why = "item not in bags" end
         elseif want.kind == "macro" then
+            -- As the macro will be after the reverts above.
             local m = Game.MacrosNamed(want.name)
-            if m and #m == 1 and m[1].scope == want.scope and Game.Normalize(m[1].body) == Game.Normalize(want.body) then
-                target = { kind = "macro", name = want.name, body = m[1].body, scope = want.scope }
+            local live = m and #m == 1 and m[1].scope == want.scope
+                and View({ kind = "macro", name = want.name, scope = want.scope, body = m[1].body, icon = m[1].icon })
+            if live and Game.Normalize(live.body) == Game.Normalize(want.body) then
+                target = { kind = "macro", name = want.name, body = live.body, scope = want.scope }
             else
                 why = "macro gone or changed"
             end
@@ -1244,7 +1368,7 @@ function Loadout.PlanRestore(which)
     -- The pet bar: only with the backup's pet out (family and name, #47).
     plan.pet = ASS.Pet.PlanRestore(snap.pet)
     if Unsaved() and Game.CharacterBindings() then plan.resave = true end
-    if plan.blocked then plan.actions, plan.keys, plan.resave, plan.pet = {}, {}, nil, nil end
+    if plan.blocked then plan.actions, plan.edits, plan.keys, plan.resave, plan.pet = {}, {}, {}, nil, nil end
     return Finish(plan)
 end
 

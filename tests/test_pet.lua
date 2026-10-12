@@ -610,7 +610,7 @@ do
     local back = assert(A.Envelope.Decode(enc))
     eq("wire: the pet bar survives", back.modules.pet[4].slots[4].id, 14916)
     eq("wire: an empty slot stays false", back.modules.pet[4].slots[7], false)
-    eq("schema 7", A.SCHEMA, 7)
+    eq("schema 8 (#6 bumped it after #47's 7)", A.SCHEMA, 8)
 end
 
 finish("test_pet")

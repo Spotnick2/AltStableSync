@@ -62,9 +62,11 @@ over months. The full model is in `docs/DESIGN.md`; the short form:
    entry is empty or holds what the character **verifiably** can't use. Unresolvable entries stay in
    the saved entry. A failed read, a damaged entry, an uncovered slot, or content the backup can't
    put back is left untouched. The player retries explicitly.
-5. **Account macros are never edited, created or deleted.** Reuse only on name + normalised body +
-   scope match; otherwise create a character macro. **No macro is ever deleted** unless the player
-   explicitly asks. Macro mutations first, reindex, then place.
+5. **Account macros are never edited, created or deleted.** Reuse on name + normalised body +
+   scope match; update the one character macro of that name when its text or icon differs
+   (previewed, backed up, restored); create a character macro when no macro has that name.
+   **No macro is ever deleted** unless the player explicitly asks. Macro mutations first,
+   reindex, then place.
    Sharing account macros between accounts is a separate, owner-approved policy change (#30), never
    an exception implied by other work.
 6. **Bindings are written to the Character set only, and only when it is active.** Account-binding
