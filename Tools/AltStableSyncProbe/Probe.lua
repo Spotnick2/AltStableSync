@@ -40,6 +40,15 @@
         /syncprobe macroedit combat  IN COMBAT: EditMacro to the same body; blocked or not?
         /syncprobe bind            bind CTRL-SHIFT-F11 in the CHARACTER binding set (restart test)
         /syncprobe cvar            write a marker CVar (restart test)
+        /syncprobe layouts         #29/#58 (read-only): saved layouts with content sums, Blizzard's
+                                   copy, this character's load records, bar toggles, damage meter
+        /syncprobe layoutadd       add an ACCOUNT layout "SyncProbe" (a copy of the active one) with
+                                   SaveLayouts + OnLayoutAdded; backup first (restart test). Log
+                                   another character in BEFORE this, so its load record exists
+        /syncprobe layoutupdate    replace SyncProbe's content in place (SaveLayouts only)
+        /syncprobe layoutactivate  SetActiveLayout to SyncProbe, then back by name
+        /syncprobe layoutclean     remove SyncProbe, compare every other layout with the backup
+        /syncprobe bartoggle <n>   flip bar n's visibility (2-8), read back, flip it back
         /syncprobe restart         after a FULL EXIT: what survived (macro, bind, cvar, SVs)
         /syncprobe clean           undo macro, bind and cvar
         /syncprobe copy            reopen the copy window (Ctrl+A, Ctrl+C)
@@ -158,6 +167,128 @@ local function TaintSince(mark)
     local t = {}
     for i = mark + 1, #blocked do t[#t + 1] = blocked[i] end
     return table.concat(t, " | ")
+end
+
+----------------------------------------------------------------------------
+-- Edit Mode layouts (#29, #58): helpers for the layout sections, the login
+-- record and restart. Indices count the presets first, as
+-- C_EditMode.GetLayouts().activeLayout does (measured on 70245).
+----------------------------------------------------------------------------
+
+local LAYOUT_NAME = "SyncProbe"
+local LT = (Enum and Enum.EditModeLayoutType) or { Preset = 0, Account = 1, Character = 2 }
+local MAX_LAYOUTS = (Constants and Constants.EditModeConsts and Constants.EditModeConsts.EditModeMaxLayoutsPerType) or 5
+
+-- Adler-32 of a layout string. Re-encoding is stable (70245), so equal sums
+-- mean equal content.
+local function Sum(s)
+    if type(s) ~= "string" then return nil end
+    local a, b = 1, 0
+    for i = 1, #s do
+        a = (a + s:byte(i)) % 65521
+        b = (b + a) % 65521
+    end
+    return ("%04x%04x"):format(b, a)
+end
+
+local function Encode(layout)
+    local ok, s = pcall(C_EditMode.ConvertLayoutInfoToString, layout)
+    if ok and type(s) == "string" then return s end
+end
+
+-- A copy of Blizzard's preset layouts: the list SaveLayouts is given starts
+-- with them, as EditModeManagerFrame passes it.
+local function Presets()
+    local ok, p = pcall(function() return EditModePresetLayoutManager:GetCopyOfPresetLayouts() end)
+    if ok and type(p) == "table" then return p end
+end
+
+-- { active, activeName, presets, list = { { index, name, type, systems, str, sum } } },
+-- plus the raw GetLayouts() result and the presets copy.
+local function LayoutSnapshot()
+    if not C_EditMode then return nil end
+    local ok, info = pcall(C_EditMode.GetLayouts)
+    if not ok or type(info) ~= "table" or type(info.layouts) ~= "table" then return nil end
+    local presets = Presets()
+    local np = presets and #presets
+        or (Enum and Enum.EditModePresetLayoutsMeta and Enum.EditModePresetLayoutsMeta.NumValues) or 2
+    local snap = { active = info.activeLayout, presets = np, list = {} }
+    for i, l in ipairs(info.layouts) do
+        local s = Encode(l)
+        snap.list[i] = { index = np + i, name = l.layoutName, type = l.layoutType,
+                         systems = type(l.systems) == "table" and #l.systems or -1, str = s, sum = Sum(s) }
+    end
+    local a = tonumber(info.activeLayout)
+    if a and a > np then
+        local e = snap.list[a - np]
+        snap.activeName = e and e.name
+    elseif a and presets and presets[a] then
+        snap.activeName = "preset:" .. tostring(presets[a].layoutName)
+    end
+    return snap, info, presets
+end
+
+local function FindByName(snap, name)
+    for _, e in ipairs(snap.list) do
+        if e.name == name then return e end
+    end
+end
+
+-- Blizzard's own copy of the layouts. Edit Mode saves THIS list, so if it
+-- misses our write, its next save drops it.
+local function BlizzardCopyLine(snap)
+    local f = _G.EditModeManagerFrame
+    local li = f and f.layoutInfo
+    if type(li) ~= "table" or type(li.layouts) ~= "table" then return "none (EditModeManagerFrame.layoutInfo)" end
+    local names, inStep = {}, li.activeLayout == snap.active and #li.layouts - snap.presets == #snap.list
+    for i, l in ipairs(li.layouts) do
+        names[#names + 1] = tostring(l.layoutName)
+        if i > snap.presets then
+            local e = snap.list[i - snap.presets]
+            if not e or e.name ~= l.layoutName or e.sum ~= Sum(Encode(l)) then inStep = false end
+        end
+    end
+    return ("%d layouts, active=%s, names+content in step: %s [%s]"):format(#li.layouts,
+        tostring(li.activeLayout), tostring(inStep), table.concat(names, ", "))
+end
+
+-- EDIT_MODE_LAYOUTS_UPDATED: when the client tells Blizzard's copy to refresh.
+local layoutEvents = {}
+local layoutEventFrame = CreateFrame("Frame")
+pcall(layoutEventFrame.RegisterEvent, layoutEventFrame, "EDIT_MODE_LAYOUTS_UPDATED")
+layoutEventFrame:SetScript("OnEvent", function(_, _, info, reconcile)
+    local okT = type(info) == "table"
+    layoutEvents[#layoutEvents + 1] = ("t=%.1f saved=%s active=%s reconcile=%s"):format(GetTime(),
+        okT and type(info.layouts) == "table" and #info.layouts or "?", okT and tostring(info.activeLayout) or "?",
+        tostring(reconcile))
+end)
+
+local function EventsSince(mark)
+    if #layoutEvents == mark then return "none" end
+    local t = {}
+    for i = mark + 1, #layoutEvents do t[#t + 1] = layoutEvents[i] end
+    return table.concat(t, " | ")
+end
+
+-- Each character's active layout at every load, by index AND name: adding
+-- an Account layout may move other characters (their active layout is an index).
+local function RecordLoginLayout(isLogin)
+    local snap = LayoutSnapshot()
+    if not snap then return end
+    local cdb = CharDB()
+    cdb.layoutLogins = cdb.layoutLogins or {}
+    table.insert(cdb.layoutLogins, { at = Stamp(), login = isLogin, active = snap.active, name = snap.activeName,
+                                     saved = #snap.list })
+    while #cdb.layoutLogins > 5 do table.remove(cdb.layoutLogins, 1) end
+end
+
+local function LoginRecordLines(cdb)
+    local l = cdb.layoutLogins or {}
+    for i = math.max(1, #l - 2), #l do
+        Record(("%-44s %s %s active=%s (%s) saved=%s"):format("load record " .. i .. "/" .. #l, tostring(l[i].at),
+            l[i].login == true and "login" or l[i].login == false and "/reload" or "?", ValStr(l[i].active),
+            ValStr(l[i].name), ValStr(l[i].saved)))
+    end
 end
 
 local P = {}
@@ -331,6 +462,7 @@ loginFrame:SetScript("OnEvent", function(self, event, arg1)
             cdb.logins = cdb.logins or {}
             table.insert(cdb.logins, { at = Stamp(), build = Build(), log = copy, counts = counts })
             while #cdb.logins > 5 do table.remove(cdb.logins, 1) end
+            pcall(RecordLoginLayout, initialLogin)
         end)
     end
 end)
@@ -377,6 +509,343 @@ function P.editmode()
         tostring(#(back.systems or {}) == #(info.systems or {}))))
     local okR, s2 = pcall(C_EditMode.ConvertLayoutInfoToString, back)
     Record(("%-44s %s"):format("re-encode identical", okR and tostring(s2 == s) or ("THREW " .. tostring(s2))))
+end
+
+----------------------------------------------------------------------------
+-- layouts (#29, #58): read-only state, then the layout write tests
+----------------------------------------------------------------------------
+
+local function LayoutLines(snap)
+    for _, e in ipairs(snap.list) do
+        Record(("  [%d] %-22s type=%s systems=%d len=%s sum=%s"):format(e.index, ValStr(e.name), ValStr(e.type),
+            e.systems, ValStr(e.str and #e.str), ValStr(e.sum)))
+    end
+    Record(("%-44s %s (%s)"):format("active", ValStr(snap.active), ValStr(snap.activeName)))
+end
+
+function P.layouts()
+    Section("layouts  (#29/#58: saved layouts, Blizzard's copy, bars, damage meter - read-only)")
+    if not C_EditMode then Record("C_EditMode ABSENT"); return end
+    local snap = LayoutSnapshot()
+    if not snap then Record("GetLayouts failed"); return end
+    Record(("%-44s %d presets, %d saved, max %d per type"):format("layouts", snap.presets, #snap.list, MAX_LAYOUTS))
+    LayoutLines(snap)
+    Record(("%-44s %s"):format("Blizzard copy", BlizzardCopyLine(snap)))
+    Record(("%-44s %s"):format("Edit Mode window shown",
+        tostring(EditModeManagerFrame ~= nil and EditModeManagerFrame:IsShown())))
+    LoginRecordLines(CharDB())
+    -- The owner's new-character steps 2-4.
+    Call("GetActionBarToggles()", GetActionBarToggles)
+    Call("C_CVar.GetCVar(damageMeterEnabled)", C_CVar.GetCVar, "damageMeterEnabled")
+    local okS, settings = pcall(C_EditMode.GetAccountSettings)
+    if okS and type(settings) == "table" then
+        local want = Enum and Enum.EditModeAccountSetting and Enum.EditModeAccountSetting.ShowDamageMeter
+        for _, s in ipairs(settings) do
+            if s.setting == want then Record(("%-44s %s"):format("account setting ShowDamageMeter", ValStr(s.value))) end
+        end
+        Record(("%-44s %d settings"):format("C_EditMode.GetAccountSettings()", #settings))
+    else
+        Record("GetAccountSettings THREW " .. tostring(settings))
+    end
+    -- "Current Segment" lives in Blizzard's own per-character SavedVariables: read only.
+    local dm = _G.DamageMeterPerCharacterSettings
+    local wl = type(dm) == "table" and dm.windowDataList
+    if type(wl) == "table" then
+        for i, w in pairs(wl) do
+            Record(("%-44s meterType=%s sessionType=%s shown=%s"):format("damage meter window " .. tostring(i),
+                ValStr(w.damageMeterType), ValStr(w.sessionType), ValStr(w.shown)))
+        end
+    else
+        Record("DamageMeterPerCharacterSettings.windowDataList: " .. type(wl))
+    end
+    if Enum and Enum.DamageMeterSessionType then
+        Record(("%-44s %s"):format("Enum.DamageMeterSessionType", ValStr(Enum.DamageMeterSessionType, 1)))
+    end
+end
+
+local function LayoutWriteGate()
+    if InCombatLockdown() then Record("out of combat only"); return false end
+    if EditModeManagerFrame and EditModeManagerFrame:IsShown() then Record("close Edit Mode first"); return false end
+    return true
+end
+
+-- The list SaveLayouts takes: the presets, then the saved layouts as the
+-- client returned them. EditModeManagerFrame:SaveLayouts passes the same shape.
+local function Combined(info, presets)
+    local c = { activeLayout = info.activeLayout, layouts = {} }
+    for _, p in ipairs(presets) do c.layouts[#c.layouts + 1] = p end
+    for _, l in ipairs(info.layouts) do c.layouts[#c.layouts + 1] = l end
+    return c
+end
+
+-- Every layout of the backup except the probe's: still there, same type, same content?
+local function OthersLine(snap, before)
+    local bad, n = {}, 0
+    for _, b in ipairs(before.list) do
+        if b.name ~= LAYOUT_NAME then
+            n = n + 1
+            local e = FindByName(snap, b.name)
+            if not e then bad[#bad + 1] = tostring(b.name) .. " MISSING"
+            elseif e.sum ~= b.sum or e.type ~= b.type then bad[#bad + 1] = tostring(b.name) .. " CHANGED" end
+        end
+    end
+    return #bad == 0 and ("all %d unchanged"):format(n) or table.concat(bad, ", ")
+end
+
+local function LayoutCheck(label, test, expect)
+    local snap = LayoutSnapshot()
+    if not snap then Record(label .. ": GetLayouts failed"); return end
+    local e = FindByName(snap, LAYOUT_NAME)
+    Record(("%-44s %s"):format(label .. ": probe layout", e and ("index %d type %s, content %s"):format(e.index,
+        ValStr(e.type), expect and (e.sum == expect and "as written" or "DIFFERENT") or "-") or "absent"))
+    Record(("%-44s %s"):format(label .. ": other layouts", OthersLine(snap, test.before)))
+    Record(("%-44s %s (%s), before %s (%s)"):format(label .. ": active", ValStr(snap.active), ValStr(snap.activeName),
+        ValStr(test.before.active), ValStr(test.before.activeName)))
+    Record(("%-44s %s"):format(label .. ": Blizzard copy", BlizzardCopyLine(snap)))
+    return snap, e
+end
+
+function P.layoutadd()
+    Section("layoutadd  (#29/#58: add an ACCOUNT layout from a string, SaveLayouts + OnLayoutAdded)")
+    if not LayoutWriteGate() then return end
+    local db = DB()
+    if db.layoutTest then
+        Record("a layout test is armed (" .. tostring(db.layoutTest.state) .. ") - restart and/or layoutclean first")
+        return
+    end
+    local snap, info, presets = LayoutSnapshot()
+    if not snap then Record("GetLayouts failed"); return end
+    if not presets then Record("no preset copy (EditModePresetLayoutManager) - not writing"); return end
+    if FindByName(snap, LAYOUT_NAME) then Record("a layout named " .. LAYOUT_NAME .. " already exists - not touching it"); return end
+    local nAcc = 0
+    for _, e in ipairs(snap.list) do
+        if e.type == LT.Account then nAcc = nAcc + 1 end
+        if not e.str then Record("layout " .. tostring(e.name) .. " does not encode - not writing"); return end
+    end
+    if nAcc >= MAX_LAYOUTS then
+        Record(("%d Account layouts already (max %d) - not adding"):format(nAcc, MAX_LAYOUTS))
+        return
+    end
+    local okN, valid = pcall(C_EditMode.IsValidLayoutName, LAYOUT_NAME)
+    Record(("%-44s %s"):format("IsValidLayoutName(" .. LAYOUT_NAME .. ")", okN and ValStr(valid) or "THREW"))
+    if not (okN and valid) then return end
+    -- The content: the active saved layout's, else the first saved one's.
+    local a = tonumber(snap.active)
+    local src = (a and a > snap.presets and snap.list[a - snap.presets]) or snap.list[1]
+    if not src then Record("no saved layout to copy - Save As one in Edit Mode first"); return end
+    local okD, newInfo = pcall(C_EditMode.ConvertStringToLayoutInfo, src.str)
+    if not okD or type(newInfo) ~= "table" then Record("ConvertStringToLayoutInfo THREW " .. tostring(newInfo)); return end
+    newInfo.layoutName, newInfo.layoutType = LAYOUT_NAME, LT.Account
+    -- Where Blizzard's MakeNewLayout puts it: after the last Account layout.
+    local combined = Combined(info, presets)
+    local at = #presets + 1
+    for i = #presets + 1, #combined.layouts do
+        if combined.layouts[i].layoutType == LT.Account then at = i + 1 end
+    end
+    table.insert(combined.layouts, at, newInfo)
+    -- The backup, before any write: restart and layoutclean compare against it.
+    local t = { state = "adding", at = Stamp(), char = UnitName("player"), before = snap, insertAt = at,
+                source = src.name, expect = src.sum }
+    db.layoutTest = t
+    local mark, emark = #blocked, #layoutEvents
+    Record(("%-44s %s at index %d, a copy of %s"):format("adding", LAYOUT_NAME, at, ValStr(src.name)))
+    local okSave = Call("C_EditMode.SaveLayouts(presets+saved+new)", C_EditMode.SaveLayouts, combined)
+    if okSave then Call("C_EditMode.OnLayoutAdded(at, false, true)", C_EditMode.OnLayoutAdded, at, false, true) end
+    LayoutCheck("immediately", t, src.sum)
+    C_Timer.After(1.5, function()
+        local _, e = LayoutCheck("after 1.5 s", t, src.sum)
+        Record(("%-44s %s"):format("EDIT_MODE_LAYOUTS_UPDATED", EventsSince(emark)))
+        Record(("%-44s %s"):format("taint", TaintSince(mark)))
+        if e and e.sum == src.sum then
+            t.state = "added"
+            Record("armed. Open Edit Mode: is " .. LAYOUT_NAME .. " in the layout list? Close it WITHOUT saving.")
+            Record("Then EXIT THE GAME FULLY, relaunch, /syncprobe restart here AND on another character.")
+        else
+            Record("add NOT verified - run /syncprobe layoutclean")
+        end
+    end)
+end
+
+function P.layoutupdate()
+    Section("layoutupdate  (#58: replace the probe layout's content in place, SaveLayouts only)")
+    if not LayoutWriteGate() then return end
+    local t = DB().layoutTest
+    if not t or (t.state ~= "added" and t.state ~= "updated") then Record("run /syncprobe layoutadd first"); return end
+    local snap, info, presets = LayoutSnapshot()
+    if not (snap and presets) then Record("GetLayouts or the preset copy failed"); return end
+    local e = FindByName(snap, LAYOUT_NAME)
+    if not e or e.type ~= LT.Account then Record("probe layout not found"); return end
+    -- New content: the first preset whose content differs from the probe layout's.
+    local srcStr
+    for _, p in ipairs(presets) do
+        local s = Encode(p)
+        if s and Sum(s) ~= e.sum then srcStr = s; break end
+    end
+    if not srcStr then Record("no different content to write"); return end
+    local okD, newInfo = pcall(C_EditMode.ConvertStringToLayoutInfo, srcStr)
+    if not okD or type(newInfo) ~= "table" then Record("ConvertStringToLayoutInfo THREW " .. tostring(newInfo)); return end
+    newInfo.layoutName, newInfo.layoutType = LAYOUT_NAME, LT.Account
+    local combined = Combined(info, presets)
+    combined.layouts[e.index] = newInfo
+    local expect = Sum(srcStr)
+    t.state, t.expect = "updating", expect
+    local mark, emark = #blocked, #layoutEvents
+    Call("C_EditMode.SaveLayouts(probe replaced)", C_EditMode.SaveLayouts, combined)
+    LayoutCheck("immediately", t, expect)
+    C_Timer.After(1.5, function()
+        local _, e2 = LayoutCheck("after 1.5 s", t, expect)
+        Record(("%-44s %s"):format("EDIT_MODE_LAYOUTS_UPDATED", EventsSince(emark)))
+        Record(("%-44s %s"):format("taint", TaintSince(mark)))
+        if not (e2 and e2.sum == expect) then
+            Record("update NOT verified - /syncprobe layouts, then layoutclean")
+            return
+        end
+        t.state = "updated"
+        -- Blizzard's copy is only refreshed by EDIT_MODE_LAYOUTS_UPDATED. Does
+        -- re-selecting the active layout (same index) send it?
+        local s2 = LayoutSnapshot()
+        local emark2 = #layoutEvents
+        Call("C_EditMode.SetActiveLayout(same index)", C_EditMode.SetActiveLayout, s2.active)
+        C_Timer.After(1.5, function()
+            local s3 = LayoutSnapshot()
+            Record(("%-44s %s"):format("after re-select: EDIT_MODE_LAYOUTS_UPDATED", EventsSince(emark2)))
+            Record(("%-44s %s"):format("after re-select: Blizzard copy", s3 and BlizzardCopyLine(s3) or "-"))
+            Record(("%-44s %s (%s)"):format("after re-select: active", ValStr(s3 and s3.active), ValStr(s3 and s3.activeName)))
+            Record(("%-44s %s"):format("taint", TaintSince(mark)))
+            Record("updated. EXIT THE GAME FULLY, relaunch, /syncprobe restart")
+        end)
+    end)
+end
+
+function P.layoutactivate()
+    Section("layoutactivate  (#29: SetActiveLayout to the probe layout, then back by name)")
+    if not LayoutWriteGate() then return end
+    local t = DB().layoutTest
+    if not t or (t.state ~= "added" and t.state ~= "updated") then Record("run /syncprobe layoutadd first"); return end
+    local snap = LayoutSnapshot()
+    if not snap then Record("GetLayouts failed"); return end
+    local e = FindByName(snap, LAYOUT_NAME)
+    if not e then Record("probe layout not found"); return end
+    local backName, backIndex = snap.activeName, snap.active
+    if backName == LAYOUT_NAME then Record("the probe layout is already active - pick another in Edit Mode first"); return end
+    Record(("%-44s %s (%s)"):format("active before", ValStr(backIndex), ValStr(backName)))
+    local mark, emark = #blocked, #layoutEvents
+    Call("C_EditMode.SetActiveLayout(probe)", C_EditMode.SetActiveLayout, e.index)
+    C_Timer.After(1.5, function()
+        local s2 = LayoutSnapshot()
+        if not s2 then Record("GetLayouts failed - switch back by hand in Edit Mode"); return end
+        Record(("%-44s %s (%s)"):format("active after 1.5 s", ValStr(s2.active), ValStr(s2.activeName)))
+        Record(("%-44s %s"):format("Blizzard copy", BlizzardCopyLine(s2)))
+        -- Back by NAME: a preset keeps its index, a saved layout is found again.
+        local back = backIndex
+        if type(backName) == "string" and not backName:find("^preset:") then
+            local b = FindByName(s2, backName)
+            back = b and b.index
+        end
+        if not back then Record("previous layout " .. tostring(backName) .. " not found - switch back by hand in Edit Mode"); return end
+        Call("C_EditMode.SetActiveLayout(previous)", C_EditMode.SetActiveLayout, back)
+        C_Timer.After(1.5, function()
+            local s3 = LayoutSnapshot()
+            Record(("%-44s %s (%s), back as before: %s"):format("active after restore", ValStr(s3 and s3.active),
+                ValStr(s3 and s3.activeName), tostring(s3 ~= nil and s3.activeName == backName)))
+            Record(("%-44s %s"):format("Blizzard copy", s3 and BlizzardCopyLine(s3) or "-"))
+            Record(("%-44s %s"):format("EDIT_MODE_LAYOUTS_UPDATED", EventsSince(emark)))
+            Record(("%-44s %s"):format("taint", TaintSince(mark)))
+        end)
+    end)
+end
+
+function P.layoutclean()
+    Section("layoutclean  (remove the probe layout; compare the others with the backup)")
+    if not LayoutWriteGate() then return end
+    local db = DB()
+    local t = db.layoutTest
+    local snap, info, presets = LayoutSnapshot()
+    if not (snap and presets) then Record("GetLayouts or the preset copy failed"); return end
+    local e = FindByName(snap, LAYOUT_NAME)
+    if not e then
+        if t then Record(("%-44s %s"):format("other layouts vs backup", OthersLine(snap, t.before))) end
+        db.layoutTest = nil
+        Record("no probe layout - nothing to remove, record cleared")
+        return
+    end
+    if not t then
+        Record("a layout named " .. LAYOUT_NAME .. " exists but the probe has no record of it - not touching it")
+        return
+    end
+    if e.type ~= LT.Account then Record(LAYOUT_NAME .. " is not an Account layout - not the probe's, not touching it"); return end
+    if snap.active == e.index then Record("the probe layout is active here - pick another layout in Edit Mode first"); return end
+    local combined = Combined(info, presets)
+    table.remove(combined.layouts, e.index)
+    local mark, emark = #blocked, #layoutEvents
+    local okSave = Call("C_EditMode.SaveLayouts(without probe)", C_EditMode.SaveLayouts, combined)
+    if okSave then Call("C_EditMode.OnLayoutDeleted(index)", C_EditMode.OnLayoutDeleted, e.index) end
+    local beforeName = snap.activeName
+    C_Timer.After(1.5, function()
+        local s2 = LayoutSnapshot()
+        if not s2 then Record("GetLayouts failed - rerun layoutclean"); return end
+        local gone = FindByName(s2, LAYOUT_NAME) == nil
+        local others = OthersLine(s2, t.before)
+        Record(("%-44s %s"):format("probe layout", gone and "removed" or "STILL THERE"))
+        Record(("%-44s %s"):format("other layouts vs backup", others))
+        Record(("%-44s %s (%s), before %s"):format("active", ValStr(s2.active), ValStr(s2.activeName), ValStr(beforeName)))
+        Record(("%-44s %s"):format("Blizzard copy", BlizzardCopyLine(s2)))
+        Record(("%-44s %s"):format("EDIT_MODE_LAYOUTS_UPDATED", EventsSince(emark)))
+        Record(("%-44s %s"):format("taint", TaintSince(mark)))
+        if gone then
+            db.layoutTest = nil
+            Record(others:find("^all") and "done - removed, the others match the backup" or "removed, but see 'other layouts' above")
+        end
+    end)
+end
+
+----------------------------------------------------------------------------
+-- bartoggle (step 2 of a new character: show action bars 2-8)
+----------------------------------------------------------------------------
+
+local function Pack(...) return { n = select("#", ...), ... } end
+
+local function TogglesLine(label)
+    local p = Pack(pcall(GetActionBarToggles))
+    if not p[1] then Record(("%-44s THREW %s"):format(label, tostring(p[2]))); return end
+    local parts = {}
+    for i = 2, p.n do parts[#parts + 1] = ValStr(p[i]) end
+    Record(("%-44s %s"):format(label, table.concat(parts, " ")))
+    return p
+end
+
+function P.bartoggle(rest)
+    Section("bartoggle  (flip one bar's visibility, read back, flip it back)")
+    if InCombatLockdown() then Record("out of combat only"); return end
+    local db = DB()
+    if db.barToggle then Record("a bar toggle record exists - /syncprobe clean first"); return end
+    local bar = tonumber(rest)
+    if not bar or bar < 2 or bar > 8 then Record("usage: /syncprobe bartoggle <2-8>"); return end
+    local p = TogglesLine("GetActionBarToggles() before")
+    if not p then return end
+    local count, idx = p.n - 1, bar - 1
+    if idx > count then Record("only " .. count .. " toggles returned"); return end
+    local orig, flipped = {}, {}
+    for i = 1, count do orig[i] = p[i + 1]; flipped[i] = p[i + 1] end
+    flipped[idx] = not orig[idx]
+    db.barToggle = { orig = orig, count = count, at = Stamp() }
+    local mark = #blocked
+    Call("SetActionBarToggles(bar " .. bar .. " flipped)", SetActionBarToggles, unpack(flipped, 1, count))
+    TogglesLine("immediately")
+    C_Timer.After(1, function() TogglesLine("after 1 s") end)
+    C_Timer.After(3, function()
+        TogglesLine("after 3 s")
+        Call("SetActionBarToggles(original)", SetActionBarToggles, unpack(orig, 1, count))
+        C_Timer.After(2, function()
+            local q = TogglesLine("after restore + 2 s")
+            local same = q ~= nil
+            for i = 1, count do
+                if not q or q[i + 1] ~= orig[i] then same = false end
+            end
+            Record(("%-44s %s"):format("taint", TaintSince(mark)))
+            if same then db.barToggle = nil; Record("restored and verified") else Record("NOT restored - /syncprobe clean") end
+        end)
+    end)
 end
 
 ----------------------------------------------------------------------------
@@ -1326,8 +1795,25 @@ function P.restart()
         Record(("%-44s armed %s by %s -> %s=%s (marker %s, original %s)"):format("cvar survived?", db.cvarTest.at,
             tostring(db.cvarTest.char), CVAR, ok and ValStr(v) or "THREW", db.cvarTest.marker, db.cvarTest.original))
     end
-    if not (cdb.macroOwned or cdb.bindOwned or db.cvarTest) then
-        Record("nothing armed - run /syncprobe macro | bind | cvar first")
+    if db.layoutTest then
+        local t = db.layoutTest
+        local snap = LayoutSnapshot()
+        if snap then
+            local e = FindByName(snap, LAYOUT_NAME)
+            Record(("%-44s armed %s by %s (%s) -> %s"):format("probe layout survived?", tostring(t.at), tostring(t.char),
+                tostring(t.state), e and ("index %d, content %s"):format(e.index, e.sum == t.expect and "as written"
+                or "DIFFERENT") or "ABSENT"))
+            Record(("%-44s %s"):format("other layouts vs backup", OthersLine(snap, t.before)))
+            Record(("%-44s %s (%s)"):format("active layout now", ValStr(snap.active), ValStr(snap.activeName)))
+            Record(("%-44s %s"):format("Blizzard copy", BlizzardCopyLine(snap)))
+        else
+            Record("probe layout survived?                       GetLayouts failed")
+        end
+    end
+    -- This character's active layout at each load: did adding a layout move it?
+    LoginRecordLines(cdb)
+    if not (cdb.macroOwned or cdb.bindOwned or db.cvarTest or db.layoutTest) then
+        Record("nothing armed - run /syncprobe macro | bind | cvar | layoutadd first")
     end
     Record("The loadCount goes up on /reload too - it cannot prove a full exit. Only you can:")
     Record("say 'full exit' when you paste this, or it proves nothing.")
@@ -1417,6 +1903,13 @@ function P.clean()
         end
     end
 
+    if db.barToggle then
+        local o = db.barToggle
+        Call("SetActionBarToggles(original)", SetActionBarToggles, unpack(o.orig, 1, o.count))
+        db.barToggle = nil
+    end
+    if db.layoutTest then left[#left + 1] = "layout test (run /syncprobe layoutclean)" end
+
     Record(#left == 0 and "done - everything undone" or ("NOT done: " .. table.concat(left, "; ")))
 end
 
@@ -1472,11 +1965,17 @@ end
 -- Slash command
 ----------------------------------------------------------------------------
 
-local READ_ONLY = { "client", "actions", "ranks", "login", "editmode", "encoding" }
+local READ_ONLY = { "client", "actions", "ranks", "login", "editmode", "encoding", "layouts" }
+
+-- Sections that report later: the copy window opens after them.
+local REPORT_DELAY = { place = 0.7, layoutadd = 2, layoutupdate = 3.5, layoutclean = 2, layoutactivate = 3.5,
+                       bartoggle = 5.5 }
 
 local function Persist(label)
     local db = DB()
     db.runs = db.runs or {}
+    -- A repeated label keeps the run before it.
+    if db.runs[label] then db.runs[label .. " (previous)"] = db.runs[label] end
     db.runs[label] = { at = Stamp(), build = Build(), char = UnitName("player"), lines = lines }
 end
 
@@ -1499,10 +1998,9 @@ SlashCmdList.ALTSTABLESYNCPROBE = function(msg)
     elseif P[cmd] then
         Run(cmd)
     else
-        Out("/syncprobe [client|actions|ranks|login|editmode|encoding] | place | bars [label|write <n>] | pet [swap a b|move j i|write n|readd n|autocast n] | macro | bind | cvar | restart | clean | copy")
+        Out("/syncprobe [client|actions|ranks|login|editmode|encoding|layouts] | place | bars [label|write <n>] | pet [swap a b|move j i|write n|readd n|autocast n] | macro | bind | cvar | layoutadd | layoutupdate | layoutactivate | layoutclean | bartoggle <n> | restart | clean | copy")
         return
     end
     Persist(label or cmd)
-    -- place reports half a second later; open the window after that.
-    C_Timer.After(cmd == "place" and 0.7 or 0, ShowCopy)
+    C_Timer.After(REPORT_DELAY[cmd] or 0, ShowCopy)
 end

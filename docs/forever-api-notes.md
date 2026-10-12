@@ -338,6 +338,44 @@ never calls it in combat (the write guard refuses first, and a refused or silent
 the read-back as "macro not updated"). Deleting a macro empties its slots, which is one more reason a
 load or a restore never deletes one.
 
+### Edit Mode layouts: the write side (#29, #58, 2026-10-12, build 70338)
+
+Measured with `/syncprobe layouts`, `layoutadd`, `layoutupdate`, `layoutactivate`, `layoutclean`
+and `bartoggle` on one beta account (Kaleid), with a relog between rounds and a check on a second
+character (Drakuzo). The probe passes `SaveLayouts` the same shape as Blizzard's
+`EditModeManagerFrame:SaveLayouts`: a copy of the presets, then the saved layouts.
+
+| Question | Measured |
+|---|---|
+| Presets | **3** (Modern, Classic, Gamepad), so saved layouts start at index 4. The limit is 5 per type (`EditModeMaxLayoutsPerType`). |
+| Add an Account layout | `SaveLayouts(presets + saved + new)` then `OnLayoutAdded(6, false, true)`: the copy of "My UI" read back with identical content, the other layouts were byte-identical, the active layout stayed "My UI", no taint. |
+| Blizzard's copy after an add | **Refreshed.** The client sent `EDIT_MODE_LAYOUTS_UPDATED` (`reconcile=true`), and `EditModeManagerFrame.layoutInfo` matched by name and content. |
+| Replace a layout in place | `SaveLayouts` alone wrote the new content and left the others byte-identical, but **sent no event**: Blizzard's copy kept the OLD content. A later Save in Edit Mode would write it back over ours. |
+| The fix for that | `SetActiveLayout(<the current active index>)` right after: the client sent `EDIT_MODE_LAYOUTS_UPDATED` (`reconcile=false`), Blizzard's copy matched again, the active layout was unchanged, no taint. |
+| Persistence | After a **full client exit** (round 2), the replaced content was there as written, on Kaleid and on Drakuzo. |
+| `SetActiveLayout` | To the new layout and back, found again **by name**: each switch sent the event, Blizzard's copy followed, no taint. |
+| Remove | `SaveLayouts(without it)` then `OnLayoutDeleted(6)`: gone, the others byte-identical to the backup taken before the add, the active layout unchanged, event sent, no taint. |
+| `SetActionBarToggles` | Bar 8 off: read back immediately (no server delay seen), on again: verified, no taint. Bars 2-8 are seven booleans. |
+| Damage meter | `damageMeterEnabled` = "1" (a CVar). The `ShowDamageMeter` Edit Mode account setting is Edit Mode's own display toggle. A window's segment (`sessionType`, Overall = 0, Current = 1) lives in Blizzard's per-character SavedVariables `DamageMeterPerCharacterSettings`, which an addon must not write. |
+
+**Consequences:**
+- #58 is feasible: every write is `SaveLayouts` with the full list, then `OnLayoutAdded`,
+  `OnLayoutDeleted` or (for a replace) `SetActiveLayout(active)`, then a read-back by name and content
+  **including Blizzard's copy**. Never with Edit Mode open, never in combat.
+- Content equality is string equality of `ConvertLayoutInfoToString` (stable, 70245), so "this layout
+  differs from the other account's" is a string compare.
+- **Another character's active layout is a raw index.** Drakuzo had a Character layout, CharTest, active
+  at index 6. Kaleid added an Account layout, which went in at index 6 and pushed CharTest to 7. At its
+  next login Drakuzo was on **SyncProbe**. After the removal it was back on CharTest. `OnLayoutAdded`
+  only corrects the character that makes the call. Adding or removing an Account layout therefore moves
+  every other character whose active layout comes after that position, which means every Character
+  layout user. Replacing in place moves nobody. Blizzard's own `MakeNewLayout` inserts the same way, so
+  creating an Account layout in Edit Mode probably does this too (not measured).
+- One unexplained switch: in the first round, Kaleid's active layout became SyncProbe within 22 s of
+  the add, with Edit Mode opened in between. The owner isn't sure whether they clicked it. Two later adds
+  stayed inactive throughout.
+- The damage meter's segment stays manual.
+
 ## Still open
 
 - Does any taint appear after `/reload` following `place`? (Nothing was reported during the run.)
