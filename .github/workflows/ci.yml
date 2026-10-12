@@ -46,3 +46,9 @@ jobs:
             lua5.1 "$t" || failed=$((failed + 1))
           done
           test "$failed" -eq 0
+
+      # The transfer script's self-test (#12). Real transfers are Windows-only;
+      # this proves the checks, not Windows' replace and locking behaviour.
+      - name: Transfer script self-test
+        shell: pwsh
+        run: ./Tools/Transfer-Profiles.ps1 -SelfTest
