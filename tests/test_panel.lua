@@ -85,11 +85,23 @@ local function confirm() return previewFrame().confirm:Click() end
 local function cancel() return previewFrame().cancel:Click() end
 local function dialog() return P._Dialog() end
 
--- Open a picker or menu and click the item with this value.
+-- The list's visible rows, as a player sees them.
+local function visible()
+    local out = {}
+    for _, b in ipairs(W.menu.items) do if b:IsShown() then out[#out + 1] = b end end
+    return out
+end
+-- Open a picker or menu and click the item with this value, scrolling the
+-- list with the mouse wheel as a player would.
 local function pick(owner, value)
     owner:Click()
-    for _, b in ipairs(W.menu.items) do
-        if b:IsShown() and b.value == value then return b:Click() end
+    for _ = 1, 100 do
+        for _, b in ipairs(visible()) do
+            if b.value == value then return b:Click() end
+        end
+        local before = W.menu.offset
+        W.menu.scripts.OnMouseWheel(W.menu, -1)
+        if W.menu.offset == before then break end
     end
     error("no menu item " .. tostring(value))
 end
@@ -763,6 +775,32 @@ do
     check("events: a slot change shows at once", W.saveStatus:GetText():find("Unsaved: 1 slot", 1, true) ~= nil, W.saveStatus:GetText())
     P.Hide()
     check("events: hidden, no longer registered", not P._Frame().events.ACTIONBAR_SLOT_CHANGED)
+end
+
+-- A long list stays on screen and every entry is reachable (Codex on #60).
+do
+    boot(); main(); ready()
+    local made = {}
+    for i = 1, 25 do made[i] = create(("Loadout %02d"):format(i)) end
+    P.Show()
+    W.entry:Click()
+    eq("long list: at most 12 rows", #visible(), 12)
+    check("long list: says there is more", W.menu.down:IsShown() and not W.menu.up:IsShown())
+    W.entry:Click()
+    pick(W.entry, made[25].id)
+    eq("long list: the last one reachable by scrolling", W.entry.label:GetText(), "Loadout 25")
+    W.entry:Click()
+    local last = visible()
+    eq("long list: reopens scrolled to the current one", last[#last].value, made[25].id)
+    check("long list: more above", W.menu.up:IsShown() and not W.menu.down:IsShown())
+    W.entry:Click()
+    -- Less room below the picker: fewer rows, still scrollable.
+    W.entry.GetBottom = function() return 150 end
+    W.entry:Click()
+    eq("long list: fits the space below", #visible(), 6)
+    W.entry:Click()
+    W.entry.GetBottom = nil
+    P.Hide()
 end
 
 finish("test_panel")

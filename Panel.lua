@@ -402,37 +402,87 @@ local function Menu()
     return mf
 end
 
-local function OpenMenu(owner, items, onPick)
+-- A list never runs off the screen (Codex on #60): at most MENU_ROWS rows,
+-- fewer when the space below its owner is short, and the mouse wheel scrolls
+-- the rest. Arrows say there is more above or below; it opens scrolled to
+-- the current choice.
+local MENU_ROWS, MENU_ROW = 12, 22
+
+local function MenuRow(mf, i)
+    local b = mf.items[i]
+    if b then return b end
+    b = CreateFrame("Button", nil, mf)
+    b:SetHeight(MENU_ROW)
+    b:SetPoint("TOPLEFT", 4, -4 - (i - 1) * MENU_ROW)
+    b:SetPoint("RIGHT", -18, 0)
+    local hl = b:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints()
+    hl:SetColorTexture(1, 1, 1, 0.12)
+    b.text = Text(b, "GameFontHighlightSmall")
+    b.text:SetPoint("LEFT", 8, 0)
+    b.text:SetPoint("RIGHT", -4, 0)
+    b.text:SetWordWrap(false)
+    b:SetScript("OnClick", function(self)
+        mf:Hide()
+        if mf.onPick then mf.onPick(self.value) end
+    end)
+    mf.items[i] = b
+    return b
+end
+
+local function DrawMenu(mf)
+    for i = 1, mf.rows do
+        local it = mf.all[mf.offset + i]
+        local b = MenuRow(mf, i)
+        b.text:SetText(it and it.text or "")
+        b.value = it and it.value
+        if it then b:Show() else b:Hide() end
+    end
+    for i = mf.rows + 1, #mf.items do mf.items[i]:Hide() end
+    if mf.offset > 0 then mf.up:Show() else mf.up:Hide() end
+    if mf.offset + mf.rows < #mf.all then mf.down:Show() else mf.down:Hide() end
+end
+
+-- How many rows fit below `owner` on screen (all of them when it can't tell).
+local function RowsBelow(owner)
+    local bottom = owner.GetBottom and owner:GetBottom()
+    if type(bottom) ~= "number" then return MENU_ROWS end
+    local scale = (owner.GetEffectiveScale and owner:GetEffectiveScale() or 1)
+        / ((UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1)
+    return math.max(4, math.floor((bottom * scale - 16) / MENU_ROW))
+end
+
+local function OpenMenu(owner, items, onPick, current)
     local mf = Menu()
     if mf:IsShown() and mf.owner == owner then mf:Hide() return end
-    mf.owner = owner
-    local width = math.max(160, owner:GetWidth() or 160)
-    for i, it in ipairs(items) do
-        local b = mf.items[i]
-        if not b then
-            b = CreateFrame("Button", nil, mf)
-            b:SetHeight(22)
-            b:SetPoint("TOPLEFT", 4, -4 - (i - 1) * 22)
-            b:SetPoint("RIGHT", -4, 0)
-            local hl = b:CreateTexture(nil, "HIGHLIGHT")
-            hl:SetAllPoints()
-            hl:SetColorTexture(1, 1, 1, 0.12)
-            b.text = Text(b, "GameFontHighlightSmall")
-            b.text:SetPoint("LEFT", 8, 0)
-            b.text:SetPoint("RIGHT", -8, 0)
-            b.text:SetWordWrap(false)
-            mf.items[i] = b
+    if not mf.up then
+        local function arrow(flip)
+            local t = mf:CreateTexture(nil, "OVERLAY")
+            t:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
+            t:SetSize(16, 16)
+            if flip then t:SetTexCoord(0, 1, 1, 0) end
+            return t
         end
-        b.text:SetText(it.text)
-        b.value = it.value
-        b:SetScript("OnClick", function(self)
-            mf:Hide()
-            onPick(self.value)
+        mf.up, mf.down = arrow(true), arrow(false)
+        mf.up:SetPoint("TOPRIGHT", -2, -4)
+        mf.down:SetPoint("BOTTOMRIGHT", -2, 4)
+        mf:EnableMouseWheel(true)
+        mf:SetScript("OnMouseWheel", function(self, delta)
+            local max = math.max(0, #self.all - self.rows)
+            self.offset = math.max(0, math.min(max, self.offset - delta))
+            DrawMenu(self)
         end)
-        b:Show()
     end
-    for i = #items + 1, #mf.items do mf.items[i]:Hide() end
-    mf:SetSize(width, 8 + #items * 22)
+    mf.owner, mf.all, mf.onPick = owner, items, onPick
+    mf.rows = math.min(#items, MENU_ROWS, RowsBelow(owner))
+    mf.offset = 0
+    for i, it in ipairs(items) do
+        if current ~= nil and it.value == current and i > mf.rows then
+            mf.offset = math.min(i - 1, #items - mf.rows)
+        end
+    end
+    DrawMenu(mf)
+    mf:SetSize(math.max(160, owner:GetWidth() or 160), 8 + mf.rows * MENU_ROW)
     mf:ClearAllPoints()
     mf:SetPoint("TOPLEFT", owner, "BOTTOMLEFT", 0, -2)
     mf:Show()
@@ -486,7 +536,7 @@ local function Picker(parent, width)
     end
     arrow:SetSize(22, 22)
     arrow:SetPoint("RIGHT", -3, 0)
-    p:SetScript("OnClick", function(self) OpenMenu(self, self.items or {}, self.onPick) end)
+    p:SetScript("OnClick", function(self) OpenMenu(self, self.items or {}, self.onPick, self.value) end)
     return p
 end
 
@@ -588,8 +638,9 @@ local function ShowNameDialog(mode, entry)
         for _, c in ipairs(ASS.Categories.List(class) or {}) do items[#items + 1] = { text = c.label, value = c.key } end
         d.cat.items = items
         d.cat.label:SetText(ASS.Categories.Label(class, d.category))
+        d.cat.value = d.category
         d.cat.onPick = function(key)
-            d.category = key
+            d.category, d.cat.value = key, key
             d.cat.label:SetText(ASS.Categories.Label(class, key))
             d.Check(false)
         end
@@ -989,11 +1040,11 @@ function Panel.Refresh()
     for _, c in ipairs(m.categories) do
         catItems[#catItems + 1] = { text = c.label .. (c.count > 0 and ("  (" .. c.count .. ")") or ""), value = c.key }
     end
-    W.cat.items = catItems
+    W.cat.items, W.cat.value = catItems, m.category
     W.cat.label:SetText(m.categoryLabel)
     local entItems = {}
     for _, e in ipairs(m.entries) do entItems[#entItems + 1] = { text = e.text, value = e.id } end
-    W.entry.items = entItems
+    W.entry.items, W.entry.value = entItems, m.selectedId
     Set(W.entry, #entItems > 0, "No loadouts in this category.")
     local s = m.selected
     W.entry.label:SetText(s and s.name or (#entItems > 0 and "Choose a loadout" or "None"))
