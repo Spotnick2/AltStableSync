@@ -583,11 +583,14 @@ function Commands.load(arg)
 end
 
 -- Does the entry hold a character macro in a covered slot? Then the Load
--- preview offers "Include character macros" (#6).
+-- preview offers "Include character macros" (#6). A damaged cover answers
+-- no: the plan is blocked, and its preview must still show (Codex on #56).
 local function HasCharMacros(entry)
     local m = entry.modules
-    for slot, a in pairs(m and m.actions or {}) do
-        if type(a) == "table" and a.kind == "macro" and a.scope == "char" and ASS.Cover.Has(m.cover, slot) then
+    if not ASS.Cover.Ok(m) then return false end
+    for slot, a in pairs(type(m.actions) == "table" and m.actions or {}) do
+        if type(slot) == "number" and type(a) == "table" and a.kind == "macro" and a.scope == "char"
+            and ASS.Cover.Has(m.cover, slot) then
             return true
         end
     end
@@ -605,7 +608,7 @@ function Commands.LoadEntry(entry, note, opts)
     local plan = ASS.Loadout.Plan(entry, opts)
     -- The tick box: unticking or ticking shows a new preview of a new plan.
     local check
-    if HasCharMacros(entry) then
+    if not plan.blocked and HasCharMacros(entry) then
         check = { text = "Include character macros", checked = not opts.noCharMacros,
                   onToggle = function(on) Commands.LoadEntry(entry, note, { noCharMacros = not on }) end }
     end

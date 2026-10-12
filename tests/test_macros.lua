@@ -166,6 +166,23 @@ do
     check("report: counts the update", chat("1 macro updated"), table.concat(WoW.chat(), " / "))
 end
 
+-- A damaged cover blocks the plan; the preview still shows that refusal,
+-- with no tick box and nothing written (Codex on #56).
+for _, bad in ipairs({ { "missing", nil }, { "malformed", { { "x" } } }, { "not a table", 7 } }) do
+    boot(); char()
+    local e = loadout()
+    e.modules.cover = bad[2]
+    A._shown = nil
+    local ok, err = pcall(A.Commands.LoadEntry, e)
+    check("damaged cover (" .. bad[1] .. "): no error", ok, err)
+    check("damaged cover (" .. bad[1] .. "): preview shown", A._shown ~= nil)
+    check("damaged cover (" .. bad[1] .. "): says damaged",
+        A._shown and has(text(A._shown.lines), "This loadout is damaged"), A._shown and text(A._shown.lines))
+    check("damaged cover (" .. bad[1] .. "): no Load button", A._shown and A._shown.confirm == false)
+    check("damaged cover (" .. bad[1] .. "): no tick box", A._shown and A._shown.check == nil)
+    eq("damaged cover (" .. bad[1] .. "): no EditMacro", calls("EditMacro"), 0)
+end
+
 ------------------------------------------------------------
 -- Icon only; no icon in the definition; nothing to update
 ------------------------------------------------------------
