@@ -140,7 +140,7 @@ bus.
 
 ```lua
 AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
-  schema = 7,                       -- #27 1 -> 2, #28 2 -> 3, #5 3 -> 4, #46 4 -> 5, #7 5 -> 6, #47 6 -> 7; an unknown or newer schema is refused untouched
+  schema = 8,                       -- #27 1 -> 2, #28 2 -> 3, #5 3 -> 4, #46 4 -> 5, #7 5 -> 6, #47 6 -> 7, #6 7 -> 8; an unknown or newer schema is refused untouched
   presets = {
     [id] = {
       id = "loadout-a1b2c3d4e5f6-12",          -- kind-writer-seq: never collides across accounts or copies
@@ -169,7 +169,11 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
                                                -- createdMacros = { {index, name, body}, ... }: the
                                                -- character macros the operation it preceded created
       ring = { <up to 10, oldest evicted> },  -- a snapshot of a pet bar write also holds
-                                               -- pet = { family, familyName, guid, name, slots } (#47)
+                                               -- pet = { family, familyName, guid, name, slots } (#47);
+                                               -- one that updates character macros holds
+                                               -- editedMacros = { {name, before = {body, icon},
+                                               --   after = {body, icon}}, ... } (#6), written
+                                               -- before the snapshot is stored
       firstSeen = <snapshot>,                  -- pinned forever
       operation = <snapshot> | nil,            -- the interrupted operation's original backup;
   } },                                         -- pinned until it completes or is abandoned
@@ -177,7 +181,7 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
 }
 
 AltStableSyncChar = {               -- per character
-  schema = 7,                       -- same number as the DB; an unknown or newer one is refused untouched
+  schema = 8,                       -- same number as the DB; an unknown or newer one is refused untouched
   lastSelected = { ui = id, loadout = { category = "discipline", id = id } },
   loaded = {                        -- ONE baseline per kind: the last Load/Apply, or a Save/Save As (#28)
     ui = { id, version, baseline = <modules as loaded>, result = {...} },
@@ -224,6 +228,8 @@ AltStableSyncLAS = <LibAccountSync store only>   -- declared ONLY by AltStableSy
   warns before a plain capture. A valid cover is ascending and canonical: adjacent ranges are merged,
   so one slot set has one spelling. Slots outside this build's set are listed by Load and Restore
   ("not supported on this build"), never written, and don't keep a backup "partial".
+- **Schema 7 → 8** (#6) only stamps the number: 8 adds a backup's optional `editedMacros`. Catalog
+  entries don't change, so the wire schema stays 4.
 - **Schema 6 → 7** (#47) only stamps the number: 7 adds the optional `modules.pet`, a backup's `pet`
   and the record's `after.pet`. The wire schema moves 3 → 4 with it, so a schema-6 build never
   receives an entry with a pet bar by sync.
@@ -376,17 +382,26 @@ Only an explicit confirmation click writes game state.
 9. **Macros:**
    - **Account macros are never edited, created or deleted.** Sharing them is a separate, future,
      owner-approved policy (#30).
-   - Character macros travel with a loadout (included by default). Reuse a macro only on a matching
-     name + normalised body + scope; otherwise create a character macro after checking capacity.
+   - Character macros travel with a loadout (included by default; "Include character macros"
+     unticked, or `/altsync load <name> nomacros`, leaves their slots as they are, listed). Reuse a
+     macro on a matching name + normalised body + scope (+ icon). **Update** the one character
+     macro of that name when its text or icon differs (#6): shown in the preview ("An updated macro
+     changes every button that uses it, on any bar"), recorded in the backup before it is stored,
+     checked against the preview right before `EditMacro`, read back. Restore puts it back when it
+     is as the load left it, does nothing when it is already as it was, and leaves it (named,
+     partial) when the player changed it since. Create a character macro when no macro has that
+     name and capacity permits. An account macro of that name, or two macros of that name: refused,
+     never written. A definition whose body isn't text is damage, never an update.
    - **No macro is ever deleted** (character or account) unless the player explicitly asks.
-     Capacity is never freed by deleting; a shortfall is shown before any write. The one offered
-     deletion: a Restore preview lists the character macros that the operation being undone
-     **created**. They are recorded by index, name and body in the restored backup's
-     `createdMacros` (accumulated across resumes), which stays with that snapshot through
-     completion, abandonment and ring moves. The preview shows "Also remove N macros that load
-     created", checked by default and visible. Declining keeps them, and the result says so. Confirming is the player's explicit ask. A macro
-     whose body has changed since is never removed.
-   - Macro mutations run first, then the name/body→index map is rebuilt, then actions are placed.
+     Capacity is never freed by deleting; a shortfall is shown before any write. A Restore lists
+     the character macros the operation being undone **created** (`createdMacros` on the
+     backup) as kept. **Offering to remove them is deferred** (#6, Codex): a removed macro can't be
+     brought back by the restore's own backup, and a bar scan misses direct `MACRO` key bindings.
+   - Macro mutations (creates, then updates) run first, each looked up by name at that moment
+     (a creation shifts indices), then actions are placed. A slot's displaced content is compared
+     with its backup as updated so far.
+   - Duplicate macro names are refused ("rename one"); capture never uses a cursor round trip
+     (capture runs at preview time and writes nothing).
    - A button never points at a missing or mismatched macro.
    - Macro bodies are never rewritten (for faction, race, locale, rank or talents).
    - A macro whose spell is not learned yet is still placed; this is reasoned, and verified in #13.
@@ -402,7 +417,7 @@ Only an explicit confirmation click writes game state.
    Otherwise re-preview.
 4. Capture an exact snapshot of everything the plan may touch, plus the active binding and layout
    context. If that fails, write nothing.
-5. Create or reuse character macros, then rebuild the index map.
+5. Create, update or reuse character macros, then rebuild the index map.
 6. Write actions and bindings one at a time, reading each back. Save the explicit binding set.
 7. Stop on combat, a stale dependency or a verification failure. Keep the result and the backup.
    Offer a fresh preview for what remains.

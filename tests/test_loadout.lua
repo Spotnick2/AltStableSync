@@ -274,9 +274,11 @@ end
 -- Skips that must not write their slot
 ------------------------------------------------------------
 do
-    -- A conflicting macro name on the alt: never create a second "Shield".
+    -- An ACCOUNT macro of that name on the alt: never create a second
+    -- "Shield", never write the account one (a character macro of that name
+    -- is updated instead, #6: tests/test_macros.lua).
     boot(); ready(); save()
-    alt({ macros = { { name = "Shield", body = "/different", char = true }, { name = "Acct", body = "/say hi" } } })
+    alt({ macros = { { name = "Shield", body = "/different" }, { name = "Acct", body = "/say hi" } } })
     local plan = L.Plan(entry)
     local why = {}
     for _, s in ipairs(plan.waiting) do why[s.slot] = s.reason end
@@ -2009,12 +2011,12 @@ do
     boot(); ready()
     local e = custom({ actions = { [4] = { kind = "macro", name = "Shield", scope = "char", body = "/cast Power Word: Shield" } },
                        macros = { Shield = { body = "/cast Power Word: Shield" } } })
-    local mac = { { name = "Acct", body = "/say hi" }, { name = "Shield", body = "/different", char = true } }
-    for i = 1, 29 do mac[#mac + 1] = { name = ("M%02d"):format(i), body = "/m" .. i, char = true } end
+    local mac = { { name = "Acct", body = "/say hi" }, { name = "Shield", body = "/different" } }
+    for i = 1, 30 do mac[#mac + 1] = { name = ("M%02d"):format(i), body = "/m" .. i, char = true } end
     alt({ macros = mac, actions = {} })
     local plan = L.Plan(e)
     eq("#46 stale: waits on the conflict", byReason(plan.waiting)[4], "macro name conflict")
-    for _, m in ipairs(G.char) do if m.name == "Shield" then m.name = "Zzz" end end
+    for _, m in ipairs(G.account) do if m.name == "Shield" then m.name = "Zzz" end end
     G.sortMacros()
     eq("#46 stale: now waits on capacity", byReason(L.Plan(e).waiting)[4], "macro slots full")
     G.calls = {}

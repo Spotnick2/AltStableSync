@@ -315,6 +315,29 @@ commands and stances by name; autocast stays as it is and the preview says so. M
 and remove/re-place from the book both work and keep autocast, so a load can rearrange, empty and fill
 pet slots (measured on one bear; the ability move was measured as a swap only).
 
+### EditMacro (#6, 2026-10-12, build 70338)
+
+Measured with `/syncprobe macro`, `/syncprobe macroedit` and `/syncprobe macroedit combat`
+(`Tools/AltStableSyncProbe`) on one character's own test macro, placed in an empty bar slot first.
+Then a **full client exit**, `/syncprobe restart` (it reported "a login", not a `/reload`), and
+`/syncprobe clean`.
+
+| Question | Measured |
+|---|---|
+| The call | `EditMacro(122, name, 134414, body)` returns **122**, the same index. `GetNumMacros()` is unchanged (3 account, 2 character). No taint. |
+| Read back | `GetMacroInfo(122)` → the same name, the new body, and icon **134414 as a number**. The icon before was also a number (134400, made from `"INV_Misc_QuestionMark"`), so a fileID goes in and comes out unchanged. |
+| A bar slot holding it | Still `"macro", 122` with the macro's name, after the edit and after the full exit. Every button on the macro shows the new text. |
+| In combat | **Protected.** `ADDON_ACTION_BLOCKED … UNKNOWN()`, no return, and the macro is unchanged. |
+| Full exit | The edited body and icon survived, at index 122, and so did the slot. |
+| Trailing newline | The body read 83 characters right after the edit and 84 after the next load, a `/reload` as well as the full exit. So the server's trailing newline comes back on a `/reload` too; on 70245 it was only seen after a full exit. |
+| `DeleteMacro(122)` | No return; **the slot holding it becomes empty**. |
+
+**Consequence for #6:** an update is one `EditMacro` call on the macro's own index. Read it back by
+name, with bodies compared without trailing newlines, and the icon compared as a number. The load
+never calls it in combat (the write guard refuses first, and a refused or silently dropped edit fails
+the read-back as "macro not updated"). Deleting a macro empties its slots, which is one more reason a
+load or a restore never deletes one.
+
 ## Still open
 
 - Does any taint appear after `/reload` following `place`? (Nothing was reported during the run.)

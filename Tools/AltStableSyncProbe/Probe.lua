@@ -34,6 +34,10 @@
         /syncprobe pet autocast <n> [book]  toggle autocast on slot n, read it, toggle it back
                                    (book: through C_SpellBook.SetSpellBookItemAutoCastEnabled)
         /syncprobe macro           create the test character macro (restart test)
+        /syncprobe macroedit [slot]  #6: put the test macro in an EMPTY action slot (default: the
+                                   first empty of 1-72), EditMacro its body and icon, read back
+                                   (restart test; clean deletes it and reads the slot after)
+        /syncprobe macroedit combat  IN COMBAT: EditMacro to the same body; blocked or not?
         /syncprobe bind            bind CTRL-SHIFT-F11 in the CHARACTER binding set (restart test)
         /syncprobe cvar            write a marker CVar (restart test)
         /syncprobe restart         after a FULL EXIT: what survived (macro, bind, cvar, SVs)
@@ -287,6 +291,9 @@ local function readinessRaw()
 end
 
 local loginCounts, loginSaved = {}, false
+-- PLAYER_ENTERING_WORLD's isInitialLogin for this addon load: true after a
+-- login from the character list, false after /reload. restart reports it.
+local initialLogin
 local function readiness()
     local ok, r = pcall(readinessRaw)
     return ok and r or ("readiness THREW: " .. tostring(r))
@@ -311,6 +318,7 @@ loginFrame:SetScript("OnEvent", function(self, event, arg1)
         db.loadCount = (db.loadCount or 0) + 1
         cdb.loadCount = (cdb.loadCount or 0) + 1
     elseif event == "PLAYER_ENTERING_WORLD" and not loginSaved then
+        initialLogin = arg1
         -- One copy of the startup log per addon load, 5 s after entering the
         -- world, kept for reading off disk (last 5 loads).
         loginSaved = true
@@ -1098,6 +1106,10 @@ local FIRST_CHAR_MACRO = 121   -- measured (Stakeout, 69977)
 
 local function Norm(body) return (tostring(body or ""):gsub("[\r\n]+$", "")) end
 local MARKER = "AltStableSyncProbe 256-char body test"
+-- #6: the body /syncprobe macroedit writes (it keeps the marker, so clean
+-- still recognises the macro), and a numeric icon fileID.
+local EDIT_BODY = "/run -- " .. MARKER .. " (edited by macroedit), safe to delete"
+local EDIT_ICON = 134414
 
 -- Character-scope macros only, exact name AND body (trailing newlines
 -- normalised: the server appends one, measured 70245).
@@ -1106,7 +1118,9 @@ local function FindProbeMacro()
     if not ok or type(nChar) ~= "number" then return nil end
     for i = FIRST_CHAR_MACRO, FIRST_CHAR_MACRO + nChar - 1 do
         local okI, name, _, body = pcall(GetMacroInfo, i)
-        if okI and name == MACRO_NAME and Norm(body) == Norm(MACRO_BODY) then return i, body end
+        if okI and name == MACRO_NAME and (Norm(body) == Norm(MACRO_BODY) or Norm(body) == Norm(EDIT_BODY)) then
+            return i, body
+        end
     end
 end
 
@@ -1138,6 +1152,80 @@ function P.macro()
     if not idx then Record("create NOT verified - no marker recorded"); return end
     cdb.macroOwned, cdb.macroMarkedAt = true, Stamp()
     Record("armed. EXIT THE GAME FULLY, relaunch, log this character in, /syncprobe restart")
+end
+
+-- #6: what EditMacro does on Forever. The probe's own macro only (made by
+-- /syncprobe macro). Read: the return, the index, body and icon after, and a
+-- bar slot holding the macro before and after.
+local function MacroLine(label, idx)
+    local ok, name, icon, body = pcall(GetMacroInfo, idx)
+    if not ok then Record(("%-44s THREW"):format(label)) return end
+    Record(("%-44s index=%s name=%s icon=%s (%s) bodyLen=%s edited=%s"):format(label, ValStr(idx), ValStr(name),
+        ValStr(icon), type(icon), ValStr(body and #body), tostring(Norm(body) == Norm(EDIT_BODY))))
+end
+
+local function SlotLine(label, slot)
+    local okI, kind, id, sub = pcall(GetActionInfo, slot)
+    local okT, text = pcall(GetActionText, slot)
+    Record(("%-44s slot %d: %s %s %s text=%s"):format(label, slot, okI and ValStr(kind) or "THREW", ValStr(id),
+        ValStr(sub), okT and ValStr(text) or "THREW"))
+end
+
+function P.macroedit(rest)
+    local cdb = CharDB()
+    local idx, body = FindProbeMacro()
+    if rest == "combat" then
+        Section("macroedit combat  (EditMacro in combat lockdown)")
+        if not InCombatLockdown() then Record("enter combat first (attack a training dummy), then rerun"); return "macroedit combat" end
+        -- Its own run label, so it never overwrites the out-of-combat run.
+        if not idx then Record("no probe macro - run /syncprobe macro out of combat first (and before clean)"); return "macroedit combat" end
+        local mark = #blocked
+        Call("EditMacro(i, name, nil, same body)", EditMacro, idx, MACRO_NAME, nil, body)
+        MacroLine("after", idx)
+        Record(("%-44s %s"):format("blocked (ADDON_ACTION_BLOCKED/FORBIDDEN)", TaintSince(mark)))
+        return "macroedit combat"
+    end
+    Section("macroedit  (#6: EditMacro on the probe's character macro)")
+    if InCombatLockdown() then Record("out of combat only"); return end
+    if cdb.macroEdit then
+        Record("already armed (slot " .. tostring(cdb.macroEdit.slot) .. ") - /syncprobe restart after a full exit, then clean")
+        return
+    end
+    if not cdb.macroOwned or not idx then Record("no probe macro - run /syncprobe macro first"); return end
+    if Norm(body) ~= Norm(MACRO_BODY) then Record("the probe macro is already edited - /syncprobe clean, then macro"); return end
+    local okC, ck = pcall(GetCursorInfo)
+    if not okC or ck ~= nil then Record("empty the cursor first"); return end
+    local slot = tonumber(rest)
+    if slot then
+        local ok, kind = pcall(GetActionInfo, slot)
+        if not ok or kind ~= nil then Record("slot " .. slot .. " is not empty (or unreadable) - pick an empty one"); return end
+    else
+        for s = 1, 72 do
+            local ok, kind = pcall(GetActionInfo, s)
+            if ok and kind == nil then slot = s break end
+        end
+        if not slot then Record("no empty slot in 1-72 - give one: /syncprobe macroedit <slot>"); return end
+    end
+    local mark = #blocked
+    Call("GetNumMacros() before", GetNumMacros)
+    MacroLine("before", idx)
+    Call("PickupMacro(i)", PickupMacro, idx)
+    Call("PlaceAction(slot)", PlaceAction, slot)
+    local okC2, ck2 = pcall(GetCursorInfo)
+    if okC2 and ck2 ~= nil then pcall(ClearCursor) end
+    SlotLine("placed", slot)
+    local okT, text = pcall(GetActionText, slot)
+    if not okT or text ~= MACRO_NAME then Record("the macro did not land in slot " .. slot .. " - stopping"); return end
+    -- Recorded before the edit: whatever happens next, clean knows the slot.
+    cdb.macroEdit = { slot = slot, at = Stamp() }
+    Call("EditMacro(i, name, icon, body)", EditMacro, idx, MACRO_NAME, EDIT_ICON, EDIT_BODY)
+    Call("GetNumMacros() after", GetNumMacros)
+    MacroLine("same index after", idx)
+    local idx2 = FindProbeMacro()
+    Record(("%-44s %s"):format("found by name after (index)", ValStr(idx2)))
+    SlotLine("slot after the edit", slot)
+    Record(("%-44s %s"):format("taint", TaintSince(mark)))
+    Record("armed. Look at slot " .. slot .. " (icon, tooltip). EXIT THE GAME FULLY, relaunch, /syncprobe restart")
 end
 
 function P.bind()
@@ -1215,9 +1303,17 @@ function P.restart()
     Section("restart  (run after a FULL EXIT, not /reload)")
     local db, cdb = DB(), CharDB()
     Record(("%-44s account %s, character %s"):format("probe SV loadCount", ValStr(db.loadCount), ValStr(cdb.loadCount)))
+    Record(("%-44s %s"):format("this load (PLAYER_ENTERING_WORLD)", initialLogin == true and "a login (relog or full exit)"
+        or initialLogin == false and "a /reload - NOT a restart, results below prove nothing" or "unknown"))
     if cdb.macroOwned then
         local idx, body = FindProbeMacro()
         Record(("%-44s armed %s -> index=%s bodyLen=%s"):format("macro survived?", tostring(cdb.macroMarkedAt), ValStr(idx), ValStr(body and #body)))
+    end
+    if cdb.macroEdit then
+        local idx = FindProbeMacro()
+        if idx then MacroLine("edited macro survived? (armed " .. tostring(cdb.macroEdit.at) .. ")", idx)
+        else Record("edited macro survived?                       NOT FOUND by name") end
+        SlotLine("edited macro's slot after restart", cdb.macroEdit.slot)
     end
     if cdb.bindOwned and not cdb.bindSavePending then
         local ok, act = pcall(GetBindingAction, BIND_KEY)
@@ -1252,9 +1348,32 @@ function P.clean()
     end
     if cdb.macroOwned or orphan then
         local idx = FindProbeMacro()
+        if cdb.macroEdit then
+            SlotLine("macroedit slot before DeleteMacro", cdb.macroEdit.slot)
+            Call("GetNumMacros() before DeleteMacro", GetNumMacros)
+        end
         if idx then Call("DeleteMacro(" .. idx .. ")", DeleteMacro, idx) end
         if FindProbeMacro() then left[#left + 1] = "macro (still present)"
         else cdb.macroOwned, cdb.macroMarkedAt = nil, nil end
+    end
+    -- #6: what a deleted macro leaves in its slot; the slot is then emptied
+    -- only if it still shows our macro's name.
+    if cdb.macroEdit and not cdb.macroOwned then
+        local slot = cdb.macroEdit.slot
+        SlotLine("macroedit slot after DeleteMacro", slot)
+        local okT, text = pcall(GetActionText, slot)
+        if okT and text == MACRO_NAME then
+            Call("PickupAction(slot)", PickupAction, slot)
+            pcall(ClearCursor)
+        end
+        local okI, kind = pcall(GetActionInfo, slot)
+        local okT2, text2 = pcall(GetActionText, slot)
+        if okT2 and text2 == MACRO_NAME then
+            left[#left + 1] = "macroedit slot " .. slot .. " (still holds the macro)"
+        else
+            if okI and kind ~= nil then Record("slot " .. slot .. " holds something else now - left alone") end
+            cdb.macroEdit = nil
+        end
     end
 
     if cdb.bindOwned then

@@ -32,9 +32,11 @@ local ADDON_NAME = "AltStableSync"
 -- spell actions from the class spellbook tabs; and 5 -> 6 (#7), a stamp too:
 -- 6 adds the optional per-character `bindingSwitch` guard; and 6 -> 7
 -- (#47), a stamp too: 7 adds the optional `pet` module (a pet bar per pet
--- family), backups' `pet` and the loaded record's `after.pet`. There is no
+-- family), backups' `pet` and the loaded record's `after.pet`; and 7 -> 8
+-- (#6), a stamp too: 8 adds backups' optional `editedMacros` (the character
+-- macros a load updated, as they were and as it left them). There is no
 -- migration framework.
-local SCHEMA = 7
+local SCHEMA = 8
 ASS.SCHEMA = SCHEMA
 
 ------------------------------------------------------------
@@ -170,7 +172,7 @@ local function Validate(db, char)
         end
         dbAction = "upgrade1"
     elseif db.schema ~= SCHEMA and db.schema ~= 2 and db.schema ~= 3 and db.schema ~= 4 and db.schema ~= 5
-        and db.schema ~= 6 then
+        and db.schema ~= 6 and db.schema ~= 7 then
         return WrongSchema("saved data", db.schema)
     else
         for _, field in ipairs(DB_TABLES) do
@@ -193,7 +195,7 @@ local function Validate(db, char)
     elseif char.schema == nil then
         return "AltStableSyncChar has data but no schema"
     elseif char.schema ~= SCHEMA and char.schema ~= 2 and char.schema ~= 3 and char.schema ~= 4 and char.schema ~= 5
-        and char.schema ~= 6 then
+        and char.schema ~= 6 and char.schema ~= 7 then
         return WrongSchema("character data", char.schema)
     elseif char.loaded ~= nil and type(char.loaded) ~= "table" then
         return "AltStableSyncChar.loaded is a " .. type(char.loaded) .. ", not a table"

@@ -23,12 +23,12 @@ end
 -- First run: fresh tables at the current schema, and a writer token.
 do
     local A = load(nil, nil)
-    eq("fresh: schema", AltStableSyncDB.schema, 7)
-    eq("fresh: schema constant", A.SCHEMA, 7)
+    eq("fresh: schema", AltStableSyncDB.schema, 8)
+    eq("fresh: schema constant", A.SCHEMA, 8)
     check("fresh: presets table", type(AltStableSyncDB.presets) == "table")
     check("fresh: backups table", type(AltStableSyncDB.backups) == "table")
     eq("fresh: no profiles", AltStableSyncDB.profiles, nil)
-    eq("fresh: char schema", AltStableSyncChar.schema, 7)
+    eq("fresh: char schema", AltStableSyncChar.schema, 8)
     check("fresh: not disabled", A.disabled == nil)
     eq("fresh: LAS store untouched", AltStableSyncLAS, nil)
     check("fresh: writer token is 12 hex", type(A.writer) == "string" and A.writer:match("^%x+$") ~= nil
@@ -55,18 +55,18 @@ do
     local A = load(db, {})
     check("upgrade: usable", A.disabled == nil, tostring(A.disabled))
     check("upgrade: same DB object", rawequal(AltStableSyncDB, db))
-    eq("upgrade: schema 4", db.schema, 7)
+    eq("upgrade: schema 4", db.schema, 8)
     eq("upgrade: profiles dropped", db.profiles, nil)
     check("upgrade: presets added", type(db.presets) == "table" and next(db.presets) == nil)
     check("upgrade: same backups table", db.backups == backups)
-    eq("upgrade: empty char gets schema 4", AltStableSyncChar.schema, 7)
+    eq("upgrade: empty char gets schema 4", AltStableSyncChar.schema, 8)
 end
 
 -- Schema 1 with no `profiles` key at all upgrades too.
 do
     local A = load({ schema = 1 }, nil)
     check("upgrade, no profiles key: usable", A.disabled == nil, tostring(A.disabled))
-    eq("upgrade, no profiles key: schema 4", AltStableSyncDB.schema, 7)
+    eq("upgrade, no profiles key: schema 4", AltStableSyncDB.schema, 8)
 end
 
 -- A cover as text ("1-12,145-180"), for comparing.
@@ -86,8 +86,8 @@ do
     local A = load({ schema = 2, presets = presets, backups = {} },
                    { schema = 2, lastSelected = { ui = "ui-abc-2" }, loaded = loaded })
     check("2->4: usable", A.disabled == nil, tostring(A.disabled))
-    eq("2->4: DB stamped", AltStableSyncDB.schema, 7)
-    eq("2->4: char stamped", AltStableSyncChar.schema, 7)
+    eq("2->4: DB stamped", AltStableSyncDB.schema, 8)
+    eq("2->4: char stamped", AltStableSyncChar.schema, 8)
     check("2->4: same presets table", AltStableSyncDB.presets == presets)
     eq("2->4: char selection kept", AltStableSyncChar.lastSelected.ui, "ui-abc-2")
     check("2->4: loaded record kept", AltStableSyncChar.loaded == loaded and loaded.loadout.version == "abc:1")
@@ -108,7 +108,7 @@ do
     local rec = { id = "loadout-a-1", version = "a:1", baseline = { actions = {} }, after = { actions = {} } }
     local A = load({ schema = 3, presets = presets, backups = {} }, { schema = 3, loaded = { loadout = rec } })
     check("3->4: usable", A.disabled == nil, tostring(A.disabled))
-    eq("3->4: DB stamped", AltStableSyncDB.schema, 7)
+    eq("3->4: DB stamped", AltStableSyncDB.schema, 8)
     eq("3->4: modules cover", R(presets["loadout-a-1"].modules.cover), "1-12")
     eq("3->4: previous cover", R(presets["loadout-a-1"].previous.modules.cover), "1-12")
     eq("3->4: tombstone untouched", presets["loadout-a-2"].modules, nil)
@@ -119,32 +119,43 @@ do
     -- A DB already at 4 with a character still at 3: only the character upgrades.
     local rec2 = { id = "x", version = "x:1", baseline = {}, after = {} }
     load({ schema = 4, presets = {}, backups = {} }, { schema = 3, loaded = { loadout = rec2 } })
-    eq("mixed 4/3: char stamped", AltStableSyncChar.schema, 7)
+    eq("mixed 4/3: char stamped", AltStableSyncChar.schema, 8)
     eq("mixed 4/3: record cover", R(rec2.after.cover), "1-12")
     -- 4 -> 5 (#46) only stamps the number: a schema-4 loadout without a cover
     -- is damaged and stays so (its operations refuse), never made 1-12.
     local p5 = { ["loadout-b-1"] = { id = "loadout-b-1", kind = "loadout", modules = { actions = {} } } }
     local rec5 = { id = "loadout-b-1", version = "b:1", baseline = { actions = {} }, after = { actions = {} } }
     load({ schema = 4, presets = p5, backups = {} }, { schema = 4, loaded = { loadout = rec5 } })
-    eq("4->5: DB stamped", AltStableSyncDB.schema, 7)
-    eq("4->5: char stamped", AltStableSyncChar.schema, 7)
+    eq("4->5: DB stamped", AltStableSyncDB.schema, 8)
+    eq("4->5: char stamped", AltStableSyncChar.schema, 8)
     eq("4->5: no cover invented", p5["loadout-b-1"].modules.cover, nil)
     eq("4->5: record no cover invented", rec5.after.cover, nil)
     -- 5 -> 6 (#7) only stamps the number too; a schema-6 guard is kept as is.
     local guard = { before = { ACTIONBUTTON1 = { "1" } }, at = "loading character keybindings" }
     load({ schema = 5, presets = {}, backups = {} }, { schema = 5 })
-    eq("5->6: DB stamped", AltStableSyncDB.schema, 7)
-    eq("5->6: char stamped", AltStableSyncChar.schema, 7)
+    eq("5->6: DB stamped", AltStableSyncDB.schema, 8)
+    eq("5->6: char stamped", AltStableSyncChar.schema, 8)
     load({ schema = 6, presets = {}, backups = {} }, { schema = 6, bindingSwitch = guard })
     check("6: guard kept", AltStableSyncChar.bindingSwitch == guard and AltStableSync.char.bindingSwitch.before.ACTIONBUTTON1[1] == "1")
     -- 6 -> 7 (#47) only stamps the number: 7 adds the optional pet module.
     local entry = { id = "loadout-x-1", kind = "loadout", class = "HUNTER", category = "general", name = "Six",
                     version = "x:1", modules = { actions = {}, cover = { { 1, 12 } } } }
     load({ schema = 6, presets = { [entry.id] = entry }, backups = {} }, { schema = 6, bindingSwitch = guard })
-    eq("6->7: DB stamped", AltStableSyncDB.schema, 7)
-    eq("6->7: char stamped", AltStableSyncChar.schema, 7)
+    eq("6->7: DB stamped", AltStableSyncDB.schema, 8)
+    eq("6->7: char stamped", AltStableSyncChar.schema, 8)
     check("6->7: entry kept as is", AltStableSyncDB.presets[entry.id] == entry and entry.modules.pet == nil)
     check("6->7: guard kept", AltStableSyncChar.bindingSwitch == guard)
+    -- 7 -> 8 (#6) only stamps the number: 8 adds backups' optional
+    -- editedMacros. A schema-7 backup and loaded record are kept as they are.
+    local snap = { reason = "load Seven", actions = { [4] = { kind = "macro", name = "Heal", body = "/a", scope = "char" } },
+                   keys = {}, createdMacros = {} }
+    local backups = { ["Player-70-X"] = { ring = { snap } } }
+    local rec = { id = entry.id, version = "x:1", baseline = { actions = {} }, after = { actions = {} } }
+    load({ schema = 7, presets = { [entry.id] = entry }, backups = backups }, { schema = 7, loaded = { loadout = rec } })
+    eq("7->8: DB stamped", AltStableSyncDB.schema, 8)
+    eq("7->8: char stamped", AltStableSyncChar.schema, 8)
+    check("7->8: backup kept as is", AltStableSyncDB.backups["Player-70-X"].ring[1] == snap and snap.editedMacros == nil)
+    check("7->8: record kept as is", AltStableSyncChar.loaded.loadout == rec)
 end
 
 -- The cover helper.
@@ -173,11 +184,11 @@ end
 do
     local A = load({ schema = 3, presets = {}, backups = {} }, { schema = 2, lastSelected = { ui = "u" } })
     check("mixed 3/2: usable", A.disabled == nil, tostring(A.disabled))
-    eq("mixed 3/2: char stamped", AltStableSyncChar.schema, 7)
+    eq("mixed 3/2: char stamped", AltStableSyncChar.schema, 8)
     eq("mixed 3/2: char data kept", AltStableSyncChar.lastSelected.ui, "u")
     local B = load({ schema = 2, presets = {}, backups = {} }, { schema = 3 })
     check("mixed 2/3: usable", B.disabled == nil, tostring(B.disabled))
-    eq("mixed 2/3: DB stamped", AltStableSyncDB.schema, 7)
+    eq("mixed 2/3: DB stamped", AltStableSyncDB.schema, 8)
 end
 
 -- Every refusal leaves ALL THREE SavedVariables exactly as loaded: same
@@ -220,7 +231,7 @@ end
 -- A newer schema: refused, with the update hint, and the slash command says so.
 do
     local A = refused("newer schema", { schema = 99, somethingNew = { x = 1 } },
-                      { schema = 2, lastSelected = { ui = "p9" } }, "schema 99, this build reads 7 - update")
+                      { schema = 2, lastSelected = { ui = "p9" } }, "schema 99, this build reads 8 - update")
     check("newer schema: said so at load", anyLine("disabled"))
     WoW.chatLines = {}
     A.SlashHandler("status")
@@ -231,7 +242,7 @@ end
 refused("schema 0", { schema = 0, presets = {} }, nil, "schema 0")
 refused("schema -1", { schema = -1 }, nil, "schema -1")
 refused("schema 1.5", { schema = 1.5 }, nil, "schema 1.5")
-refused("schema 8", { schema = 8 }, nil, "schema 8, this build reads 7 - update")
+refused("schema 9", { schema = 9 }, nil, "schema 9, this build reads 8 - update")
 -- #7's guard is never guessed at: damaged, the whole file is refused untouched.
 refused("guard a string", { schema = 6, presets = {} }, { schema = 6, bindingSwitch = "x" }, "bindingSwitch is damaged")
 refused("guard without before", { schema = 6, presets = {} }, { schema = 6, bindingSwitch = { at = "x" } }, "bindingSwitch is damaged")
@@ -257,10 +268,10 @@ refused("backups is a string", { schema = 2, presets = {}, backups = "x" }, nil,
 refused("char is a string", { schema = 2, presets = {}, backups = {} }, "corrupt", "AltStableSyncChar is a string")
 refused("char populated, no schema", { schema = 2, presets = {} }, { lastSelected = { ui = "p1" } },
         "AltStableSyncChar has data but no schema")
-refused("char schema 8", { schema = 2 }, { schema = 8 }, "character data has schema 8")
+refused("char schema 9", { schema = 2 }, { schema = 9 }, "character data has schema 9")
 -- A newer schema in either table leaves BOTH untouched, the upgradable one too.
-refused("char schema 8, DB 3", { schema = 3, presets = {} }, { schema = 8 }, "character data has schema 8")
-refused("DB schema 8, char 2", { schema = 8 }, { schema = 2, lastSelected = { ui = "x" } }, "schema 8")
+refused("char schema 9, DB 3", { schema = 3, presets = {} }, { schema = 9 }, "character data has schema 9")
+refused("DB schema 9, char 2", { schema = 9 }, { schema = 2, lastSelected = { ui = "x" } }, "schema 9")
 refused("char loaded not a table", { schema = 3 }, { schema = 2, loaded = "x" }, "loaded is a string")
 refused("char string schema", { schema = 2 }, { schema = "2" }, 'character data has schema "2" (string)')
 refused("upgradable DB, bad char", { schema = 1, profiles = {} }, { stray = true }, "AltStableSyncChar has data")
@@ -270,7 +281,7 @@ refused("newer schema, string char", { schema = 99 }, "corrupt", "schema 99")
 do
     local A = load({}, nil)
     check("empty DB: usable", A.disabled == nil)
-    eq("empty DB: schema stamped", AltStableSyncDB.schema, 7)
+    eq("empty DB: schema stamped", AltStableSyncDB.schema, 8)
 end
 
 -- /altsync before our ADDON_LOADED: a clear message, not a nil index.
@@ -308,7 +319,7 @@ do
     eq("slash name", SLASH_ALTSTABLESYNC1, "/altsync")
     WoW.chatLines = {}
     A.SlashHandler("")
-    check("status line", anyLine("schema 7, 0 saved setup%(s%)"))
+    check("status line", anyLine("schema 8, 0 saved setup%(s%)"))
     WoW.chatLines = {}
     A.SlashHandler("nonsense")
     check("help line", anyLine("commands:"))

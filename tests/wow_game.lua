@@ -22,6 +22,9 @@
 --   WoW.game.blocked           -- protected calls attempted IN COMBAT (each also raises, like
 --                                 the client's ADDON_ACTION_BLOCKED); must stay empty
 --   WoW.relaunch()             -- a full exit: macro bodies gain the server newline
+--   WoW.game.macroFault = "error" | "noop" | "wrong"  -- the next EditMacro raises, does
+--                                 nothing, or writes another body (#6)
+--   WoW.game.onEditMacro = function(index)  -- runs before each EditMacro (e.g. combat starts)
 --
 -- The pet (#47, measured on 70338): setup{ pet = { family = 4, familyName = "Bear",
 -- name, guid, bar = { [i] = { token = "PET_ACTION_ATTACK" } | { spell = id } },
@@ -80,6 +83,7 @@ function G.setup(opts)
     end
     G.petCalls, G.petFault, G.onPetCall, G.afterPetCall, G.petReadFails, G.petBookFails = 0, nil, nil, nil, nil, nil
     -- macros: { name, icon, body, char = bool, shows = spellID }
+    G.macroFault, G.onEditMacro = nil, nil
     G.account, G.char = {}, {}
     for _, m in ipairs(opts.macros or {}) do
         local t = { name = m.name, icon = m.icon or 134400, body = m.body, shows = m.shows }
@@ -392,7 +396,25 @@ function CreateMacro(name, icon, body, perCharacter)
     return G.indexOf(m)
 end
 
-function EditMacro() mutate("EditMacro"); error("EditMacro must never be called by AltStableSync in these tests", 2) end
+-- EditMacro(index, name, icon, body) -> index. Character macros only: an
+-- account index raises, as AltStableSync must never write one (#6). The
+-- name sorts again, so indices may shift (none of ours rename).
+function EditMacro(index, name, icon, body)
+    if G.onEditMacro then G.onEditMacro(index) end
+    mutate("EditMacro", true)
+    if type(index) ~= "number" or index < 121 then error("EditMacro on an account macro: never allowed", 2) end
+    local m = macroAt(index)
+    if not m then error("EditMacro: no macro " .. tostring(index), 2) end
+    local fault = G.macroFault
+    G.macroFault = nil
+    if fault == "error" then error("EditMacro failed", 2) end
+    if fault == "noop" then return index end
+    if name then m.name = name end
+    if icon then m.icon = icon end
+    if body then m.body = fault == "wrong" and (body .. " -- something else") or body end
+    G.sortMacros()
+    return G.indexOf(m)
+end
 function DeleteMacro() mutate("DeleteMacro"); error("DeleteMacro must never be called by AltStableSync in these tests", 2) end
 
 function PickupMacro(index)

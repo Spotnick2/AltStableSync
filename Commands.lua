@@ -129,6 +129,47 @@ local function PetLines(out, pp)
     end
 end
 
+-- The first line where two macro bodies differ, each cut to fit a line.
+local function FirstDiff(a, b)
+    local function split(t)
+        local out = {}
+        for l in (ASS.Game.Normalize(t) .. "\n"):gmatch("(.-)\n") do out[#out + 1] = l end
+        return out
+    end
+    local x, y = split(a), split(b)
+    for i = 1, math.max(#x, #y) do
+        if x[i] ~= y[i] then
+            local function cut(l)
+                if l == nil then return "(no line)" end
+                return #l > 40 and (l:sub(1, 37) .. "...") or l
+            end
+            return cut(x[i]), cut(y[i]), i
+        end
+    end
+end
+
+-- The character macros a plan creates and updates (#6). An update changes
+-- the macro itself, so every button that uses it shows the new text.
+local function MacroLines(lines, plan)
+    local nc, ne = #(plan.creates or {}), #(plan.edits or {})
+    if nc + ne == 0 then return end
+    local parts = {}
+    if ne > 0 then
+        parts[#parts + 1] = Plural(ne, "macro") .. (plan.kind == "restore" and " to put back" or " to update")
+    end
+    if nc > 0 then parts[#parts + 1] = Plural(nc, "macro") .. " to create" end
+    lines[#lines + 1] = ("Character macros: %s (account macros stay untouched)."):format(table.concat(parts, ", "))
+    for _, e in ipairs(plan.edits or {}) do
+        local what = {}
+        local from, to, line = FirstDiff(e.from.body, e.to.body)
+        if from then what[#what + 1] = "text changes" end
+        if e.from.icon ~= e.to.icon then what[#what + 1] = "icon changes" end
+        lines[#lines + 1] = ("  %s: %s"):format(tostring(e.name), table.concat(what, ", "))
+        if from then lines[#lines + 1] = ("    line %d: %s -> %s"):format(line, from, to) end
+    end
+    if ne > 0 then lines[#lines + 1] = "An updated macro changes every button that uses it, on any bar." end
+end
+
 -- The preview's lines for a plan (pure; tested).
 function Commands.Describe(plan)
     local lines = {}
@@ -158,9 +199,7 @@ function Commands.Describe(plan)
     local nKeys = 0
     for _ in pairs(plan.keys) do nKeys = nKeys + 1 end
     lines[#lines + 1] = ("Actions: %s change."):format(Plural(#plan.actions, "slot"))
-    if #plan.creates > 0 then
-        lines[#lines + 1] = ("Character macros: %s to create (account macros stay untouched)."):format(Plural(#plan.creates, "macro"))
-    end
+    MacroLines(lines, plan)
     if plan.keysBlocked then
         lines[#lines + 1] = "Bindings: not changed. " .. plan.keysBlocked
     else
@@ -182,11 +221,17 @@ function Commands.Describe(plan)
     end
     items = {}
     for _, s in ipairs(plan.skips) do items[#items + 1] = { slot = s.slot, text = "left unchanged: " .. tostring(s.reason) } end
+    local named = {}
     for _, u in ipairs(plan.unavailable or {}) do
-        items[#items + 1] = { slot = u.slot, text = "can't be restored exactly: " .. tostring(u.reason) }
+        if u.slot then
+            items[#items + 1] = { slot = u.slot, text = "can't be restored exactly: " .. tostring(u.reason) }
+        else
+            named[#named + 1] = ("  macro %s: %s"):format(tostring(u.name), tostring(u.reason))
+        end
     end
-    if #items > 0 then
+    if #items > 0 or #named > 0 then
         lines[#lines + 1] = "Not changed:"
+        for _, l in ipairs(named) do lines[#lines + 1] = l end
         BySlot(lines, items)
     end
     Waiting(lines)
@@ -232,8 +277,9 @@ local function Report(kind, result, err, plan)
         local next_ = kind == "load"
             and "Use /altsync restore op to undo, or load again to abandon it."
             or "What was there before this restore is backup 1 in /altsync backups."
-        Print(("Stopped (%s at %s): %d slots, %d keys done. %s")
-            :format(result.failed, tostring(result.at), result.changed, result.keys, next_))
+        Print(("Stopped (%s at %s): %d slots, %d keys%s done. %s")
+            :format(result.failed, tostring(result.at), result.changed, result.keys,
+                (result.edited or 0) > 0 and (", " .. Plural(result.edited, "macro")) or "", next_))
         return
     end
     local petChanged = (result.pet or 0) > 0 and #ASS.Pet.Changes(pp) or 0
@@ -244,6 +290,8 @@ local function Report(kind, result, err, plan)
     local msg = ("%s: %d slots%s, %d keys%s."):format(kind == "load" and "Loaded" or "Restored",
         result.changed, emptied > 0 and (" (" .. emptied .. " emptied)") or "",
         result.keys, (result.created > 0 and (", " .. result.created .. " macros created") or "")
+            .. ((result.edited or 0) > 0 and (", " .. Plural(result.edited, "macro")
+                .. (kind == "load" and " updated" or " put back")) or "")
             .. (petChanged > 0 and (", " .. Plural(petChanged, "pet slot")) or ""))
     if skipped > 0 then msg = msg .. " " .. skipped .. " left unchanged (see the preview's list)." end
     if result.partial then msg = msg .. " Partial: some entries couldn't be restored exactly; the backup is kept." end
@@ -487,7 +535,7 @@ Commands.SWITCH_LINES = {
 -- show the ordinary Load preview. It stops if its own preview is no longer
 -- on screen: cancelled, or replaced by another preview.
 Commands.STEP2 = "Step 2 of 2. Character keybindings are on; cancelling leaves them on."
-function Commands.AwaitLoad(id, name)
+function Commands.AwaitLoad(id, name, opts)
     local waiting = {
         title = ("Load %s: step 2 of 2"):format(name),
         lines = { "Character keybindings are on; cancelling leaves them on.",
@@ -514,7 +562,7 @@ function Commands.AwaitLoad(id, name)
                     :format(name))
                 return
             end
-            return Commands.LoadEntry(e, Commands.STEP2)
+            return Commands.LoadEntry(e, Commands.STEP2, opts)
         end
         if GetTime() >= deadline then
             waiting.lines[2] = ("Still waiting for character data. Run /altsync load %s when ready."):format(name)
@@ -527,19 +575,40 @@ function Commands.AwaitLoad(id, name)
 end
 
 function Commands.load(arg)
-    local entry, why = FindEntry(arg)
+    -- "nomacros" last: leave character macros out (#6).
+    local rest, flag = tostring(arg or ""):match("^(.-)%s+(nomacros)%s*$")
+    local entry, why = FindEntry(flag and rest or arg)
     if not entry then for _, l in ipairs(why) do Print(l) end return end
-    return Commands.LoadEntry(entry)
+    return Commands.LoadEntry(entry, nil, { noCharMacros = flag ~= nil })
+end
+
+-- Does the entry hold a character macro in a covered slot? Then the Load
+-- preview offers "Include character macros" (#6).
+local function HasCharMacros(entry)
+    local m = entry.modules
+    for slot, a in pairs(m and m.actions or {}) do
+        if type(a) == "table" and a.kind == "macro" and a.scope == "char" and ASS.Cover.Has(m.cover, slot) then
+            return true
+        end
+    end
+    return false
 end
 
 -- The Load preview for one catalog entry. `note`: a line shown first (step 2
--- of the #7 wizard).
-function Commands.LoadEntry(entry, note)
+-- of the #7 wizard). `opts.noCharMacros`: "Include character macros" off.
+function Commands.LoadEntry(entry, note, opts)
     if type(entry.modules) ~= "table" then
         -- A deletion conflict copy stands for "deleted on the other account".
         Print("That entry has nothing to load. " .. Copy("conflict-copy")) return
     end
-    local plan = ASS.Loadout.Plan(entry)
+    opts = opts or {}
+    local plan = ASS.Loadout.Plan(entry, opts)
+    -- The tick box: unticking or ticking shows a new preview of a new plan.
+    local check
+    if HasCharMacros(entry) then
+        check = { text = "Include character macros", checked = not opts.noCharMacros,
+                  onToggle = function(on) Commands.LoadEntry(entry, note, { noCharMacros = not on }) end }
+    end
     if plan.needsCharacterBindings then
         -- #7, a two-step wizard: step 1's OK turns on character keybindings
         -- and nothing else; step 2 is the ordinary Load preview, planned
@@ -570,7 +639,7 @@ function Commands.LoadEntry(entry, note)
                 if not e or e.deleted or e.version ~= version then Print(Copy("stale")) return end
                 local ok, why = ASS.Loadout.UseCharacterBindings(shownKeys)
                 if not ok then Print(why) return end
-                Commands.AwaitLoad(id, name)
+                Commands.AwaitLoad(id, name, opts)
             end,
         })
         return
@@ -590,6 +659,7 @@ function Commands.LoadEntry(entry, note)
         title = "Load " .. tostring(entry.name) .. "?",
         lines = lines,
         confirm = confirm,
+        check = check,
         onConfirm = function()
             local r, err = ASS.Loadout.Load(entry, plan, pinned ~= nil)
             Report("load", r, err, plan)
