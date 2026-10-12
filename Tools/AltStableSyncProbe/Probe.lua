@@ -808,15 +808,28 @@ function P.layoutclean()
     local e = FindByName(snap, LAYOUT_NAME)
     if not e then
         if not t then Record("no probe layout, no record - nothing to do"); return end
-        local line, ok = OthersLine(snap, t.before, not SameChar(t))
+        -- Already removed (by layoutclean on another character, say): the same
+        -- checks as after a removal before the backup goes, including this
+        -- character's active layout (a removal elsewhere can shift its index)
+        -- and Blizzard's copy.
+        local same = SameChar(t)
+        local line, ok = OthersLine(snap, t.before, not same)
+        local copyLine, inStep = BlizzardCopyLine(snap)
+        local activeOk = snap.activeName == t.before.activeName
         Record(("%-44s %s"):format("other layouts vs backup", line))
-        if ok and SameChar(t) and not t.restoreActive then
+        Record(("%-44s %s (%s), backup %s"):format("active", ValStr(snap.active), ValStr(snap.activeName),
+            ValStr(t.before.activeName)))
+        Record(("%-44s %s"):format("Blizzard copy", copyLine))
+        if ok and same and activeOk and inStep and not t.restoreActive then
             db.layoutTest = nil
-            Record("no probe layout, the others match the backup - record cleared")
+            Record("no probe layout, everything matches the backup - record cleared")
         else
-            Record("no probe layout, but the backup record is KEPT (" .. (not ok and "layouts differ"
-                or not SameChar(t) and ("taken on " .. tostring(t.char) .. ": clear it there")
-                or "a switch back is pending: /syncprobe layoutactivate") .. ")")
+            Record("no probe layout, but the backup record is KEPT: " .. (not ok and "layouts differ from the backup"
+                or not same and ("taken on " .. tostring(t.char) .. ": run layoutclean there to verify and clear it")
+                or not activeOk and ("the active layout isn't the backup's " .. tostring(t.before.activeName)
+                    .. " (pick it in Edit Mode, then rerun)")
+                or not inStep and "Blizzard's copy is out of step (/reload, then /syncprobe layoutclean)"
+                or "a switch back is pending: /syncprobe layoutactivate"))
         end
         return
     end
