@@ -249,7 +249,7 @@ local function BlizzardCopyLine(snap)
         end
     end
     return ("%d layouts, active=%s, names+content in step: %s [%s]"):format(#li.layouts,
-        tostring(li.activeLayout), tostring(inStep), table.concat(names, ", "))
+        tostring(li.activeLayout), tostring(inStep), table.concat(names, ", ")), inStep
 end
 
 -- EDIT_MODE_LAYOUTS_UPDATED: when the client tells Blizzard's copy to refresh.
@@ -578,18 +578,28 @@ local function Combined(info, presets)
     return c
 end
 
--- Every layout of the backup except the probe's: still there, same type, same content?
-local function OthersLine(snap, before)
+-- Was the backup taken on this character? Character layouts are per character,
+-- so another character can only be compared on the Account layouts.
+local function SameChar(t)
+    local okG, guid = pcall(UnitGUID, "player")
+    if t.guid then return okG and guid == t.guid end
+    return t.char == UnitName("player")
+end
+
+-- Every layout of the backup except the probe's: still there, same type, same
+-- content? Second return: true when all are. `accountOnly`: another character.
+local function OthersLine(snap, before, accountOnly)
     local bad, n = {}, 0
     for _, b in ipairs(before.list) do
-        if b.name ~= LAYOUT_NAME then
+        if b.name ~= LAYOUT_NAME and not (accountOnly and b.type ~= LT.Account) then
             n = n + 1
             local e = FindByName(snap, b.name)
             if not e then bad[#bad + 1] = tostring(b.name) .. " MISSING"
             elseif e.sum ~= b.sum or e.type ~= b.type then bad[#bad + 1] = tostring(b.name) .. " CHANGED" end
         end
     end
-    return #bad == 0 and ("all %d unchanged"):format(n) or table.concat(bad, ", ")
+    local what = accountOnly and "Account layouts" or "layouts"
+    return #bad == 0 and ("all %d %s unchanged"):format(n, what) or table.concat(bad, ", "), #bad == 0
 end
 
 local function LayoutCheck(label, test, expect)
@@ -598,7 +608,7 @@ local function LayoutCheck(label, test, expect)
     local e = FindByName(snap, LAYOUT_NAME)
     Record(("%-44s %s"):format(label .. ": probe layout", e and ("index %d type %s, content %s"):format(e.index,
         ValStr(e.type), expect and (e.sum == expect and "as written" or "DIFFERENT") or "-") or "absent"))
-    Record(("%-44s %s"):format(label .. ": other layouts", OthersLine(snap, test.before)))
+    Record(("%-44s %s"):format(label .. ": other layouts", (OthersLine(snap, test.before, not SameChar(test)))))
     Record(("%-44s %s (%s), before %s (%s)"):format(label .. ": active", ValStr(snap.active), ValStr(snap.activeName),
         ValStr(test.before.active), ValStr(test.before.activeName)))
     Record(("%-44s %s"):format(label .. ": Blizzard copy", BlizzardCopyLine(snap)))
@@ -644,7 +654,9 @@ function P.layoutadd()
     end
     table.insert(combined.layouts, at, newInfo)
     -- The backup, before any write: restart and layoutclean compare against it.
-    local t = { state = "adding", at = Stamp(), char = UnitName("player"), before = snap, insertAt = at,
+    local okG, guid = pcall(UnitGUID, "player")
+    local t = { state = "adding", at = Stamp(), char = UnitName("player"), guid = okG and guid or nil,
+                before = snap, insertAt = at,
                 source = src.name, expect = src.sum }
     db.layoutTest = t
     local mark, emark = #blocked, #layoutEvents
@@ -701,18 +713,28 @@ function P.layoutupdate()
             return
         end
         t.state = "updated"
+        local STALE = "Blizzard's copy is STALE: do NOT save in Edit Mode; /reload refreshes it, then /syncprobe layouts"
         -- Blizzard's copy is only refreshed by EDIT_MODE_LAYOUTS_UPDATED. Does
-        -- re-selecting the active layout (same index) send it?
+        -- re-selecting the active layout (same index) send it? Gated again:
+        -- combat or Edit Mode may have started during the wait.
+        if not LayoutWriteGate() then Record("re-select skipped. " .. STALE); return end
         local s2 = LayoutSnapshot()
+        if not s2 then Record("GetLayouts failed. " .. STALE); return end
         local emark2 = #layoutEvents
         Call("C_EditMode.SetActiveLayout(same index)", C_EditMode.SetActiveLayout, s2.active)
         C_Timer.After(1.5, function()
             local s3 = LayoutSnapshot()
+            local line, inStep = "-", false
+            if s3 then line, inStep = BlizzardCopyLine(s3) end
             Record(("%-44s %s"):format("after re-select: EDIT_MODE_LAYOUTS_UPDATED", EventsSince(emark2)))
-            Record(("%-44s %s"):format("after re-select: Blizzard copy", s3 and BlizzardCopyLine(s3) or "-"))
+            Record(("%-44s %s"):format("after re-select: Blizzard copy", line))
             Record(("%-44s %s (%s)"):format("after re-select: active", ValStr(s3 and s3.active), ValStr(s3 and s3.activeName)))
             Record(("%-44s %s"):format("taint", TaintSince(mark)))
-            Record("updated. EXIT THE GAME FULLY, relaunch, /syncprobe restart")
+            if inStep and s3.active == s2.active then
+                Record("updated, Blizzard's copy in step. EXIT THE GAME FULLY, relaunch, /syncprobe restart")
+            else
+                Record("updated, but " .. STALE)
+            end
         end)
     end)
 end
@@ -724,34 +746,55 @@ function P.layoutactivate()
     if not t or (t.state ~= "added" and t.state ~= "updated") then Record("run /syncprobe layoutadd first"); return end
     local snap = LayoutSnapshot()
     if not snap then Record("GetLayouts failed"); return end
-    local e = FindByName(snap, LAYOUT_NAME)
-    if not e then Record("probe layout not found"); return end
-    local backName, backIndex = snap.activeName, snap.active
-    if backName == LAYOUT_NAME then Record("the probe layout is already active - pick another in Edit Mode first"); return end
-    Record(("%-44s %s (%s)"):format("active before", ValStr(backIndex), ValStr(backName)))
     local mark, emark = #blocked, #layoutEvents
-    Call("C_EditMode.SetActiveLayout(probe)", C_EditMode.SetActiveLayout, e.index)
-    C_Timer.After(1.5, function()
-        local s2 = LayoutSnapshot()
-        if not s2 then Record("GetLayouts failed - switch back by hand in Edit Mode"); return end
-        Record(("%-44s %s (%s)"):format("active after 1.5 s", ValStr(s2.active), ValStr(s2.activeName)))
-        Record(("%-44s %s"):format("Blizzard copy", BlizzardCopyLine(s2)))
-        -- Back by NAME: a preset keeps its index, a saved layout is found again.
+    -- Switching back, by name and verified. Until it is, t.restoreActive keeps
+    -- the layout to return to, and rerunning layoutactivate retries it.
+    local function SwitchBack(backName, backIndex, s)
+        if not LayoutWriteGate() then Record("can't switch back now - rerun /syncprobe layoutactivate to retry"); return end
         local back = backIndex
         if type(backName) == "string" and not backName:find("^preset:") then
-            local b = FindByName(s2, backName)
+            local b = FindByName(s, backName)
             back = b and b.index
         end
         if not back then Record("previous layout " .. tostring(backName) .. " not found - switch back by hand in Edit Mode"); return end
         Call("C_EditMode.SetActiveLayout(previous)", C_EditMode.SetActiveLayout, back)
         C_Timer.After(1.5, function()
             local s3 = LayoutSnapshot()
+            local line, inStep = "-", false
+            if s3 then line, inStep = BlizzardCopyLine(s3) end
+            local backOk = s3 ~= nil and s3.activeName == backName
             Record(("%-44s %s (%s), back as before: %s"):format("active after restore", ValStr(s3 and s3.active),
-                ValStr(s3 and s3.activeName), tostring(s3 ~= nil and s3.activeName == backName)))
-            Record(("%-44s %s"):format("Blizzard copy", s3 and BlizzardCopyLine(s3) or "-"))
+                ValStr(s3 and s3.activeName), tostring(backOk)))
+            Record(("%-44s %s"):format("Blizzard copy", line))
             Record(("%-44s %s"):format("EDIT_MODE_LAYOUTS_UPDATED", EventsSince(emark)))
             Record(("%-44s %s"):format("taint", TaintSince(mark)))
+            if backOk and inStep then
+                t.restoreActive = nil
+                Record("back on " .. tostring(backName) .. ", verified")
+            else
+                Record("NOT verified - rerun /syncprobe layoutactivate to retry the switch back")
+            end
         end)
+    end
+    if t.restoreActive then
+        Record(("%-44s %s"):format("pending switch back to", ValStr(t.restoreActive.name)))
+        return SwitchBack(t.restoreActive.name, t.restoreActive.index, snap)
+    end
+    local e = FindByName(snap, LAYOUT_NAME)
+    if not e then Record("probe layout not found"); return end
+    local backName, backIndex = snap.activeName, snap.active
+    if backName == LAYOUT_NAME then Record("the probe layout is already active - pick another in Edit Mode first"); return end
+    Record(("%-44s %s (%s)"):format("active before", ValStr(backIndex), ValStr(backName)))
+    -- Recorded before the switch: whatever happens next, a rerun switches back.
+    t.restoreActive = { name = backName, index = backIndex }
+    Call("C_EditMode.SetActiveLayout(probe)", C_EditMode.SetActiveLayout, e.index)
+    C_Timer.After(1.5, function()
+        local s2 = LayoutSnapshot()
+        if not s2 then Record("GetLayouts failed - rerun /syncprobe layoutactivate to switch back"); return end
+        Record(("%-44s %s (%s)"):format("active after 1.5 s", ValStr(s2.active), ValStr(s2.activeName)))
+        Record(("%-44s %s"):format("Blizzard copy", (BlizzardCopyLine(s2))))
+        -- Back by NAME: a preset keeps its index, a saved layout is found again.
+        SwitchBack(backName, backIndex, s2)
     end)
 end
 
@@ -764,9 +807,17 @@ function P.layoutclean()
     if not (snap and presets) then Record("GetLayouts or the preset copy failed"); return end
     local e = FindByName(snap, LAYOUT_NAME)
     if not e then
-        if t then Record(("%-44s %s"):format("other layouts vs backup", OthersLine(snap, t.before))) end
-        db.layoutTest = nil
-        Record("no probe layout - nothing to remove, record cleared")
+        if not t then Record("no probe layout, no record - nothing to do"); return end
+        local line, ok = OthersLine(snap, t.before, not SameChar(t))
+        Record(("%-44s %s"):format("other layouts vs backup", line))
+        if ok and SameChar(t) and not t.restoreActive then
+            db.layoutTest = nil
+            Record("no probe layout, the others match the backup - record cleared")
+        else
+            Record("no probe layout, but the backup record is KEPT (" .. (not ok and "layouts differ"
+                or not SameChar(t) and ("taken on " .. tostring(t.char) .. ": clear it there")
+                or "a switch back is pending: /syncprobe layoutactivate") .. ")")
+        end
         return
     end
     if not t then
@@ -785,16 +836,28 @@ function P.layoutclean()
         local s2 = LayoutSnapshot()
         if not s2 then Record("GetLayouts failed - rerun layoutclean"); return end
         local gone = FindByName(s2, LAYOUT_NAME) == nil
-        local others = OthersLine(s2, t.before)
+        local same = SameChar(t)
+        local others, ok = OthersLine(s2, t.before, not same)
+        local line, inStep = BlizzardCopyLine(s2)
+        local activeOk = s2.activeName == beforeName
         Record(("%-44s %s"):format("probe layout", gone and "removed" or "STILL THERE"))
         Record(("%-44s %s"):format("other layouts vs backup", others))
         Record(("%-44s %s (%s), before %s"):format("active", ValStr(s2.active), ValStr(s2.activeName), ValStr(beforeName)))
-        Record(("%-44s %s"):format("Blizzard copy", BlizzardCopyLine(s2)))
+        Record(("%-44s %s"):format("Blizzard copy", line))
         Record(("%-44s %s"):format("EDIT_MODE_LAYOUTS_UPDATED", EventsSince(emark)))
         Record(("%-44s %s"):format("taint", TaintSince(mark)))
-        if gone then
+        -- The backup goes only when everything is verified on the character it
+        -- was taken on; otherwise it stays for recovery.
+        if gone and ok and activeOk and inStep and same and not t.restoreActive then
             db.layoutTest = nil
-            Record(others:find("^all") and "done - removed, the others match the backup" or "removed, but see 'other layouts' above")
+            Record("done - removed, the others match the backup, record cleared")
+        else
+            Record("backup record KEPT: " .. (not gone and "the probe layout is still there"
+                or not ok and "layouts differ from the backup"
+                or not activeOk and "the active layout changed"
+                or not inStep and "Blizzard's copy is out of step (/reload, then /syncprobe layoutclean)"
+                or not same and ("taken on " .. tostring(t.char) .. ": run layoutclean there to verify and clear it")
+                or "a switch back is pending: /syncprobe layoutactivate"))
         end
     end)
 end
@@ -1803,7 +1866,7 @@ function P.restart()
             Record(("%-44s armed %s by %s (%s) -> %s"):format("probe layout survived?", tostring(t.at), tostring(t.char),
                 tostring(t.state), e and ("index %d, content %s"):format(e.index, e.sum == t.expect and "as written"
                 or "DIFFERENT") or "ABSENT"))
-            Record(("%-44s %s"):format("other layouts vs backup", OthersLine(snap, t.before)))
+            Record(("%-44s %s"):format("other layouts vs backup", (OthersLine(snap, t.before, not SameChar(t)))))
             Record(("%-44s %s (%s)"):format("active layout now", ValStr(snap.active), ValStr(snap.activeName)))
             Record(("%-44s %s"):format("Blizzard copy", BlizzardCopyLine(snap)))
         else
@@ -1906,7 +1969,13 @@ function P.clean()
     if db.barToggle then
         local o = db.barToggle
         Call("SetActionBarToggles(original)", SetActionBarToggles, unpack(o.orig, 1, o.count))
-        db.barToggle = nil
+        local q = TogglesLine("GetActionBarToggles() after")
+        local same = q ~= nil
+        for i = 1, o.count do
+            if not q or q[i + 1] ~= o.orig[i] then same = false end
+        end
+        if same then db.barToggle = nil
+        else left[#left + 1] = "bar toggles (not back to the original - record kept, rerun clean)" end
     end
     if db.layoutTest then left[#left + 1] = "layout test (run /syncprobe layoutclean)" end
 
