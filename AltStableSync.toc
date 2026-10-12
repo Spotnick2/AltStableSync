@@ -21,3 +21,4 @@ Ready.lua
 Loadout.lua
 Preview.lua
 Commands.lua
+Panel.lua

@@ -9,7 +9,7 @@
 -- One frame, reused; parented to UIParent; Escape and Cancel close it without
 -- writing anything. onConfirm runs at most once per Show.
 -- Preview.Shown() is the options table on screen now, or nil.
--- #9 replaces this with the two-tab panel; the contract stays.
+-- The panel (#9) opens these same previews; it never writes by itself.
 ------------------------------------------------------------
 
 AltStableSync = AltStableSync or {}

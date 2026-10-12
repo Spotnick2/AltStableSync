@@ -298,7 +298,9 @@ local function SlashHandler(msg)
         Print("not initialised yet (SavedVariables not loaded)")
         return
     end
-    if cmd == "" or cmd == "status" then
+    if cmd == "" and ASS.Panel then
+        ASS.Panel.Toggle()                                   -- the window (#9)
+    elseif cmd == "" or cmd == "status" then
         local version = C_AddOns and C_AddOns.GetAddOnMetadata
             and C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version") or "?"
         local live = 0
@@ -317,7 +319,7 @@ local function SlashHandler(msg)
     elseif ASS.Commands and type(ASS.Commands[cmd]) == "function" then
         ASS.Commands[cmd](rest)
     else
-        Print("commands: /altsync status | saveas <name> | save [drop] | list | load <id or name> | backups | restore [n or op]" .. " | rename <id or name> <new name> | delete <id or name> | conflicts | resolve <id or name> theirs or mine | link")
+        Print("commands: /altsync (the window) | status | saveas <name> | save [drop] | list | load <id or name> | backups | restore [n or op]" .. " | rename <id or name> <new name> | delete <id or name> | conflicts | resolve <id or name> theirs or mine | link")
     end
 end
 ASS.SlashHandler = SlashHandler
