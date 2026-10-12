@@ -746,13 +746,26 @@ offline while A saved three times) a plain fast-forward rather than a conflict.
     `AltStableSyncLAS = ` other than `AltStableSyncLAS = nil`. The client writes `= nil` for a
     declared but unset variable, and today's beta files contain exactly that line (a line-level
     text check, not Lua parsing);
-  - requires the destination `WTF\Account\<id>\SavedVariables` folder to exist already. On a fresh
-    live install, log each live account in once and exit before transferring;
+  - refuses a source with no `AltStableSyncDB = ` line (not this addon's file; it only identifies
+    the file, and the addon validates the content on load);
+  - reads the source **once**: the bytes checked are the bytes hashed and written, never re-encoded;
+  - requires the destination `WTF\Account\<id>\SavedVariables` folder to exist already, and never
+    creates it. On a fresh live install, log each live account in once and exit before transferring;
+  - refuses `-From` and `-To` in the same WoW folder (a scope rule for a beta → live tool, not flavour
+    detection);
   - is run once per live WoW account that should start with the catalog;
-  - refuses while any `Wow*.exe` runs, checked again just before writing;
-  - refuses if the destination file exists (`-Force` backs it up first);
-  - copies to a temp file, then moves it into place;
-  - has `-WhatIf` and a self-test.
+  - refuses while any `Wow*` process runs, checked again just before the commit (two checks aren't
+    a lock, so every client stays closed throughout);
+  - refuses if the destination file exists. `-Force` **replaces** the whole live catalog and its
+    account-wide backups, never merges, after keeping a verified `.pre-transfer-<time>` copy;
+  - stages a verified temp file, then commits with a rename that never overwrites
+    (`File.Move`), or `File.Replace` for `-Force` (never `Move-Item -Force`, which deletes first),
+    then reads the result back by SHA-256;
+  - real transfers run on **Windows only**: .NET's non-overwriting move on Unix can overwrite a
+    file that appears at the last moment;
+  - exits 0 done, 1 refused before any write, 2 failed after the write phase began, with the state
+    and the backup's recovery line printed;
+  - has `-WhatIf` (a read-only preflight) and a self-test (`tests/run.ps1` and CI run it).
 - **No flavour fingerprint, no quarantine.** Backups are keyed by GUID, and live GUIDs differ, so
   beta backups are inert on live. They stay as dead data, and cleanup is deferred. `origin` is
   provenance only (#11). `WOW_PROJECT_ID` or build changes never trigger anything.

@@ -35,6 +35,11 @@ try {
         if ($LASTEXITCODE -ne 0) { $failed++ }
         Write-Host ""
     }
+    # The beta -> live transfer script's own self-test (#12).
+    Write-Host "-- Transfer-Profiles.ps1 -SelfTest --" -ForegroundColor Cyan
+    & pwsh -NoProfile (Join-Path $RepoRoot "Tools/Transfer-Profiles.ps1") -SelfTest
+    if ($LASTEXITCODE -ne 0) { $failed++ }
+    Write-Host ""
     if ($failed -gt 0) {
         Write-Host "$failed test file(s) FAILED" -ForegroundColor Red
         exit 1

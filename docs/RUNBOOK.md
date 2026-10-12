@@ -117,6 +117,37 @@ after a load adds the other bars ("Adds N slots this loadout didn't cover yet");
 **Update both accounts together.** This version speaks sync schema 3. While one account is still on
 the old version, sync pauses both ways and `/altsync link` on the updated one says "sync paused".
 
+## Transfer (beta → live, #12)
+
+`Tools/Transfer-Profiles.ps1` copies one file, `WTF\Account\<id>\SavedVariables\AltStableSync.lua`
+(the catalog and the account's backups), from a beta account to a live one. Never
+`AltStableSyncLink.lua` (LibAccountSync's store, which must never cross flavours) and never a
+per-character file. Run it on Windows, with `pwsh` 7.
+
+It refuses, writing nothing, when:
+
+- a WoW client is running (any `Wow*` process): close them all and keep them closed until it finishes;
+- the source assigns a value to `AltStableSyncLAS` (`= nil` is fine). Only an older version wrote
+  it there: log in on beta once with the current version and exit, and the client rewrites the file
+  without it;
+- the source isn't AltStableSync's file, or is empty;
+- the live `SavedVariables` folder doesn't exist: log that live account in once and exit;
+- `-From` and `-To` are the same folder, or in the same WoW folder;
+- a live `AltStableSync.lua` already exists.
+
+**`-Force` replaces the whole live catalog and its backups; it never merges.** It first keeps the
+live file as `AltStableSync.lua.pre-transfer-<time>`, verified. To put it back:
+`Copy-Item -LiteralPath '<that file>' -Destination '<live>\WTF\Account\<id>\SavedVariables\AltStableSync.lua' -Force`.
+Merging into an existing live catalog is the export string (#17).
+
+The script exits with 0 when it's done, and 1 when it refused. Exit 2 means it failed after it
+started writing: read what it printed, which says what the live file holds now and, after `-Force`,
+where the copy is.
+
+The beta backups travel inside the file, as inert data: they are keyed by beta character GUIDs, which
+live characters don't share. Live per-character files stay as they are; every character starts
+fresh only on a fresh live install.
+
 ## Nov 4 launch — day-one checklist (draft; finalised by #13)
 
 1. **Before launch, on beta:** UI setups and loadouts saved for every class and category you play;
@@ -124,11 +155,10 @@ the old version, sync pauses both ways and `/altsync link` on the updated one sa
    directory.
 2. **Live installed.** Log each live WoW account in once (any character) and **exit fully**, so
    its `WTF\Account\<id>\SavedVariables` folder exists. Then close every client.
-3. For **each** live WoW account:
+3. For **each** live WoW account, with every WoW client closed throughout, first a dry run, then
+   the real one (#12, see "Transfer" below):
+   `pwsh Tools/Transfer-Profiles.ps1 -From "<beta>\WTF\Account\<id>" -To "<live>\WTF\Account\<id>" -WhatIf`
    `pwsh Tools/Transfer-Profiles.ps1 -From "<beta>\WTF\Account\<id>" -To "<live>\WTF\Account\<id>"`
-   (#12). It copies `AltStableSync.lua` only, never `AltStableSyncLink.lua`, and refuses a source that
-   assigns a value to `AltStableSyncLAS` (`= nil` is fine). It also refuses when the destination
-   folder is missing or a live file already exists.
 4. `pwsh Tools/deploy.ps1 -AddOnsPath "<live>\Interface\AddOns"`.
 5. Log in one character. **Nothing is written.** If a UI setup exists, the addon *offers* it
    ("Make yourself at home"); beta backups stay inert (they are keyed by beta GUIDs).
