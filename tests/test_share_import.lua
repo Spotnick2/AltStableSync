@@ -340,6 +340,25 @@ do
     WoW.type(d.name, "Mine")
     d = paste(assert(S.Encode(e)))
     eq("a typed name stays", d.name:GetText(), "Mine")
+    -- Codex on PR #74: a replaced paste after a typed name takes the new
+    -- string's category; only a picked category stays.
+    local shadow = copy(x); shadow.category = "shadow"; shadow.name = "Dots"
+    d = paste(assert(E.EncodeShare(shadow)))
+    eq("replaced paste: its category", d.category, "shadow")
+    eq("replaced paste: the typed name stays", d.name:GetText(), "Mine")
+    d.cat:Click()
+    for _, b in ipairs(W.menu.items) do if b:IsShown() and b.value == "discipline" then b:Click() break end end
+    eq("picked: the category", d.category, "discipline")
+    d = paste(assert(S.Encode(e)))
+    eq("picked: a replaced paste keeps it", d.category, "discipline")
+    d.review:Click()
+    _G.AltStableSyncPreview.confirm:Click()
+    local saved
+    for _, z in pairs(AltStableSyncDB.presets) do if z.name == "Mine" then saved = z end end
+    eq("picked: saved in it", saved and saved.category, "discipline")
+    P.OpenImport()
+    d = paste(assert(E.EncodeShare(shadow)))
+    eq("reopened: the string's category again", d.category, "shadow")
     -- A change drops the draft at once.
     check("debounce: a draft", d.draft ~= nil and d.review:IsEnabled())
     WoW.type(d.box, d.box:GetText() .. "x")

@@ -838,11 +838,13 @@ local function ImportDialog()
             else
                 d.draft = x
                 d.status:SetText(("A %s loadout: %s"):format(ASS.Share.ClassLabel(class), ASS.Share.Literal(x.name)))
-                -- The string's name and category, until the player types a name.
-                if not d.nameTyped then
+                -- The string's category until the player picks one, and its
+                -- name until the player types one: each on its own, so a
+                -- replaced paste never keeps the last string's category.
+                if not d.catPicked then
                     SetCategory(ASS.Categories.IsValid(class, x.category) and x.category or "general")
-                    d.name:SetText(x.name)
                 end
+                if not d.nameTyped then d.name:SetText(x.name) end
             end
         end
         d.Check(false)
@@ -906,10 +908,12 @@ local function ShowImport()
     for _, c in ipairs(ASS.Categories.List(class) or {}) do items[#items + 1] = { text = c.label, value = c.key } end
     d.cat.items = items
     d.cat.onPick = function(key)
+        d.catPicked = true
         d.category, d.cat.value = key, key
         d.cat.label:SetText(ASS.Categories.Label(class, key))
         d.Check(false)
     end
+    d.catPicked = false
     d.category, d.cat.value = "general", "general"
     d.cat.label:SetText(ASS.Categories.Label(class, "general"))
     d.nameTyped = false
