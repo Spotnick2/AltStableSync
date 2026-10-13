@@ -32,7 +32,7 @@ standalone, `## OptionalDeps: AltStable`, with a sidebar tab when AltStable is p
   Classic/TBC-era API advice is usually stale; Lua 5.1 semantics still apply.
 - **Namespace:** one global table `AltStableSync`; every file starts `AltStableSync = AltStableSync or {}`
   (file-local alias `ASS`).
-- **SavedVariables:** `AltStableSyncDB` (account-wide: schema, presets, backups, origin) and
+- **SavedVariables:** `AltStableSyncDB` (account-wide: schema, presets, backups, minimap) and
   `AltStableSyncChar` (per character: last selections, loaded baselines, onboarding dismissal,
   interrupted operation). `AltStableSyncLAS` (the LibAccountSync store **only**) belongs to the
   separate `AltStableSyncLink` addon (#18), so it lands in its own file and never travels with

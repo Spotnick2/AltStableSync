@@ -20,3 +20,11 @@ function finish(label)
     print(("%s: %d passed, %d failed"):format(label, passed, failed))
     os.exit(failed == 0 and 0 or 1)
 end
+
+-- finish(), then `marker` as the very last line when nothing failed (a
+-- child session's pass signal, tests/flavour_session.lua).
+function finishWith(label, marker)
+    print(("%s: %d passed, %d failed"):format(label, passed, failed))
+    if failed == 0 then print(marker) end
+    os.exit(failed == 0 and 0 or 1)
+end
