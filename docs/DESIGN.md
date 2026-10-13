@@ -140,7 +140,7 @@ bus.
 
 ```lua
 AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
-  schema = 8,                       -- #27 1 -> 2, #28 2 -> 3, #5 3 -> 4, #46 4 -> 5, #7 5 -> 6, #47 6 -> 7, #6 7 -> 8; an unknown or newer schema is refused untouched
+  schema = 9,                       -- #27 1 -> 2, #28 2 -> 3, #5 3 -> 4, #46 4 -> 5, #7 5 -> 6, #47 6 -> 7, #6 7 -> 8, #62 8 -> 9 (a stamp); an unknown or newer schema is refused untouched
   presets = {
     [id] = {
       id = "loadout-a1b2c3d4e5f6-12",          -- kind-writer-seq: never collides across accounts or copies
@@ -178,10 +178,12 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
       operation = <snapshot> | nil,            -- the interrupted operation's original backup;
   } },                                         -- pinned until it completes or is abandoned
   origin = { build, region, project },         -- provenance only; never a migration trigger
+  minimap = { angle = 200, hide = true | nil } | nil,  -- #62: the minimap button only; made on its
+                                               -- first write, never at load; not a table -> refused
 }
 
 AltStableSyncChar = {               -- per character
-  schema = 8,                       -- same number as the DB; an unknown or newer one is refused untouched
+  schema = 9,                       -- same number as the DB; an unknown or newer one is refused untouched
   lastSelected = { ui = id, loadout = { category = "discipline", id = id } },
   loaded = {                        -- ONE baseline per kind: the last Load/Apply, or a Save/Save As (#28)
     ui = { id, version, baseline = <modules as loaded>, result = {...} },
