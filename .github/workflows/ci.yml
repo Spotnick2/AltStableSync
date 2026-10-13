@@ -1,11 +1,14 @@
 name: CI
 
-# Syntax check + unit tests under Lua 5.1 (WoW's Lua). No packager step while
-# the addon is personal-use; add a BigWigs dry run (-d) here before any release.
+# Syntax check + unit tests under Lua 5.1 (WoW's Lua), then the BigWigs
+# packager as a dry run (-d: build, never upload) and a check of what the
+# package holds. CurseForge builds the real release from each tag.
 on:
   push:
     branches: [main]
   pull_request:
+  # Manual run on a tag: the zip for the GitHub release (AGENTS.md "Releasing").
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Lua 5.1
         run: |
@@ -52,3 +57,25 @@ jobs:
       - name: Transfer script self-test
         shell: pwsh
         run: ./Tools/Transfer-Profiles.ps1 -SelfTest
+
+      # The release package, exactly as CurseForge's packager would build it
+      # (pinned to a commit), checked for what it may hold (Tools/check_package.py).
+      - name: Package dry run
+        uses: BigWigsMods/packager@e50a250f8705041e40f2fa1ddcb280a686d65aa0
+        with:
+          args: -d
+
+      - name: Check the package contents
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(.release/*.zip)
+          test "${#archives[@]}" -gt 0
+          for archive in "${archives[@]}"; do python3 Tools/check_package.py "$archive"; done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: altstablesync-package
+          path: .release/*.zip
+          include-hidden-files: true
+          if-no-files-found: error

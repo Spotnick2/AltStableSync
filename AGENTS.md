@@ -151,6 +151,23 @@ copy only**. Never commit a literal version over that keyword. Then `/reload` in
 - **Never write into another repo** (AltStable, AltStableCompanion, LibGlass, LibAccountSync) from
   this session; file an issue there only with the owner's OK.
 
+## Releasing
+
+Repo: `github.com/Spotnick2/AltStableSync` (public). CurseForge project **1733555**,
+`https://www.curseforge.com/wow/addons/altstable-sync-forever-edition`. The project page's text is
+`README.curseforge.md`, kept **untracked** (`.git/info/exclude`) and pasted by the owner; `README.md`
+is the GitHub page.
+
+CurseForge's packager builds from the tag webhook, reading `.pkgmeta`; no API key lives here.
+`git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`. Every tag needs a player-facing
+`CHANGELOG.md` section (`## vX.Y.Z`), which is also the upload's changelog. The same version is a
+**GitHub release** (TimeIsMoney's model): run CI on the tag (`gh workflow run ci.yml --ref vX.Y.Z`),
+download its `altstablesync-package` artifact, then
+`gh release create vX.Y.Z <zip> --title "AltStableSync X.Y.Z" --notes-file <notes>`, the notes being
+that version's changelog section. CI dry-runs the BigWigs packager on every PR and `main` and checks
+the zip with `Tools/check_package.py` (two addons, nothing extra, LibAccountSync only in the Link
+addon, versions substituted). Check the published zip by hand afterwards.
+
 ## Git conventions
 
 - Branch off `main` per issue (`m1/vertical-slice`). Never commit directly to `main`. Commit or push

@@ -24,33 +24,32 @@ SOFTWARE.
 
 THIRD-PARTY COMPONENTS
 
-The MIT terms above cover AltStable's own code. They do NOT relicense the
-libraries bundled under Libs/, each of which is redistributed under its own
-terms and remains the work of its authors:
+The MIT terms above cover AltStableSync's own code. They do NOT relicense the
+libraries it ships with, each of which is redistributed under its own terms
+and remains the work of its authors:
 
-  Libs/LibStub             LibStub, by Kaelten, Cladhaire, ckknight, Mikk,
+  AltStableSync/Libs/LibStub
+                           LibStub, by Kaelten, Cladhaire, ckknight, Mikk,
                            Ammo, Nevcairiel and joshborke.
                            Placed in the Public Domain by its authors.
 
-  Libs/LibDeflate          LibDeflate, copyright (c) 2018-2020 Haoqian He.
-                           zlib License. See the header of LibDeflate.lua.
-
-  Libs/LibGlass-1.0        LibGlass-1.0, copyright (c) 2026 Spotnick2.
+  AltStableSync/Libs/LibGlass-1.0
+                           LibGlass-1.0, copyright (c) 2026 Spotnick2.
                            MIT License; its own LICENSE ships beside it.
                            Fetched at build time, not kept in this
                            repository.
 
-  Libs/LibShowcase-1.0     LibShowcase-1.0, copyright (c) 2026 Spotnick2.
+  AltStableSyncLink/Libs/LibAccountSync-1.0
+                           LibAccountSync-1.0, copyright (c) 2026 Spotnick2.
                            MIT License; its own LICENSE ships beside it.
                            Fetched at build time, not kept in this
-                           repository.
+                           repository. It bundles:
 
-  Libs/ChatThrottleLib     ChatThrottleLib, by Mikk.
-                           Carries no licence header. It is embedded in a
-                           great many addons by long-standing convention
-                           rather than by a stated grant, which is recorded
-                           here rather than glossed over.
+    .../LibStub            LibStub (as above), Public Domain.
 
-Media/ contains artwork generated for this addon and textures referenced by
-file id from the game client; the latter are Blizzard's and are not
-redistributed here.
+    .../ChatThrottleLib    ChatThrottleLib, by Mikk (v32). Placed in the
+                           public domain, as LibAccountSync records it; the
+                           file itself carries no licence header.
+
+AltStableSync uses textures and icons from the game client by file id. They
+are Blizzard's and are not redistributed here.
