@@ -15,9 +15,10 @@ change, and after taking a backup.
 
 ![The AltStableSync window](https://raw.githubusercontent.com/Spotnick2/AltStableSync/main/docs/screenshots/panel.png)
 
-**Nothing happens on its own.** Not at login, not when you change zones, not when something arrives
-from your other account. Your bars change only when you click Load in a preview, and a saved loadout
-changes only when you click Save.
+**Nothing touches your character on its own.** Not at login, not when you change zones, not when
+something arrives from your other account: your bars, keys and macros change only when you confirm a
+Load or a Restore in its preview. A saved loadout changes when you save it, or when your other
+account saves a newer version of it (see below).
 
 ## What a loadout holds
 
@@ -61,13 +62,18 @@ Other characters keep their own setup until they load the new version.
 ## Backups
 
 Every load and restore takes a backup first. **Backups…** lists the last 10 for the character,
-plus its very first. **Restore…** puts the bars, keys and macros back exactly as they were.
+plus its very first. **Restore…** puts the bars and keys back as they were in the backup, and the
+character macros the load changed. Macros the load created stay. Anything it can't put back (an
+item no longer in your bags, a macro you've deleted since) is listed in the preview first, and left
+as it is.
 
 ## Your other WoW account
 
 The included **AltStableSync Link** addon shares your saved loadouts with your **other WoW account
 on the same Battle.net account**, while both are online. They appear in its list, and nothing is
-loaded on any character until you load it there.
+loaded on any character until you load it there. When you save a loadout on one account, the other
+account's copy is updated to that version automatically; its characters keep their bars until they
+load it.
 
 If both accounts changed the same loadout, you get both versions, never a merge. Pick one with
 **Manage… > Resolve…**. `/altsync link off` turns sharing off.
