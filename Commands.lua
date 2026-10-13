@@ -173,7 +173,8 @@ local function MacroLines(lines, plan)
         if from then what[#what + 1] = "text changes" end
         if e.from.icon ~= e.to.icon then what[#what + 1] = "icon changes" end
         lines[#lines + 1] = ("  %s: %s"):format(tostring(e.name), table.concat(what, ", "))
-        if from then lines[#lines + 1] = ("    line %d: %s -> %s"):format(line, from, to) end
+        -- Macro text is code: every pipe shown (#75).
+        if from then lines[#lines + 1] = ("    line %d: %s -> %s"):format(line, ASS.Code(from), ASS.Code(to)) end
     end
     if ne > 0 then lines[#lines + 1] = "An updated macro changes every button that uses it, on any bar." end
 end
@@ -399,7 +400,7 @@ function Commands.saveas(arg) return Commands.SaveAsEntry(arg, "general") end
 -- nothing. Catalog only: no game state is read or written, and nothing is
 -- loaded. `onDone(entry)` runs after a successful save.
 function Commands.ImportEntry(frozen, onDone)
-    local S, L = ASS.Share, ASS.Share.Literal
+    local S = ASS.Share
     local class = PlayerClass()
     if ASS.disabled or not ASS.db then Print("Not imported: AltStableSync isn't available now.") return end
     if frozen.class ~= class then
@@ -410,19 +411,21 @@ function Commands.ImportEntry(frozen, onDone)
     if not trimmed then Print("Not imported: " .. Copy(nerr)) return end
     local m = frozen.modules
     local lines = {}
-    lines[#lines + 1] = ("A new loadout %q in %s: %s with an action, keys for %s, %s, %s."):format(L(trimmed),
+    lines[#lines + 1] = ("A new loadout %q in %s: %s with an action, keys for %s, %s, %s."):format(trimmed,
         ASS.Categories.Label(class, frozen.category), Plural(Count(m.actions), "slot"), Plural(Count(m.bindings), "command"),
         Plural(Count(m.macros), "character macro"), Plural(Count(m.pet), "pet bar"))
-    -- Every macro's full text: that's the code a string brings.
+    -- Every macro's full text: that's the code a string brings. Preview.Show
+    -- shows names literally; bodies are code, every pipe doubled (#75).
+    local C = ASS.Code
     local names = {}
     for name in pairs(m.macros or {}) do names[#names + 1] = name end
     table.sort(names)
     if #names > 0 then
         lines[#lines + 1] = "Character macros it holds (a Load creates or updates them, after its own preview):"
         for _, name in ipairs(names) do
-            lines[#lines + 1] = ("  %s:"):format(L(name))
+            lines[#lines + 1] = ("  %s:"):format(name)
             for line in (ASS.Game.Normalize(m.macros[name].body) .. "\n"):gmatch("([^\n]*)\n") do
-                lines[#lines + 1] = "    " .. L(line)
+                lines[#lines + 1] = "    " .. C(line)
             end
         end
     end
@@ -437,9 +440,9 @@ function Commands.ImportEntry(frozen, onDone)
     if #account > 0 then
         lines[#lines + 1] = "Account macros its bars use (never created or changed: these load only where a macro of that name and text already exists):"
         for _, a in ipairs(account) do
-            lines[#lines + 1] = ("  %s:"):format(L(a.name))
+            lines[#lines + 1] = ("  %s:"):format(a.name)
             for line in (ASS.Game.Normalize(a.body) .. "\n"):gmatch("([^\n]*)\n") do
-                lines[#lines + 1] = "    " .. L(line)
+                lines[#lines + 1] = "    " .. C(line)
             end
         end
     end
@@ -448,7 +451,7 @@ function Commands.ImportEntry(frozen, onDone)
     end
     lines[#lines + 1] = "Nothing on this character changes. Load it afterwards to use it."
     ASS.Preview.Show({
-        title = "Import " .. L(trimmed) .. "?",
+        title = "Import " .. trimmed .. "?",
         lines = lines,
         confirm = "Import",
         onConfirm = function()

@@ -115,8 +115,13 @@ end
 
 function Preview.Show(opts)
     frame = frame or Build()
-    frame.title:SetText(opts.title or "AltStableSync")
-    frame.body:SetText(table.concat(opts.lines or {}, "\n"))
+    -- Shown literally (#75), into new strings: `opts` is shown again as it
+    -- is (the waiting preview), so it is never changed.
+    local L = ASS.Literal
+    frame.title:SetText(L(opts.title or "AltStableSync"))
+    local shown = {}
+    for i, line in ipairs(opts.lines or {}) do shown[i] = L(line) end
+    frame.body:SetText(table.concat(shown, "\n"))
     frame.content:SetHeight(math.max(10, frame.body:GetStringHeight() + 8))
     frame.scroll:SetVerticalScroll(0)
     frame.confirm:SetText(opts.confirm or "Load")

@@ -225,6 +225,5 @@ function Share.ClassLabel(class)
     return (s:gsub("^%l", string.upper))
 end
 
--- Text from a string, shown as it is: "|" doubled, so no colour, link or
--- texture markup renders. Only for display; the stored text is unchanged.
-function Share.Literal(s) return (tostring(s):gsub("|", "||")) end
+-- Text from a string, shown as it is (Core's ASS.Literal, #75).
+function Share.Literal(s) return ASS.Literal(s) end

@@ -71,7 +71,8 @@ do
     GameTooltip = NewWidget("GameTooltip", "GameTooltip")
     function GameTooltip:AddLine() end
     GetCursorPosition = function() return 500, 600 end
-    for _, f in ipairs({ "Preview.lua", "Panel.lua", "Minimap.lua" }) do
+    -- Core first: the panel shows text through ASS.Literal (#75).
+    for _, f in ipairs({ "Core.lua", "Preview.lua", "Panel.lua", "Minimap.lua" }) do
         local chunk = assert(loadfile(f))
         setfenv(chunk, env)
         chunk("AltStableSync", {})
