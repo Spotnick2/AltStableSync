@@ -55,8 +55,11 @@ ChatThrottleLib = {
 WoW.reset()
 UnitClass = function() return "Priest", "PRIEST" end
 LibStub = nil
--- The core addon, as the client loads it (its TOC order).
+-- The core addon, as the client loads it (its TOC order): LibStub, then
+-- LibAccountSync (it ships in the main addon since #66), then the modules.
 dofile("Libs/LibStub/LibStub.lua")
+local lib = LoadAccountSync("AltStableSync")
+check("library loaded by the main addon", lib ~= nil)
 for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Envelope.lua", "Game.lua", "Pet.lua", "Backups.lua",
                      "Ready.lua", "Loadout.lua", "Preview.lua", "Commands.lua" }) do
     assert(loadfile(f))("AltStableSync", {})
@@ -64,9 +67,8 @@ end
 WoW.fire("ADDON_LOADED", "AltStableSync")
 assert(AltStableSync.db, "core init failed")
 
--- The Link addon, as its TOC loads it.
-local lib = LoadAccountSync("AltStableSyncLink")
-check("library loaded", lib ~= nil)
+-- The Link addon, as its TOC loads it: no library of its own, it finds
+-- LibAccountSync through LibStub.
 assert(loadfile("Plugins/Link/Sync.lua"))("AltStableSyncLink", {})
 assert(loadfile("Plugins/Link/Link.lua"))("AltStableSyncLink", {})
 WoW.fire("ADDON_LOADED", "AltStableSyncLink")

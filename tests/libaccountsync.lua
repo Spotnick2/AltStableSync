@@ -1,7 +1,7 @@
 ------------------------------------------------------------
 -- libaccountsync.lua - load LibAccountSync the way the client does
 --
--- The Link addon's TOC loads Libs\LibAccountSync-1.0\LibAccountSync-1.0.xml.
+-- The main addon's TOC loads Libs\LibAccountSync-1.0\LibAccountSync-1.0.xml (#66).
 -- That folder is gitignored (the packager fills it), so the tests read the
 -- library from a checkout: $LIBACCOUNTSYNC, else ../LibAccountSync (CI fetches
 -- the .pkgmeta pin with tests/fetch_libaccountsync.sh). No checkout, or a

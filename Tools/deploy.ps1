@@ -85,7 +85,10 @@ $excludeDirs = @(
     (Join-Path $RepoRoot "dist"),
     # Plugins ship as their own top-level addons (below), never nested here.
     (Join-Path $RepoRoot "Plugins"),
+    # The embedded libraries come only from their own deploys above: a
+    # gitignored local copy here must never overwrite them.
     (Join-Path $RepoRoot "Libs\LibGlass-1.0"),
+    (Join-Path $RepoRoot "Libs\LibAccountSync-1.0"),
     # Every dot-entry: .git (a FILE in a worktree), .github, .claude, .vscode, ...
     ".*"
 )
