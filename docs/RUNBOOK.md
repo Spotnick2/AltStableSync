@@ -117,6 +117,21 @@ after a load adds the other bars ("Adds N slots this loadout didn't cover yet");
 **Update both accounts together.** This version speaks sync schema 3. While one account is still on
 the old version, sync pauses both ways and `/altsync link` on the updated one says "sync paused".
 
+## Edit Mode layouts between accounts (by hand)
+
+AltStableSync doesn't carry Edit Mode layouts between your WoW accounts (that is #58, after launch).
+Edit Mode's own share string does it. With both clients open:
+
+1. On the account that has the layout: Edit Mode, the layout's menu, **Share**, then copy the string.
+2. On the other account: Edit Mode, the layout menu's **Import**, paste, name it, pick Account or Character.
+
+**Importing an Account layout moves other characters.** A character's layout choice is stored as a
+position in the list, and a new Account layout goes in ahead of every Character layout. That was
+measured for an addon's add on 70338 (#29); Edit Mode's import inserts the same way, so expect the
+same. So each character on that account that uses a Character layout is on a different layout at its
+next login: pick it again in Edit Mode. To replace a layout, import the new one, then delete the old
+one; each step moves those characters again.
+
 ## Transfer (beta → live, #12)
 
 `Tools/Transfer-Profiles.ps1` copies one file, `WTF\Account\<id>\SavedVariables\AltStableSync.lua`
