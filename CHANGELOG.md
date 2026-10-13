@@ -1,10 +1,5 @@
 # Changelog
 
-## v0.1.1
-
-- **A smaller download.** The CurseForge package no longer includes the sharing library's test and
-  development files. Nothing changes in game.
-
 ## v0.1.0
 
 The first release, for World of Warcraft: Forever (Interface 16001).
