@@ -155,15 +155,19 @@ function Panel.Model(sel)
     end
     -- Categories: the class's, then keys this build doesn't know (sent by a
     -- newer build), under their raw name.
+    -- Every display string here is shown literally (#75); keys and ids stay
+    -- raw. Menu items (entries, categories) are escaped where every menu
+    -- draws them (DrawMenu).
+    local L = ASS.Literal
     local label, unknown = {}, {}
     for _, c in ipairs(ASS.Categories.List(class) or {}) do
-        label[c.key] = c.label
+        label[c.key] = L(c.label)
         m.categories[#m.categories + 1] = { key = c.key, label = c.label, count = #(byCat[c.key] or {}), known = true }
     end
     for k in pairs(byCat) do if not label[k] then unknown[#unknown + 1] = k end end
     table.sort(unknown)
     for _, k in ipairs(unknown) do
-        label[k] = k
+        label[k] = L(k)
         m.categories[#m.categories + 1] = { key = k, label = k, count = #byCat[k], known = false }
     end
     m.noLoadouts = #all == 0
@@ -173,7 +177,7 @@ function Panel.Model(sel)
     if rec then
         local e = ASS.Catalog.Get(rec.id)
         local live = e and not e.deleted and not e.conflict and e.kind == "loadout" and e.class == class
-        m.target = { id = rec.id, name = e and tostring(e.name) or nil,
+        m.target = { id = rec.id, name = e and L(e.name) or nil,
                      category = live and label[tostring(e.category)] or nil, deleted = not live,
                      older = live and e.version ~= rec.version or false }
         if live then targetEntry = e end
@@ -190,7 +194,7 @@ function Panel.Model(sel)
         end
         category = category or "general"
     end
-    m.category, m.categoryLabel = category, label[category] or category
+    m.category, m.categoryLabel = category, label[category] or L(category)
     local list = byCat[category] or {}
     if selected and tostring(selected.category) ~= category then selected = nil end
     if not selected and not m.selectionGone and not sel.noDefault then
@@ -208,12 +212,12 @@ function Panel.Model(sel)
         local conflict = type(selected.conflict) == "table" and selected.conflict or nil
         local p = type(selected.provenance) == "table" and selected.provenance or {}
         m.selected = {
-            id = selected.id, name = tostring(selected.name), contents = Contents(selected),
+            id = selected.id, name = L(selected.name), contents = Contents(selected),
             marks = Marks(selected, rec, copiesOf),
-            saved = ("Saved %s%s"):format(Short(selected.updated), p.sourceChar and (" by " .. tostring(p.sourceChar)) or ""),
-            savedFull = ("Saved %s%s"):format(When(selected.updated), p.sourceChar and (" by " .. tostring(p.sourceChar)) or ""),
+            saved = ("Saved %s%s"):format(Short(selected.updated), p.sourceChar and (" by " .. L(p.sourceChar)) or ""),
+            savedFull = ("Saved %s%s"):format(When(selected.updated), p.sourceChar and (" by " .. L(p.sourceChar)) or ""),
             conflictCopy = conflict ~= nil, deletion = conflict and conflict.deletion or false,
-            from = conflict and tostring(conflict.from or "your other account") or nil,
+            from = conflict and L(conflict.from or "your other account") or nil,
         }
         m.targetDiffers = m.target ~= nil and m.target.id ~= selected.id
     end
@@ -222,12 +226,12 @@ function Panel.Model(sel)
     -- the first backup.
     local ring, op, first = ASS.Backups.List()
     if op then
-        m.pinned = tostring(op.op and op.op.name or "a loadout")
+        m.pinned = L(op.op and op.op.name or "a loadout")
         m.backups[#m.backups + 1] = { snap = op.snapshot,
             text = ("Incomplete load of %s, %s"):format(m.pinned, When(op.snapshot and op.snapshot.at)) }
     end
     for i, s in ipairs(ring) do
-        m.backups[#m.backups + 1] = { snap = s, text = ("%s, %s"):format(tostring(s.reason or ("Backup " .. i)), When(s.at)) }
+        m.backups[#m.backups + 1] = { snap = s, text = ("%s, %s"):format(L(s.reason or ("Backup " .. i)), When(s.at)) }
     end
     if first then m.backups[#m.backups + 1] = { snap = first, text = "First backup, " .. When(first.at) } end
     for _, b in ipairs(m.backups) do
@@ -251,7 +255,15 @@ end
 -- The save target's status: a fresh PlanSave, which reads the live bars,
 -- keybindings and cursor and writes nothing. "No unsaved changes" only when
 -- that comparison found none.
+local SaveStatus
 function Panel.SaveStatus()
+    -- Its text can name the entry (#75): shown literally, in the status line
+    -- and the Save button's tooltip.
+    local st = SaveStatus()
+    st.text = ASS.Literal(st.text or "")
+    return st
+end
+SaveStatus = function()
     if ASS.disabled or not (ASS.db and ASS.char) then return { ok = false, text = "" } end
     local rec = type(ASS.char.loaded) == "table" and ASS.char.loaded.loadout or nil
     if not rec then return { ok = false, text = "No save target yet: load a loadout, or use Save As." } end
@@ -286,7 +298,7 @@ end
 -- A command's message, kept for the footer (refusals included).
 if ASS.Commands then
     ASS.Commands.onMessage = function(msg)
-        Panel.message, Panel.messageAt = tostring(msg), GetTime()
+        Panel.message, Panel.messageAt = ASS.Literal(msg), GetTime()
         Panel.dirty = true
     end
 end
@@ -434,7 +446,9 @@ local function DrawMenu(mf)
     for i = 1, mf.rows do
         local it = mf.all[mf.offset + i]
         local b = MenuRow(mf, i)
-        b.text:SetText(it and it.text or "")
+        -- Every menu shows its items literally (#75): idempotent, so text
+        -- the model already escaped is unchanged.
+        b.text:SetText(it and ASS.Literal(it.text) or "")
         b.value = it and it.value
         if it then b:Show() else b:Hide() end
     end
@@ -649,12 +663,14 @@ local function ShowNameDialog(mode, entry)
         d.needsWrite = false
         d.exceptId = entry.id
         d.category = entry.category
-        d.title:SetText("Rename " .. tostring(entry.name))
+        d.title:SetText("Rename " .. ASS.Literal(entry.name))
         d.intro:SetText("Only the saved list changes; nothing on any character changes.")
         d.catLabel:Hide(); d.cat:Hide()
         d.nameLabel:SetPoint("TOPLEFT", PAD, -62)
         d.name:SetPoint("TOPLEFT", PAD + 6, -78)
-        d.name:SetText(tostring(entry.name))
+        -- The form the client gives typed text (#75): a typed name comes back
+        -- unchanged, a crafted one neutralised.
+        d.name:SetText(ASS.Literal(entry.name))
     end
     d.hint:SetPoint("TOPLEFT", d.name, "BOTTOMLEFT", -6, -4)
     d:Show()
@@ -844,7 +860,7 @@ local function ImportDialog()
                 if not d.catPicked then
                     SetCategory(ASS.Categories.IsValid(class, x.category) and x.category or "general")
                 end
-                if not d.nameTyped then d.name:SetText(x.name) end
+                if not d.nameTyped then d.name:SetText(ASS.Literal(x.name)) end
             end
         end
         d.Check(false)

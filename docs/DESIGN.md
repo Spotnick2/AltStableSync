@@ -289,6 +289,12 @@ A loadout as text, for another character, the beta → live move one loadout at 
   no markup renders. The confirm creates one new entry from what Review froze, which sync then
   carries like any Save As. It never loads anything.
 - **Load only binds the managed commands** (`PlanKeys`), whatever an entry holds.
+- **Text is shown as typed (#75).** Stored text is WoW text: the client stores a typed `|` as `||`
+  (measured). Everything drawn from the catalog, a sync or a string neutralises unpaired pipes
+  (`ASS.Literal`, idempotent), at the choke points: `Print`, `Preview.Show`, `Panel.Model`, the save
+  status and the footer. Our own messages carry no markup, and our colours are written around such
+  text. Macro text is code and doubles every pipe (`ASS.Code`). Edit boxes are prefilled in the
+  typed form.
 
 ## Trigger / write matrix
 

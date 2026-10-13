@@ -23,6 +23,7 @@ WoW = {}
 function WoW.reset()
     WoW.frames = {}
     WoW.chatLines = {}
+    WoW.drawn = {}
     WoW.build = "70338"
     WoW.now = 1760000000          -- what time() returns; test_catalog moves it forward
     WoW.clock = 1000              -- what GetTime() returns (seconds of uptime)
@@ -94,8 +95,10 @@ local function Fit(self, t)
     if self.kind == "EditBox" and (self.maxLetters or 0) > 0 and #t > self.maxLetters then t = t:sub(1, self.maxLetters) end
     return t
 end
+-- WoW.drawn: every text set on anything but an EditBox (#75), as drawn.
 function Widget:SetText(t)
     self.text = Fit(self, t)
+    if self.kind ~= "EditBox" and WoW.drawn then WoW.drawn[#WoW.drawn + 1] = self.text end
     if self.kind == "EditBox" and self.scripts.OnTextChanged then self.scripts.OnTextChanged(self, false) end
 end
 function Widget:SetMaxLetters(n) self.maxLetters = n end

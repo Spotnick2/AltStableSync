@@ -126,8 +126,24 @@ local DB_TABLES = { "presets", "backups" }
 
 local PREFIX = "|cff00ccff[AltStableSync]|r "
 
+-- Text from the catalog, a sync or a pasted string, shown as typed (#75).
+-- Stored text is WoW text: the client stores a typed "|" as "||" and draws
+-- "||" as one "|" (measured, 70338). So only an unpaired pipe could start
+-- markup: an odd run of pipes gets one more. A typed name looks as it did,
+-- and applying it twice changes nothing.
+local PIPE = "\124"          -- "|", spelled so the chat-escape guard reads it as code
+function ASS.Literal(s)
+    return (tostring(s):gsub(PIPE .. "+", function(run) return #run % 2 == 1 and run .. PIPE or run end))
+end
+
+-- Macro text is code, not display text: every pipe doubled, so print("a|b")
+-- and print("a||b") stay visibly different.
+function ASS.Code(s) return (tostring(s):gsub(PIPE, PIPE .. PIPE)) end
+
+-- Our messages carry no markup of their own (only the prefix, added here),
+-- so every message is shown literally.
 local function Print(msg)
-    if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage(PREFIX .. tostring(msg)) end
+    if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage(PREFIX .. ASS.Literal(msg)) end
 end
 ASS.Print = Print
 

@@ -6,6 +6,9 @@
   **Import…** (or `/altsync import`) pastes one on another character, on the beta or live, or a
   friend's. Review shows what it holds, with the full text of every macro, before it's saved as a
   new loadout. Nothing on the character changes until you load it.
+- **Names show as typed.** A loadout name, a character name or a macro that arrives from an
+  imported string or your other account can no longer draw colours, links or icons in the window,
+  previews, chat or the minimap tooltip.
 
 ## v0.2.0
 
