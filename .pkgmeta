@@ -1,8 +1,14 @@
 package-as: AltStableSync
 
-# Personal use for now: nothing publishes this, but the layout stays
-# packager-ready so a later CurseForge release is a tag, not a rework.
+# Released on CurseForge (project 1733555, altstable-sync-forever-edition):
+# CurseForge's packager builds a release from each tag pushed to main.
 enable-nolib-creation: no
+
+# The upload's changelog: each release gets a "## vX.Y.Z" heading before
+# it is tagged.
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
 
 # LibStub is vendored in Libs/. The externals are pinned to TAGS (never
 # "latest"), bumped only in a release made anyway. LibAccountSync goes into the
@@ -12,9 +18,11 @@ enable-nolib-creation: no
 # Comments on their own lines only - the packager's YAML reader keeps an inline
 # "# ..." as part of the value (measured in GlassUnitFrames' migration).
 externals:
+  # r5: what the v0.1.0 panel was tried with in game (only tests and docs
+  # changed after it).
   Libs/LibGlass-1.0:
     url: https://github.com/Spotnick2/LibGlass
-    tag: r2
+    tag: r5
   # r5 (76fedef): messages mode and SendTo, both required by Link.lua.
   Plugins/Link/Libs/LibAccountSync-1.0:
     url: https://github.com/Spotnick2/LibAccountSync
@@ -37,6 +45,8 @@ ignore:
   - AGENTS.md
   - CLAUDE.md
   - README.md
+  - README.curseforge.md
+  - CHANGELOG.md
   - Libs/LibGlass-1.0/tests
   - Libs/LibGlass-1.0/docs
   - Libs/LibGlass-1.0/Tools

@@ -4,8 +4,9 @@
 Libs/LibGlass-1.0/
 Plugins/Link/Libs/LibAccountSync-1.0/
 
-# Packaged zips - never committed.
+# Packaged zips - never committed (.release/ is the packager's output).
 dist/
+.release/
 
 # SavedVariables captures pulled off the client: real character names, GUIDs,
 # macros and bindings.
