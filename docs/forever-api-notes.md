@@ -380,7 +380,7 @@ character (Drakuzo). The probe passes `SaveLayouts` the same shape as Blizzard's
 
 Measured by hand with `/run` lines from the chat box.
 - **A `|` typed into an EditBox is stored as `||`.** `GetText()` returned 4 bytes for a typed `a|b`.
-- **The chat box does the same** to a typed `/run` line, so every `|` in it reaches Lua as `||`. Spell a pipe `T` in a `/run` test.
+- **The chat box does the same** to a typed `/run` line, so every `|` in it reaches Lua as `||`. Spell a pipe `\124` in a `/run` test.
 - **A FontString draws `||` as one `|`.** Strings with 2, 4, 6 and 8 pipes in a row drew 1, 2, 3 and 4, and the colour code after 6 or 8 pipes didn't render.
 - **So stored text is WoW text.** A name typed in our boxes holds `||` for each pipe the player sees, and a single `|` can only come from an import, a sync or a SetText. Display neutralises odd runs (`ASS.Literal`), and macro code doubles every pipe (`ASS.Code`).
 - **An EditBox draws SetText's text like a FontString.** One pipe before a colour code drew red, two drew one plain pipe, four drew two. So the typed form (`Literal`) shows literally in a box too, as the Import name box did with a crafted name, holding `||cff…`.
