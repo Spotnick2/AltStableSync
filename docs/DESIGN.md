@@ -585,10 +585,12 @@ not take a save of them.
   a key bound later stays on restore) **only on Character keybindings** (restores
   write the Character set only), and the bar of the pet that is out. A slot holding something this
   build can't put back exactly is left out and listed, and a restore leaves it. A failed read (a
-  slot, the keys, the pet) means no backup. Restoring it never creates or edits a macro. It writes
+  slot, the keys, the pet, its bar or spellbook) means no backup, and so does a pet ability its
+  spellbook doesn't list (a restore places pet spells from the book only). Restoring it never creates or edits a macro. It writes
   only the backups store, from an explicit click; a full ring (it would drop the oldest) is previewed
   first, and a confirm refuses if anything shown changed. "Nothing new" only against a backup that
-  restores the same way (same binding set, no macro edits).
+  restores the same way (same binding set, no macro edits; the pet by family and name, as Restore
+  matches it, never its GUID, which changes on every summon).
 - **Backups…:** the incomplete operation, the ring newest first, then the first backup. Selection follows
   the snapshot itself; **Restore…** finds its current slot at the click. An incomplete operation also
   shows in the footer with **Undo it…**.

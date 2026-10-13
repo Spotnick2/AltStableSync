@@ -457,4 +457,59 @@ do
     eq("partial book at the confirm: nothing dropped or stored", ser(ring()), before)
 end
 
+------------------------------------------------------------
+-- Codex on PR #72
+------------------------------------------------------------
+
+-- The pet's spellbook: unreadable, or missing an ability on the bar, refuses
+-- the backup (a restore couldn't put that ability back); the ring is unchanged.
+do
+    local function hunter(book)
+        boot({ class = "HUNTER", pet = { name = "Tarthosuk", guid = "Pet-0-A1",
+            bar = { [1] = { token = "PET_ACTION_ATTACK" }, [4] = { spell = 14916 } }, book = book } })
+        WoW.chatLines = {}
+    end
+    hunter({ { id = 14916, name = "Growl" } })
+    local hps = C_SpellBook.HasPetSpells
+    C_SpellBook.HasPetSpells = function() error("boom") end
+    A.Commands.backup()
+    C_SpellBook.HasPetSpells = hps
+    eq("unreadable pet book: no backup", #ring(), 0)
+    check("unreadable pet book: said", said("Couldn't read your pet's spellbook"), table.concat(WoW.chat(), " | "))
+
+    hunter({ { id = 14917, name = "Growl" } })
+    A.Commands.backup()
+    eq("ability not in the pet book: no backup", #ring(), 0)
+    check("ability not in the pet book: names the slot", said("Pet slot 4"), table.concat(WoW.chat(), " | "))
+
+    -- At a full ring's confirm, nothing is dropped.
+    hunter({ { id = 14916, name = "Growl" } })
+    for i = 1, B.RING do B.PushRing({ reason = "old " .. i, actions = {}, keys = {}, createdMacros = {}, at = i }) end
+    A.Commands.backup()
+    local shown = A._shown
+    check("pet book at confirm: previewed", shown ~= nil)
+    G.pet.book = { { id = 14917, name = "Growl" } }
+    local before = ser(ring())
+    shown.onConfirm()
+    eq("pet book at confirm: nothing dropped", ser(ring()), before)
+end
+
+-- The same pet resummoned (a new GUID), with the same bar: nothing new.
+do
+    boot({ class = "HUNTER", pet = { name = "Tarthosuk", guid = "Pet-0-A1",
+        bar = { [1] = { token = "PET_ACTION_ATTACK" }, [4] = { spell = 14916 } },
+        book = { { id = 14916, name = "Growl" } } } })
+    A.Commands.backup()
+    eq("resummon: one backup", #ring(), 1)
+    G.pet.guid = "Pet-0-B2"
+    WoW.chatLines = {}
+    A.Commands.backup()
+    eq("resummon: still one backup", #ring(), 1)
+    check("resummon: nothing new", said("nothing new"), table.concat(WoW.chat(), " | "))
+    -- Another pet with the same bar is new.
+    G.pet.name = "Other"
+    A.Commands.backup()
+    eq("another pet: a second backup", #ring(), 2)
+end
+
 finish("test_backup_now")

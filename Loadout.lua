@@ -1338,16 +1338,19 @@ local function SnapshotNow(reason)
             for _, key in ipairs(keys) do snap.keys[key] = cmd end
         end
     end
-    local pet = ASS.Pet.SnapshotNow()
-    if pet == false then return nil, "Couldn't read your pet's bar; try again." end
+    local pet, why = ASS.Pet.SnapshotNow()
+    if pet == false then return nil, why end
     snap.pet = pet
     return snap, left
 end
 
 -- What a backup holds and how restoring it behaves: its slots, keys, pet
--- bar, binding set, and the macros a restore would edit or keep.
+-- bar, binding set, and the macros a restore would edit or keep. The pet
+-- counts by what Pet.PlanRestore matches (family and name) and its slots;
+-- its GUID changes on every summon (measured), so it's left out.
 local function Content(s)
-    return Serialize({ a = s.actions or {}, k = s.keys or {}, p = s.pet or false, cb = s.characterBindings and true or false,
+    local pet = s.pet and { f = s.pet.family, n = s.pet.name, s = s.pet.slots } or false
+    return Serialize({ a = s.actions or {}, k = s.keys or {}, p = pet, cb = s.characterBindings and true or false,
                        e = s.editedMacros or false, c = s.createdMacros or {} })
 end
 
