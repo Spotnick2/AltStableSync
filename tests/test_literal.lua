@@ -159,6 +159,12 @@ do
     local theirs = copy(mine); theirs.version = "eeeeeeeeeeee:4"; theirs.parent = "eeeeeeeeeeee:3"; theirs.ancestors = {}
     theirs.modules.actions[3] = { kind = "item", id = 5512 }
     eq("a conflict copy", A.Catalog.Upsert(theirs, "Other" .. NAME), "conflict")
+    -- And a deletion conflict: deleted on the other account, edited here.
+    local gone = assert(A.Catalog.Create("loadout", { class = "PRIEST", category = "holy", name = "Gone" }, A.Loadout.Capture()))
+    assert(A.Catalog.Rename(gone.id, "Gone here", gone.version))
+    local tomb = { id = gone.id, kind = "loadout", class = "PRIEST", category = "holy", name = "Gone",
+                   version = "dddddddddddd:3", parent = "dddddddddddd:2", ancestors = {}, deleted = true }
+    eq("a deletion conflict", A.Catalog.Upsert(tomb, "Away" .. LINK), "conflict")
     local stored = ser(AltStableSyncDB.presets)
     local before = {}
     for id, x in pairs(AltStableSyncDB.presets) do if id ~= e.id then before[id] = ser(x) end end
@@ -211,6 +217,21 @@ do
     for _, b in ipairs(visible()) do if b.value == odd.category then catText = b.text:GetText() end end
     W.menu:Hide()
     check("panel: the unknown category is listed", catText and catText:find("TEXX", 1, true) ~= nil, tostring(catText))
+    -- The picker lists the deletion conflict with its "deleted on" mark.
+    W.entry:Click()
+    local marked
+    for _, b in ipairs(visible()) do if (b.text:GetText() or ""):find("deleted on", 1, true) then marked = b.text:GetText() end end
+    W.menu:Hide()
+    check("panel: the deletion conflict's mark", marked and marked:find("LINKX", 1, true) ~= nil, tostring(marked))
+    -- The Resolve menu of the regular conflict names the other side.
+    local copyId = theirs.id .. "~" .. theirs.version
+    pick(W.entry, copyId)
+    W.manage:Click()
+    local resolveText
+    for _, b in ipairs(visible()) do if b.value == "theirs" then resolveText = b.text:GetText() end end
+    W.menu:Hide()
+    check("panel: the Resolve menu names the other side", resolveText and resolveText:find("NAMEX", 1, true) ~= nil, tostring(resolveText))
+    pick(W.entry, e.id)
     -- The target changes on the other account: the status names it.
     assert(A.Catalog.Rename(e.id, "Raid " .. NAME .. " 2", A.Catalog.Get(e.id).version))
     P.RefreshSave()

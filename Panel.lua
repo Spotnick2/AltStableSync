@@ -155,18 +155,20 @@ function Panel.Model(sel)
     end
     -- Categories: the class's, then keys this build doesn't know (sent by a
     -- newer build), under their raw name.
-    -- Every display string here is shown literally (#75); keys and ids stay raw.
+    -- Every display string here is shown literally (#75); keys and ids stay
+    -- raw. Menu items (entries, categories) are escaped where every menu
+    -- draws them (DrawMenu).
     local L = ASS.Literal
     local label, unknown = {}, {}
     for _, c in ipairs(ASS.Categories.List(class) or {}) do
         label[c.key] = L(c.label)
-        m.categories[#m.categories + 1] = { key = c.key, label = L(c.label), count = #(byCat[c.key] or {}), known = true }
+        m.categories[#m.categories + 1] = { key = c.key, label = c.label, count = #(byCat[c.key] or {}), known = true }
     end
     for k in pairs(byCat) do if not label[k] then unknown[#unknown + 1] = k end end
     table.sort(unknown)
     for _, k in ipairs(unknown) do
         label[k] = L(k)
-        m.categories[#m.categories + 1] = { key = k, label = L(k), count = #byCat[k], known = false }
+        m.categories[#m.categories + 1] = { key = k, label = k, count = #byCat[k], known = false }
     end
     m.noLoadouts = #all == 0
 
@@ -201,8 +203,8 @@ function Panel.Model(sel)
     end
     for _, e in ipairs(list) do
         local marks = Marks(e, rec, copiesOf)
-        m.entries[#m.entries + 1] = { id = e.id, name = L(e.name), marks = marks,
-            text = L(e.name) .. (#marks > 0 and ("  (" .. table.concat(marks, ", ") .. ")") or "") }
+        m.entries[#m.entries + 1] = { id = e.id, name = tostring(e.name), marks = marks,
+            text = tostring(e.name) .. (#marks > 0 and ("  (" .. table.concat(marks, ", ") .. ")") or "") }
     end
     m.emptyCategory = not m.noLoadouts and #list == 0
     if selected then
@@ -444,7 +446,9 @@ local function DrawMenu(mf)
     for i = 1, mf.rows do
         local it = mf.all[mf.offset + i]
         local b = MenuRow(mf, i)
-        b.text:SetText(it and it.text or "")
+        -- Every menu shows its items literally (#75): idempotent, so text
+        -- the model already escaped is unchanged.
+        b.text:SetText(it and ASS.Literal(it.text) or "")
         b.value = it and it.value
         if it then b:Show() else b:Hide() end
     end
