@@ -143,9 +143,13 @@ check("LibAccountSync external at the Link addon's Libs, pinned to r5",
 check("move-folders ships the Link addon top-level",
       pkg:find("\nmove%-folders:%s*\r?\n  AltStableSync/Plugins/Link: AltStableSyncLink%s*\r?\n") ~= nil)
 check("no external under the package name", not pkg:find("\n  AltStableSync/[^\n]*Libs", 1))
+-- Both the source path (BigWigs) and the moved one (CurseForge's packager,
+-- which shipped the source-path entries in v0.1.0, #66).
 for _, sub in ipairs({ "tests", "docs", "Tools", "CLAUDE.md", "README.md" }) do
     check(".pkgmeta ignores the library's " .. sub,
           pkg:find("\n  %- " .. (lasKey .. "/" .. sub):gsub("%p", "%%%0") .. "\r?\n") ~= nil)
+    check(".pkgmeta ignores the library's " .. sub .. " after the move",
+          pkg:find("\n  %- " .. ("AltStableSyncLink/Libs/LibAccountSync-1.0/" .. sub):gsub("%p", "%%%0") .. "\r?\n") ~= nil)
 end
 
 -- Chat treats "|" as an escape: "<id|name>" printed as "<id", a line break,
