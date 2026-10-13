@@ -50,6 +50,7 @@ local REQUIRED = {
     "Backups.lua",
     "Ready.lua",
     "Loadout.lua",
+    "Share.lua",
     "Preview.lua",
     "Commands.lua",
 }

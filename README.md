@@ -87,6 +87,18 @@ load it.
 If both accounts changed the same loadout, you get both versions, never a merge. Pick one with
 **Manage… > Resolve…**. `/altsync link off` turns sharing off.
 
+## Sharing a loadout as text
+
+**Manage… > Share…** shows the loadout as a text string. Press Ctrl+C to copy it, then on another
+character (on the beta or live, or a friend's) open **Import…** in the Loadouts view, or type
+`/altsync import`, and paste it with Ctrl+V. Choose a category and a name, and **Review…** shows what
+it holds, including the full text of every macro in it, before it's saved as a new loadout. Nothing
+on the character changes: load it afterwards when you want to use it.
+
+The string holds the loadout's bars, keys and macro text, and no account or character details.
+Macro text may name people. A string for another class, a damaged one, or one from a newer or
+older AltStableSync is refused with the reason.
+
 ## Opening it
 
 - **The minimap button:** left-click opens or closes the window, right-click opens it on your
@@ -107,6 +119,7 @@ If both accounts changed the same loadout, you get both versions, never a merge.
 | `/altsync load <name or id>` | Review and load a loadout |
 | `/altsync backups` | This character's backups |
 | `/altsync backup` | Back up now |
+| `/altsync import` | Import a loadout from a text string |
 | `/altsync restore [n or op]` | Review and restore a backup (default: the newest) |
 | `/altsync rename <name or id> <new name>` | Rename a loadout |
 | `/altsync delete <name or id>` | Delete a loadout (on both accounts) |

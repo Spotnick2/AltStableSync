@@ -259,7 +259,12 @@ local KEYS_BLOCKED = "Enable character-specific keybindings in WoW settings, the
 local function PlanKeys(plan, wantKeys)
     local Game = G()
     local has = {}
+    -- Only the commands Capture records (#71): a loadout from a pasted string
+    -- or another account never binds anything else.
+    local managed = {}
+    for _, cmd in ipairs(Game.COMMANDS) do managed[cmd] = true end
     for cmd, keys in pairs(wantKeys) do
+        if not managed[cmd] or type(keys) ~= "table" then keys = {} end
         for i = 1, table.maxn(keys) do
             if type(keys[i]) == "string" and keys[i] ~= "" then has[cmd] = keys end
         end

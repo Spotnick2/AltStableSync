@@ -87,10 +87,22 @@ function Widget:IsVisible()
     return true
 end
 function Widget:SetShown(on) if on then self:Show() else self:Hide() end end
--- An EditBox's SetText fires OnTextChanged, as in the client.
+-- An EditBox's SetText fires OnTextChanged, as in the client, and keeps
+-- only its first maxLetters characters (#71: the paste box's limit).
+local function Fit(self, t)
+    t = t == nil and "" or tostring(t)
+    if self.kind == "EditBox" and (self.maxLetters or 0) > 0 and #t > self.maxLetters then t = t:sub(1, self.maxLetters) end
+    return t
+end
 function Widget:SetText(t)
-    self.text = t == nil and "" or tostring(t)
+    self.text = Fit(self, t)
     if self.kind == "EditBox" and self.scripts.OnTextChanged then self.scripts.OnTextChanged(self, false) end
+end
+function Widget:SetMaxLetters(n) self.maxLetters = n end
+-- The player typing or pasting into an EditBox: userInput is true.
+function WoW.type(box, t)
+    box.text = Fit(box, t)
+    if box.scripts.OnTextChanged then box.scripts.OnTextChanged(box, true) end
 end
 function Widget:GetText() return self.text end
 function Widget:SetFormattedText(fmt, ...) self:SetText(fmt:format(...)) end

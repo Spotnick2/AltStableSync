@@ -57,10 +57,19 @@ function Envelope.Pack(value)
     return PREFIX .. Adler32(cbor) .. ":" .. b64
 end
 
+-- Share strings (#71): the limits on a pasted string. RAW_MAX is the paste
+-- as typed, whitespace included; SHARE_MAX the string once whitespace is
+-- stripped; BOX_MAX the paste box's own limit, above RAW_MAX, so text the
+-- box cut off is always over RAW_MAX and never decoded; CBOR_MAX the
+-- decompressed data, refused before it is checksummed or deserialized
+-- (DecompressString itself has no output limit).
+Envelope.RAW_MAX, Envelope.SHARE_MAX, Envelope.BOX_MAX, Envelope.CBOR_MAX = 20000, 16384, 24000, 65536
+
 -- The string -> the table, or nil plus "bad-envelope" / "bad-checksum" /
 -- "older-schema" / "newer-schema" (anything but SCHEMA: refused, never
--- guessed at; "newer" also covers a schema that isn't a number).
-function Envelope.Unpack(text)
+-- guessed at; "newer" also covers a schema that isn't a number) /
+-- "too-long" (decompressed data over `maxCbor`, when given).
+function Envelope.Unpack(text, maxCbor)
     if type(text) ~= "string" then return nil, "bad-envelope" end
     local sum, b64 = text:match("^ASE1:(%x%x%x%x%x%x%x%x):(.+)$")
     if not sum then return nil, "bad-envelope" end
@@ -70,6 +79,7 @@ function Envelope.Unpack(text)
     if type(z) ~= "string" then return nil, "bad-envelope" end
     local cbor = Call(E.DecompressString, z)
     if type(cbor) ~= "string" then return nil, "bad-envelope" end
+    if maxCbor and #cbor > maxCbor then return nil, "too-long" end
     if Adler32(cbor) ~= sum:lower() then return nil, "bad-checksum" end
     local value = Call(E.DeserializeCBOR, cbor)
     if type(value) ~= "table" then return nil, "bad-envelope" end
@@ -87,11 +97,35 @@ function Envelope.Encode(entry)
     return Envelope.Pack({ s = SCHEMA, e = e })
 end
 
--- The entry, or nil plus why. Catalog.Upsert validates its fields.
+-- The entry, or nil plus why. Catalog.Upsert validates its fields. A share
+-- string is never a sync message (#71).
 function Envelope.Decode(text)
     local value, err = Envelope.Unpack(text)
     if not value then return nil, err end
-    if type(value.e) ~= "table" then return nil, "bad-envelope" end
+    if type(value.e) ~= "table" or value.share ~= nil then return nil, "bad-envelope" end
     value.e.previous = nil
     return value.e
+end
+
+-- A share string (#71): { kind, class, category, name, modules } only, never
+-- an entry's identity, versions, `previous` or provenance. Share.lua builds
+-- and validates the table; this is only the container.
+function Envelope.EncodeShare(share)
+    if type(share) ~= "table" then return nil, "encode-failed" end
+    return Envelope.Pack({ s = SCHEMA, share = share })
+end
+
+-- The pasted text -> the share table, or nil plus "too-long" / "not-a-share"
+-- or an Unpack refusal. Whitespace is stripped first (a paste from chat or a
+-- forum may wrap); both length limits are checked, the raw one before the
+-- strip. A sync message is not a share string.
+function Envelope.DecodeShare(text)
+    if type(text) ~= "string" then return nil, "bad-envelope" end
+    if #text > Envelope.RAW_MAX then return nil, "too-long" end
+    text = text:gsub("%s+", "")
+    if #text > Envelope.SHARE_MAX then return nil, "too-long" end
+    local value, err = Envelope.Unpack(text, Envelope.CBOR_MAX)
+    if not value then return nil, err end
+    if value.e ~= nil or type(value.share) ~= "table" then return nil, "not-a-share" end
+    return value.share
 end

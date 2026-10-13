@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Share a loadout as text.** **Manage… > Share…** shows a loadout as a string to copy, and
+  **Import…** (or `/altsync import`) pastes one on another character, on the beta or live, or a
+  friend's. Review shows what it holds, with the full text of every macro, before it's saved as a
+  new loadout. Nothing on the character changes until you load it.
+
 ## v0.2.0
 
 - **A minimap button.** Left-click opens or closes the window, right-click opens your backups, and
