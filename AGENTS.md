@@ -99,10 +99,11 @@ land).
   here; never edit `..\LibGlass` from this repo's session.
 - `Libs/LibStub/` — vendored, although LibGlass's XML brings its own, so the addon doesn't depend
   on LibGlass's load order to find LibStub. LibStub's version guard makes the second copy a no-op.
-  The Link addon (#18) vendors its own for LibAccountSync.
-- `Plugins/Link/` — the separate `AltStableSyncLink` addon (#18): it embeds
-  `Libs/LibAccountSync-1.0` (same embedding rules as LibGlass) and owns `AltStableSyncLAS`, so the
-  household key is written to its own file. LibAccountSync **cannot** carry beta → live: project and
+  LibAccountSync brings its own too (it loads from the main addon, #66).
+- `Plugins/Link/` — the separate `AltStableSyncLink` addon (#18): it owns `AltStableSyncLAS`, so the
+  household key is written to its own file, and uses LibAccountSync through LibStub. The library is
+  embedded in the **main** addon's `Libs/LibAccountSync-1.0`, like LibGlass (never inside a moved
+  folder: CurseForge then ships its dev files, #66). LibAccountSync **cannot** carry beta → live: project and
   region are part of its proof, by design.
 - `tests/` — Lua 5.1 unit tests. `Tools/` — deploy and transfer scripts (never ship).
 - `docs/` — `DESIGN.md`, `ACCEPTANCE.md`, `WORKFLOW.md`, `RUNBOOK.md`, `forever-api-notes.md`,
@@ -165,8 +166,8 @@ CurseForge's packager builds from the tag webhook, reading `.pkgmeta`; no API ke
 download its `altstablesync-package` artifact, then
 `gh release create vX.Y.Z <zip> --title "AltStableSync X.Y.Z" --notes-file <notes>`, the notes being
 that version's changelog section. CI dry-runs the BigWigs packager on every PR and `main` and checks
-the zip with `Tools/check_package.py` (two addons, nothing extra, LibAccountSync only in the Link
-addon, versions substituted). Check the published zip by hand afterwards.
+the zip with `Tools/check_package.py` (two addons, nothing extra, LibAccountSync once in
+`AltStableSync/Libs` and its store declared only by the Link TOC, versions substituted). Check the published zip by hand afterwards.
 
 ## Git conventions
 

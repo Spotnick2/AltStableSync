@@ -7,6 +7,5 @@
 ## Dependencies: AltStableSync
 ## SavedVariables: AltStableSyncLAS
 
-Libs\LibAccountSync-1.0\LibAccountSync-1.0.xml
 Sync.lua
 Link.lua

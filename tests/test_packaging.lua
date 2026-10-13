@@ -40,6 +40,7 @@ end
 local REQUIRED = {
     "Libs\\LibGlass-1.0\\LibGlass-1.0.xml",
     "Libs\\LibStub\\LibStub.lua",
+    "Libs\\LibAccountSync-1.0\\LibAccountSync-1.0.xml",
     "Core.lua",
     "Categories.lua",
     "Catalog.lua",
@@ -67,7 +68,8 @@ end
 -- Every listed file exists, except the externals the packager or the deploy
 -- script fills in - and those only at their exact expected path, so a
 -- misspelling can't hide behind the exemption.
-local EXTERNAL = { ["Libs\\LibGlass-1.0\\LibGlass-1.0.xml"] = true }
+local EXTERNAL = { ["Libs\\LibGlass-1.0\\LibGlass-1.0.xml"] = true,
+                   ["Libs\\LibAccountSync-1.0\\LibAccountSync-1.0.xml"] = true }
 for _, line in ipairs(files) do
     if not EXTERNAL[line] then
         local path = line:gsub("\\", "/")
@@ -115,16 +117,16 @@ local lfiles = {}
 for line in (ltoc .. "\n"):gmatch("([^\r\n]*)\r?\n") do
     if line ~= "" and not line:find("^#") then lfiles[#lfiles + 1] = line end
 end
-eq("link: loads the library, then Sync, then Link", table.concat(lfiles, ","),
-   LAS_XML .. ",Sync.lua,Link.lua")
+-- The library loads from the main addon (Dependencies: AltStableSync), as in
+-- AltStable: CurseForge doesn't apply ignores inside a moved folder (#66).
+eq("link: loads Sync, then Link, and no library of its own", table.concat(lfiles, ","), "Sync.lua,Link.lua")
+check("main addon loads LibAccountSync", toc:find(LAS_XML, 1, true) ~= nil)
 for _, line in ipairs(lfiles) do
-    if line ~= LAS_XML then
-        local path = LINK_DIR .. line:gsub("\\", "/")
-        local src = read(path)
-        check("link file exists: " .. path, src ~= nil)
-        local code = (src or ""):gsub("%-%-[^\n]*", "")
-        check(path .. " never uses StaticPopup", not code:find("StaticPopup", 1, true))
-    end
+    local path = LINK_DIR .. line:gsub("\\", "/")
+    local src = read(path)
+    check("link file exists: " .. path, src ~= nil)
+    local code = (src or ""):gsub("%-%-[^\n]*", "")
+    check(path .. " never uses StaticPopup", not code:find("StaticPopup", 1, true))
 end
 
 -- The household key lives in exactly one file: the store is declared once.
@@ -134,22 +136,19 @@ for _, t in ipairs({ toc, ltoc }) do
 end
 eq("LAS store declared in exactly one TOC", declared, 1)
 
--- .pkgmeta: the external key is a path from the project root and lands where
--- the Link TOC loads it once the folder is moved; move-folders names the
--- package. (A key prefixed with the package name would nest it elsewhere.)
-local lasKey = LINK_DIR .. LAS_XML:gsub("\\", "/"):gsub("/LibAccountSync%-1%.0%.xml$", "")
-check("LibAccountSync external at the Link addon's Libs, pinned to r5",
+-- .pkgmeta: the external key is a path from the project root, at the main
+-- addon's Libs where its TOC loads it; move-folders names the package. (A key
+-- prefixed with the package name would nest it elsewhere.)
+local lasKey = LAS_XML:gsub("\\", "/"):gsub("/LibAccountSync%-1%.0%.xml$", "")
+check("LibAccountSync external at the main addon's Libs, pinned to r5",
       pkg:find("\n  " .. lasKey:gsub("%p", "%%%0") .. ":%s*\r?\n%s+url: https://github.com/Spotnick2/LibAccountSync%s*\r?\n%s+tag: r5%s*\r?\n") ~= nil)
 check("move-folders ships the Link addon top-level",
       pkg:find("\nmove%-folders:%s*\r?\n  AltStableSync/Plugins/Link: AltStableSyncLink%s*\r?\n") ~= nil)
 check("no external under the package name", not pkg:find("\n  AltStableSync/[^\n]*Libs", 1))
--- Both the source path (BigWigs) and the package-prefixed one, before the
--- move (CurseForge's packager shipped the source-path entries in v0.1.0, #66).
+check("no external inside a moved folder (#66)", not pkg:find("\n  Plugins/[^\n]*Libs[^\n]*:%s*\r?\n%s+url:"))
 for _, sub in ipairs({ "tests", "docs", "Tools", "CLAUDE.md", "README.md" }) do
     check(".pkgmeta ignores the library's " .. sub,
           pkg:find("\n  %- " .. (lasKey .. "/" .. sub):gsub("%p", "%%%0") .. "\r?\n") ~= nil)
-    check(".pkgmeta ignores the library's " .. sub .. " with the package name",
-          pkg:find("\n  %- " .. ("AltStableSync/" .. lasKey .. "/" .. sub):gsub("%p", "%%%0") .. "\r?\n") ~= nil)
 end
 
 -- Chat treats "|" as an escape: "<id|name>" printed as "<id", a line break,

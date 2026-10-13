@@ -3,8 +3,9 @@
 The package is two top-level addons, AltStableSync and AltStableSyncLink (.pkgmeta move-folders).
 Each may hold only what it loads: its TOC, the files the TOC lists, the files those XMLs load
 (recursively), licences and textures under Libs/. Plus:
-- LibAccountSync ships in AltStableSyncLink only: its store (the household key) must be written to
-  AltStableSyncLink.lua, never to AltStableSync.lua, which the beta -> live transfer copies (#18).
+- LibAccountSync ships once, in AltStableSync/Libs (#66), and the Link addon loads no library of its
+  own. Its store (the household key) is still written to AltStableSyncLink.lua, never to
+  AltStableSync.lua: only AltStableSyncLink.toc declares it (#18; test_packaging checks the TOCs).
 - Both TOCs carry the same substituted version (never "@project-version@").
 - No development file anywhere (Markdown, scripts, tests, docs, tools).
 """
@@ -100,10 +101,14 @@ def check(path):
             parts = PurePosixPath(n).parts
             if PurePosixPath(n).suffix.lower() in DEV or DEV_DIRS & set(parts[1:]):
                 raise ValueError(f"development file in the package: {n}")
-            if parts[0] == "AltStableSync" and "LibAccountSync" in n:
-                raise ValueError(f"LibAccountSync inside AltStableSync (its store would land in AltStableSync.lua): {n}")
-        if not any(n.startswith("AltStableSyncLink/Libs/LibAccountSync-1.0/") for n in names):
-            raise ValueError("LibAccountSync missing from AltStableSyncLink")
+            if parts[0] == "AltStableSyncLink" and len(parts) > 2 and parts[1] == "Libs":
+                raise ValueError(f"a library inside AltStableSyncLink (it loads them from AltStableSync): {n}")
+        if not any(n.startswith("AltStableSync/Libs/LibAccountSync-1.0/") for n in names):
+            raise ValueError("LibAccountSync missing from AltStableSync/Libs")
+        link_toc = archive.read("AltStableSyncLink/AltStableSyncLink.toc").decode("utf-8-sig")
+        main_toc = archive.read("AltStableSync/AltStableSync.toc").decode("utf-8-sig")
+        if "AltStableSyncLAS" in main_toc or "## SavedVariables: AltStableSyncLAS" not in link_toc:
+            raise ValueError("the LibAccountSync store must be declared by AltStableSyncLink.toc only")
         if "AltStableSync/LICENSE" not in names:
             raise ValueError("AltStableSync/LICENSE missing")
 

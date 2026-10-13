@@ -22,12 +22,12 @@ if [ -e "$dest" ]; then
     exit 1
 fi
 
-# The Plugins/Link/Libs/LibAccountSync-1.0 entry of the externals block (the
-# Link addon embeds the library, never the core addon).
+# The Libs/LibAccountSync-1.0 entry of the externals block (the main addon
+# embeds the library; the Link addon uses it through LibStub, #66).
 entry=$(tr -d '\r' < .pkgmeta | awk '
     /^externals:/ { inext = 1; next }
     inext && /^[^ #]/ { inext = 0 }
-    inext && /^  Plugins\/Link\/Libs\/LibAccountSync-1\.0:/ { inlib = 1; next }
+    inext && /^  Libs\/LibAccountSync-1\.0:/ { inlib = 1; next }
     inlib && /^  [^ ]/ { inlib = 0 }
     inext && inlib')
 # Values are read the way the packager reads them: the whole rest of the line.
@@ -37,7 +37,7 @@ url=$(printf '%s\n' "$entry" | sed -n 's/^ *url: *\(.*[^ ]\) *$/\1/p')
 kind=$(printf '%s\n' "$entry" | sed -n 's/^ *\(commit\|tag\): *\(.*[^ ]\) *$/\1/p')
 ref=$(printf '%s\n' "$entry" | sed -n 's/^ *\(commit\|tag\): *\(.*[^ ]\) *$/\2/p')
 if [ -z "$url" ] || [ -z "$ref" ]; then
-    echo "no url and commit/tag pin for Plugins/Link/Libs/LibAccountSync-1.0 in .pkgmeta" >&2
+    echo "no url and commit/tag pin for Libs/LibAccountSync-1.0 in .pkgmeta" >&2
     exit 1
 fi
 

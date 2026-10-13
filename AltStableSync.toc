@@ -10,6 +10,7 @@
 
 Libs\LibGlass-1.0\LibGlass-1.0.xml
 Libs\LibStub\LibStub.lua
+Libs\LibAccountSync-1.0\LibAccountSync-1.0.xml
 Core.lua
 Categories.lua
 Catalog.lua
