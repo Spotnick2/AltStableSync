@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.3.0
 
 - **Share a loadout as text.** **Manage… > Share…** shows a loadout as a string to copy, and
   **Import…** (or `/altsync import`) pastes one on another character, on the beta or live, or a
