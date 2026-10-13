@@ -210,7 +210,9 @@ end
 -- Use it: the panel and a Load preview, never confirmed
 ------------------------------------------------------------
 
-G.calls = {}
+-- G.calls has logged every mutating game call since G.setup, so the check
+-- below covers the whole login as well as the panel and the preview.
+eq(name .. ": no game write during login", #G.calls, 0)
 A.Panel.Show()
 local m = A.Panel.Model(A.Panel.sel)
 local entry
@@ -225,7 +227,7 @@ check(name .. ": the panel isn't blocked", m.blocked == nil, tostring(m.blocked)
 check(name .. ": ready", m.ready == true)
 check(name .. ": a Load plans", plan ~= nil and plan.blocked == nil, tostring(plan and plan.blocked))
 check(name .. ": the Load preview is up, unconfirmed", A.Preview.Shown() ~= nil)
-eq(name .. ": no game write", #G.calls, 0)
+eq(name .. ": no game write from login to the preview", #G.calls, 0)
 local okDB, whyDB = deepEqual(AltStableSyncDB, wantDB, "DB")
 check(name .. ": AltStableSyncDB unchanged", okDB, whyDB)
 local okChar, whyChar = deepEqual(AltStableSyncChar, wantChar, "Char")
