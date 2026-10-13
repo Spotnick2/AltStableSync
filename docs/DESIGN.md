@@ -634,7 +634,10 @@ tiny addon folder:
 - `Plugins/Link/`, deployed and packaged as top-level `AltStableSyncLink` (AltStable's
   `move-folders` pattern);
 - `## Dependencies: AltStableSync` and `## SavedVariables: AltStableSyncLAS`;
-- it embeds `Libs/LibAccountSync-1.0` (`.pkgmeta` external, tag `r5`);
+- it uses `LibAccountSync-1.0` through LibStub. The library ships in the **main** addon's
+  `Libs/LibAccountSync-1.0` (`.pkgmeta` external, tag `r5`), as in AltStable: CurseForge's packager
+  doesn't apply ignores to an external inside a moved folder (#66). Where the code lives doesn't
+  move the key: it's written by the TOC that declares the SavedVariables;
 - it holds only the sync glue.
 
 The key lands in `AltStableSyncLink.lua`, which the transfer never touches. `AltStableSyncLAS` is

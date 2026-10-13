@@ -64,14 +64,15 @@ function Test-Pin([string]$Key, [string]$Root, [string]$Name) {
     }
 }
 Test-Pin "Libs/LibGlass-1.0" $glassRoot "LibGlass"
-Test-Pin "Plugins/Link/Libs/LibAccountSync-1.0" $lasRoot "LibAccountSync"
+Test-Pin "Libs/LibAccountSync-1.0" $lasRoot "LibAccountSync"
 
 # The libraries first: a refusal must leave the deployed addons as they were.
 & pwsh -NoProfile -File (Join-Path $glassRoot "Tools\deploy.ps1") -Addon $Addon -AddOnsPath $AddOnsPath
 if ($LASTEXITCODE -ne 0) { throw "LibGlass deploy refused; $Addon was not touched" }
-# LibAccountSync goes into the Link addon only: its store (the household key)
-# must live in AltStableSyncLink.lua, never in AltStableSync.lua (#18).
-& pwsh -NoProfile -File (Join-Path $lasRoot "Tools\deploy.ps1") -Addon $LinkAddon -AddOnsPath $AddOnsPath
+# LibAccountSync goes into the main addon's Libs, as the package ships it
+# (#66). Its store (the household key) still lands in AltStableSyncLink.lua:
+# only AltStableSyncLink.toc declares it (#18).
+& pwsh -NoProfile -File (Join-Path $lasRoot "Tools\deploy.ps1") -Addon $Addon -AddOnsPath $AddOnsPath
 if ($LASTEXITCODE -ne 0) { throw "LibAccountSync deploy refused; $Addon and $LinkAddon were not touched" }
 
 Write-Host "Deploying $Addon ..." -ForegroundColor Cyan
@@ -124,11 +125,17 @@ $toc = Join-Path $dest "$Addon.toc"
 (Get-Content $toc -Raw).Replace('@project-version@', $label) | Set-Content $toc -NoNewline
 Write-Host "  version -> $label (deployed copy only)" -ForegroundColor DarkGray
 
-# The Link addon: Plugins/Link -> AddOns/AltStableSyncLink (its Libs\ came
-# from the LibAccountSync deploy above). Only its own top-level files.
+# The Link addon: Plugins/Link -> AddOns/AltStableSyncLink. Only its own
+# top-level files: it loads LibAccountSync from AltStableSync's Libs, through
+# LibStub. A Libs\ left there by an older deploy (before #66) goes.
 $linkSrc = Join-Path $RepoRoot "Plugins\Link"
 $linkDest = Join-Path $AddOnsPath $LinkAddon
 New-Item -ItemType Directory -Force -Path $linkDest | Out-Null
+$staleLibs = Join-Path $linkDest "Libs"
+if (Test-Path -LiteralPath $staleLibs) {
+    Remove-Item -LiteralPath $staleLibs -Recurse -Force
+    Write-Host "  removed the old $LinkAddon\Libs (LibAccountSync now loads from $Addon)" -ForegroundColor DarkGray
+}
 foreach ($f in Get-ChildItem -LiteralPath $linkSrc -File) {
     if ($f.Extension -eq ".toc") {
         (Get-Content -LiteralPath $f.FullName -Raw).Replace('@project-version@', $label) |

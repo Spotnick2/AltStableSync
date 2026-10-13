@@ -11,10 +11,13 @@ manual-changelog:
   markup-type: markdown
 
 # LibStub is vendored in Libs/. The externals are pinned to TAGS (never
-# "latest"), bumped only in a release made anyway. LibAccountSync goes into the
-# Link addon only, so its store (the household key) is written to
-# AltStableSyncLink.lua and never to AltStableSync.lua (#18). External keys
-# are paths from the project root; move-folders paths include the package name.
+# "latest"), bumped only in a release made anyway. Every external sits in the
+# main addon's Libs/, as in AltStable: CurseForge's packager doesn't apply
+# ignores to an external inside a moved folder (#66, References
+# EMBEDDED-LIBRARIES.md). The Link addon uses LibAccountSync through LibStub;
+# its store (the household key) is still written to AltStableSyncLink.lua,
+# because only AltStableSyncLink.toc declares it (#18). External keys are
+# paths from the project root; move-folders paths include the package name.
 # Comments on their own lines only - the packager's YAML reader keeps an inline
 # "# ..." as part of the value (measured in GlassUnitFrames' migration).
 externals:
@@ -24,7 +27,7 @@ externals:
     url: https://github.com/Spotnick2/LibGlass
     tag: r5
   # r5 (76fedef): messages mode and SendTo, both required by Link.lua.
-  Plugins/Link/Libs/LibAccountSync-1.0:
+  Libs/LibAccountSync-1.0:
     url: https://github.com/Spotnick2/LibAccountSync
     tag: r5
 
@@ -54,18 +57,9 @@ ignore:
   - Libs/LibGlass-1.0/CLAUDE.md
   - Libs/LibGlass-1.0/README.md
   # LibAccountSync's own non-shipped paths. Its ChatThrottleLib/ and LibStub/
-  # ship: its XML loads them.
-  - Plugins/Link/Libs/LibAccountSync-1.0/tests
-  - Plugins/Link/Libs/LibAccountSync-1.0/docs
-  - Plugins/Link/Libs/LibAccountSync-1.0/Tools
-  - Plugins/Link/Libs/LibAccountSync-1.0/CLAUDE.md
-  - Plugins/Link/Libs/LibAccountSync-1.0/README.md
-  # The same paths with the package name: CurseForge's packager shipped the
-  # entries above in v0.1.0 (#66), though BigWigs honours them. Its guide
-  # applies ignores BEFORE move-folders, so these name the folder before the
-  # move, from the package root. Confirmed only by a CurseForge build.
-  - AltStableSync/Plugins/Link/Libs/LibAccountSync-1.0/tests
-  - AltStableSync/Plugins/Link/Libs/LibAccountSync-1.0/docs
-  - AltStableSync/Plugins/Link/Libs/LibAccountSync-1.0/Tools
-  - AltStableSync/Plugins/Link/Libs/LibAccountSync-1.0/CLAUDE.md
-  - AltStableSync/Plugins/Link/Libs/LibAccountSync-1.0/README.md
+  # ship: its XML loads them. Tools/ holds its in-game probe.
+  - Libs/LibAccountSync-1.0/tests
+  - Libs/LibAccountSync-1.0/docs
+  - Libs/LibAccountSync-1.0/Tools
+  - Libs/LibAccountSync-1.0/CLAUDE.md
+  - Libs/LibAccountSync-1.0/README.md
