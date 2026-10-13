@@ -177,7 +177,6 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
       firstSeen = <snapshot>,                  -- pinned forever
       operation = <snapshot> | nil,            -- the interrupted operation's original backup;
   } },                                         -- pinned until it completes or is abandoned
-  origin = { build, region, project },         -- provenance only; never a migration trigger
   minimap = { angle = 200, hide = true | nil } | nil,  -- #62: the minimap button only; made on its
                                                -- first write, never at load; not a table -> refused
 }
@@ -859,8 +858,12 @@ offline while A saved three times) a plain fast-forward rather than a conflict.
     and the backup's recovery line printed;
   - has `-WhatIf` (a read-only preflight) and a self-test (`tests/run.ps1` and CI run it).
 - **No flavour fingerprint, no quarantine.** Backups are keyed by GUID, and live GUIDs differ, so
-  beta backups are inert on live. They stay as dead data, and cleanup is deferred. `origin` is
-  provenance only (#11). `WOW_PROJECT_ID` or build changes never trigger anything.
+  beta backups are inert on live. They stay as dead data, and cleanup is deferred. There is no
+  file-level origin stamp (#11, retired unused): each entry's `provenance = { sourceChar, build }`
+  records where it was last saved. A build or `WOW_PROJECT_ID` change alone never migrates, resets
+  or disables the catalog, and never writes game state (A42, `tests/test_flavour.lua`). The build
+  only selects the "not the measured build" warning. LibAccountSync keeps its own project and region
+  bookkeeping in the Link addon's store.
   `AltStableSyncChar` never travels; per-character files aren't copied, so every live character
   starts fresh.
 - Beta entries may reference spells, macros, CVars or layouts that are unavailable on live. The

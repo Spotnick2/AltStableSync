@@ -3,7 +3,7 @@
 --
 -- SavedVariables (declared in AltStableSync.toc):
 --   AltStableSyncDB   account-wide: schema, presets (the catalog, Catalog.lua),
---                     backups, origin
+--                     backups, minimap
 --   AltStableSyncChar per character: schema, last selections, loaded
 --                     baselines, onboarding, interrupted operation,
 --                     a stopped keybinding switch (#7)
