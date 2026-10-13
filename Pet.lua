@@ -313,6 +313,33 @@ function Pet.Snapshot(pp)
     return { family = pet.family, familyName = pet.familyName, guid = pet.guid, name = pet.name, slots = slots }
 end
 
+-- The bar of the pet that is out, in Snapshot's shape, for Back up now
+-- (#61). nil: no pet out. false plus the reason: a pet, but it, its bar or
+-- its spellbook couldn't be read, or the bar holds an ability the book
+-- doesn't list, which a restore couldn't put back (ResolveExact). The backup
+-- is then refused, never stored without it. Restore puts it back only with
+-- that pet out (Pet.PlanRestore), as for any backup.
+function Pet.SnapshotNow()
+    local Game = G()
+    local pet = Game.Pet()
+    if pet == nil then return nil end
+    local unreadable = "Couldn't read your pet's bar; try again."
+    if not pet then return false, unreadable end
+    local bar = Game.PetBar()
+    if not bar then return false, unreadable end
+    local book = Game.PetBook()
+    if not book.complete then return false, "Couldn't read your pet's spellbook; try again." end
+    local slots = {}
+    for i = 1, SLOTS do
+        slots[i] = Stored(bar[i])
+        if slots[i] and slots[i].kind == "spell" and not book.byId[slots[i].id] then
+            return false, ("Pet slot %d holds an ability your pet's spellbook doesn't list, so a restore "
+                .. "couldn't put it back. Move it or take it off, then try again."):format(i)
+        end
+    end
+    return { family = pet.family, familyName = pet.familyName, guid = pet.guid, name = pet.name, slots = slots }
+end
+
 ------------------------------------------------------------
 -- Execute
 ------------------------------------------------------------

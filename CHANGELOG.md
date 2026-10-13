@@ -8,6 +8,10 @@
 - **In the minimap's addon list** too, even with the button hidden.
 - **A key binding:** Key Bindings > AltStableSync opens or closes the window. No key is set by
   default.
+- **Back up now.** Save your setup into a backup whenever you like, from the Backups view or with
+  `/altsync backup`: every bar, the keys on your main action bar and pet bar (on character
+  keybindings) and your pet's bar. It never touches your bars, and lists any slot it leaves out. With
+  10 backups already, it shows which one it would drop first.
 
 ## v0.1.1
 

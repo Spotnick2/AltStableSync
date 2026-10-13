@@ -579,6 +579,18 @@ not take a save of them.
   one) and Name, checked as you type (no red text on an untouched or blank box), Review… opens the
   preview. Enter reviews, Escape cancels. **Save As always previews**, from the panel and from
   `/altsync saveas`.
+- **Back up now** (#61, `/altsync backup`) pushes a snapshot of every bar ("Manual") into the
+  ring, in the same shape a load's backup has, so Restore reads it unchanged: every supported slot
+  (`false` when empty), each key on the managed commands (`ACTIONBUTTON1-12`, `BONUSACTIONBUTTON1-10`;
+  a key bound later stays on restore) **only on Character keybindings** (restores
+  write the Character set only), and the bar of the pet that is out. A slot holding something this
+  build can't put back exactly is left out and listed, and a restore leaves it. A failed read (a
+  slot, the keys, the pet, its bar or spellbook) means no backup, and so does a pet ability its
+  spellbook doesn't list (a restore places pet spells from the book only). Restoring it never creates or edits a macro. It writes
+  only the backups store, from an explicit click; a full ring (it would drop the oldest) is previewed
+  first, and a confirm refuses if anything shown changed. "Nothing new" only against a backup that
+  restores the same way (same binding set, no macro edits; the pet by family and name, as Restore
+  matches it, never its GUID, which changes on every summon).
 - **Backups…:** the incomplete operation, the ring newest first, then the first backup. Selection follows
   the snapshot itself; **Restore…** finds its current slot at the click. An incomplete operation also
   shows in the footer with **Undo it…**.

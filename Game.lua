@@ -234,7 +234,9 @@ function Game.ActionAt(slot)
     if kind == "item" and type(id) == "number" then return { kind = "item", id = id } end
     if kind == "macro" then
         local okT, name = pcall(GetActionText, slot)
-        if not okT or type(name) ~= "string" or name == "" then
+        -- A failed read is not "no name": a backup must not mistake one for the other (#61).
+        if not okT then return { kind = "unsupported", what = "unreadable" } end
+        if type(name) ~= "string" or name == "" then
             return { kind = "unsupported", what = "macro without a name" }
         end
         local matches = Game.MacrosNamed(name)

@@ -67,6 +67,15 @@ character macros the load changed. Macros the load created stay. Anything it can
 item no longer in your bags, a macro you've deleted since) is listed in the preview first, and left
 as it is.
 
+**Back up now** (or `/altsync backup`) saves your setup whenever you like: before you try
+something, or right after a button moved by mistake. It holds every bar, the keys on your main
+action bar and pet bar (on character keybindings), and your pet's bar if one is out, and it never
+touches your bars. Slots it can't put back exactly (a flyout, a companion) are listed and left out.
+Restoring it leaves keys you bind later, and never recreates or edits a macro: a macro slot comes back
+only if that macro is unchanged. Your pet's bar comes back with that pet out, without autocast. With 10
+backups already, it shows which one it would drop first. If nothing changed since your last one, it
+says so and takes nothing.
+
 ## Your other WoW account
 
 The included **AltStableSync Link** addon shares your saved loadouts with your **other WoW account
@@ -97,6 +106,7 @@ If both accounts changed the same loadout, you get both versions, never a merge.
 | `/altsync list` | This class's loadouts, with their ids |
 | `/altsync load <name or id>` | Review and load a loadout |
 | `/altsync backups` | This character's backups |
+| `/altsync backup` | Back up now |
 | `/altsync restore [n or op]` | Review and restore a backup (default: the newest) |
 | `/altsync rename <name or id> <new name>` | Rename a loadout |
 | `/altsync delete <name or id>` | Delete a loadout (on both accounts) |

@@ -803,4 +803,24 @@ do
     P.Hide()
 end
 
+-- Back up now from the Backups view (#61): a new row; off in combat, with the reason.
+do
+    boot(); main(); ready()
+    P.Show()
+    W.backupsLink:Click()
+    check("backup now: on", W.backupNow:IsEnabled())
+    G.calls = {}
+    W.backupNow:Click()
+    tick()
+    local ring = A.Backups.List()
+    eq("backup now: one backup", #ring, 1)
+    eq("backup now: listed", W.brows[1] and W.brows[1].text:GetText():match("^Manual, ") ~= nil, true)
+    eq("backup now: no game write", #G.calls, 0)
+    G.combat = true
+    tick()
+    check("backup now: off in combat, says why", not W.backupNow:IsEnabled() and (W.backupNow.why or ""):find("combat", 1, true) ~= nil)
+    G.combat = false
+    P.Hide()
+end
+
 finish("test_panel")
