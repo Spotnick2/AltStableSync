@@ -503,17 +503,18 @@ end
 -- The panel is an Escape target only when nothing of ours is open above it.
 -- Rejoining waits a frame, so the Escape that closed a preview doesn't reach
 -- the panel through the list it is still walking.
+-- Each by name: any of them may not exist yet (a list with a nil in it
+-- would stop ipairs early).
+local function Over()
+    local function on(f) return f ~= nil and f:IsShown() end
+    return on(_G.AltStableSyncPreview) or on(W.dialog) or on(W.menu) or on(W.share) or on(W.import)
+end
+
 function Panel.SyncEscape()
-    local p = _G.AltStableSyncPreview
-    local over = (p and p:IsShown()) or (W.dialog and W.dialog:IsShown()) or (W.menu and W.menu:IsShown())
-    if over then
+    if Over() then
         Special("AltStableSyncPanel", false)
     elseif C_Timer and C_Timer.After then
-        C_Timer.After(0, function()
-            local p2 = _G.AltStableSyncPreview
-            local still = (p2 and p2:IsShown()) or (W.dialog and W.dialog:IsShown()) or (W.menu and W.menu:IsShown())
-            Special("AltStableSyncPanel", not still)
-        end)
+        C_Timer.After(0, function() Special("AltStableSyncPanel", not Over()) end)
     else
         Special("AltStableSyncPanel", true)
     end
@@ -662,6 +663,269 @@ local function ShowNameDialog(mode, entry)
 end
 
 ------------------------------------------------------------
+-- Share and Import (#71): our own frames, never a StaticPopup
+------------------------------------------------------------
+
+-- A dialog frame in the name dialog's look, closed by Escape.
+local function DialogFrame(name, width, height)
+    local d = CreateFrame("Frame", name, UIParent, "BackdropTemplate")
+    d:SetSize(width, height)
+    d:SetPoint("CENTER", 0, 60)
+    d:SetFrameStrata("DIALOG")
+    d:EnableMouse(true)
+    if d.SetBackdrop then
+        d:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = 1 })
+        d:SetBackdropColor(0.04, 0.04, 0.06, 0.96)
+        d:SetBackdropBorderColor(0.55, 0.52, 0.45, 1)
+    end
+    tinsert(UISpecialFrames, name)
+    d.title = Text(d, "GameFontNormalLarge", width - 40)
+    d.title:SetWordWrap(false)
+    d.title:SetPoint("TOPLEFT", PAD, -16)
+    d.intro = Text(d, "GameFontHighlightSmall", width - 40, MUTED)
+    d.intro:SetPoint("TOPLEFT", PAD, -40)
+    return d
+end
+
+-- A multi-line text box that scrolls to its cursor. Returns the holder and
+-- the edit box.
+local function TextBox(parent, width, height, onEscape)
+    local holder = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    holder:SetSize(width, height)
+    if holder.SetBackdrop then
+        holder:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = 1 })
+        holder:SetBackdropColor(0, 0, 0, 0.5)
+        holder:SetBackdropBorderColor(1, 1, 1, 0.18)
+    end
+    local sc = CreateFrame("ScrollFrame", nil, holder)
+    sc:SetPoint("TOPLEFT", 6, -6)
+    sc:SetPoint("BOTTOMRIGHT", -6, 6)
+    local eb = CreateFrame("EditBox", nil, sc)
+    eb:SetMultiLine(true)
+    eb:SetAutoFocus(false)
+    eb:SetFontObject("GameFontHighlightSmall")
+    eb:SetWidth(width - 12)
+    eb:SetMaxLetters(ASS.Envelope.BOX_MAX)
+    sc:SetScrollChild(eb)
+    eb:SetScript("OnCursorChanged", function(_, _, y, _, h)
+        local top, view = sc:GetVerticalScroll(), sc:GetHeight() or height
+        y = -(y or 0)
+        if y < top then sc:SetVerticalScroll(y)
+        elseif y + (h or 0) > top + view then sc:SetVerticalScroll(y + (h or 0) - view) end
+    end)
+    eb:SetScript("OnEscapePressed", function() onEscape() end)
+    sc:EnableMouseWheel(true)
+    sc:SetScript("OnMouseWheel", function(self, delta)
+        local max = self:GetVerticalScrollRange()
+        self:SetVerticalScroll(math.max(0, math.min(max, self:GetVerticalScroll() - delta * 30)))
+    end)
+    holder:EnableMouse(true)
+    holder:SetScript("OnMouseDown", function() eb:SetFocus() end)
+    return holder, eb
+end
+
+local function ShareDialog()
+    if W.share then return W.share end
+    local d = DialogFrame("AltStableSyncShareDialog", 420, 300)
+    d.holder, d.box = TextBox(d, 384, 150, function() d:Hide() end)
+    d.holder:SetPoint("TOPLEFT", PAD, -76)
+    -- Read-only: an edit by the player is put back (SetText's own change
+    -- isn't user input, so this never recurses).
+    d.box:SetScript("OnTextChanged", function(self, userInput)
+        if userInput then self:SetText(d.text or ""); self:HighlightText() end
+    end)
+    d.box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+    d.note = Text(d, "GameFontHighlightSmall", 384, MUTED)
+    d.note:SetPoint("TOPLEFT", d.holder, "BOTTOMLEFT", 0, -8)
+    d.note:SetText("It holds this loadout's bars, keys and macro text, and no account or character "
+        .. "details. Macro text may name people.")
+    d.close = GButton(d, "Close", 100, "secondary")
+    d.close:SetPoint("BOTTOMRIGHT", -PAD, 14)
+    d.close:SetScript("OnClick", function() d:Hide() end)
+    d:SetScript("OnShow", function() Panel.SyncEscape() end)
+    d:SetScript("OnHide", function() d.box:ClearFocus(); Panel.SyncEscape() end)
+    d:Hide()
+    W.share = d
+    return d
+end
+
+-- Manage > Share...: the browsed loadout's string, selected for Ctrl+C. An
+-- addon can't write the clipboard.
+local function ShowShare(entry)
+    local d = ShareDialog()
+    CloseMenu()
+    local text, err = ASS.Share.Encode(entry)
+    d.title:SetText("Share " .. ASS.Share.Literal(entry.name))
+    d.text = text
+    if text then
+        d.intro:SetText("Press Ctrl+C to copy, then paste it into Import on the other character.")
+        d.holder:Show(); d.note:Show()
+        d.box:SetText(text)
+    else
+        d.intro:SetText(ASS.Share.Copy(err))
+        d.holder:Hide(); d.note:Hide()
+        d.box:SetText("")
+    end
+    d:Show()
+    if text then d.box:SetFocus(); d.box:HighlightText() end
+end
+
+local IMPORT_WAIT = 0.3
+
+local function ImportDialog()
+    if W.import then return W.import end
+    local d = DialogFrame("AltStableSyncImportDialog", 420, 372)
+    d.intro:SetText("Paste a loadout string (Ctrl+V). You'll review it before it's saved; nothing on this character changes.")
+    d.holder, d.box = TextBox(d, 384, 110, function() d:Hide() end)
+    d.holder:SetPoint("TOPLEFT", PAD, -76)
+    d.status = Text(d, "GameFontHighlightSmall", 384, BODY)
+    d.status:SetPoint("TOPLEFT", d.holder, "BOTTOMLEFT", 0, -6)
+    d.catLabel = Text(d, "GameFontNormal", 384)
+    d.catLabel:SetPoint("TOPLEFT", PAD, -222)
+    d.catLabel:SetText("Category")
+    d.cat = Picker(d, 384)
+    d.cat:SetPoint("TOPLEFT", PAD, -238)
+    d.nameLabel = Text(d, "GameFontNormal", 384)
+    d.nameLabel:SetPoint("TOPLEFT", PAD, -272)
+    d.nameLabel:SetText("New loadout name")
+    d.name = CreateFrame("EditBox", nil, d, "InputBoxTemplate")
+    d.name:SetSize(376, 22)
+    d.name:SetPoint("TOPLEFT", PAD + 6, -288)
+    d.name:SetAutoFocus(false)
+    d.name:SetMaxLetters(60)
+    d.hint = Text(d, "GameFontRedSmall", 384)
+    d.hint:SetPoint("TOPLEFT", d.name, "BOTTOMLEFT", -6, -4)
+    d.cancel = GButton(d, "Cancel", 100, "secondary")
+    d.cancel:SetPoint("BOTTOMRIGHT", -PAD, 14)
+    d.review = GButton(d, "Review...", 120, "primary")
+    d.review:SetPoint("RIGHT", d.cancel, "LEFT", -8, 0)
+    d.cancel:SetScript("OnClick", function() d:Hide() end)
+    d.token = 0
+
+    local function SetCategory(key)
+        local class = PlayerClass()
+        d.category, d.cat.value = key, key
+        d.cat.label:SetText(ASS.Categories.Label(class, key))
+    end
+    -- Review needs a decoded, validated draft of exactly the text in the box
+    -- and a name that works.
+    function d.Check(showEmpty)
+        local trimmed, err
+        if ASS.disabled or not ASS.db then trimmed, err = nil, "unavailable"
+        elseif not d.draft then trimmed, err = nil, "no-draft"
+        else
+            trimmed, err = ASS.Catalog.ValidateName("loadout", PlayerClass(), d.category, d.name:GetText())
+        end
+        local show = not trimmed and (err ~= "name-empty" or showEmpty) and NAME_COPY[err] ~= nil
+        d.hint:SetText(show and NAME_COPY[err] or "")
+        Set(d.review, trimmed ~= nil, not trimmed and (NAME_COPY[err] or "Paste a loadout string first.") or nil)
+        return trimmed ~= nil
+    end
+    function d.Decode()
+        local text = d.box:GetText() or ""
+        d.draft = nil
+        if not text:find("%S") then
+            d.status:SetText("")
+        else
+            local x, err = ASS.Share.Decode(text)
+            local class = PlayerClass()
+            if not x then
+                d.status:SetText("|cffff5555" .. ASS.Share.Copy(err) .. "|r")
+            elseif x.class ~= class then
+                local label = ASS.Share.ClassLabel(x.class)
+                d.status:SetText(("|cffff5555This is a %s loadout: import it on a %s.|r"):format(
+                    ASS.Share.Literal(label), ASS.Share.Literal(label)))
+            else
+                d.draft = x
+                d.status:SetText(("A %s loadout: %s"):format(ASS.Share.ClassLabel(class), ASS.Share.Literal(x.name)))
+                -- The string's name and category, until the player types a name.
+                if not d.nameTyped then
+                    SetCategory(ASS.Categories.IsValid(class, x.category) and x.category or "general")
+                    d.name:SetText(x.name)
+                end
+            end
+        end
+        d.Check(false)
+    end
+    -- Every change drops the draft at once; only the last change's timer
+    -- decodes (a paste arrives as one change, typing as many).
+    d.box:SetScript("OnTextChanged", function()
+        d.draft = nil
+        d.token = d.token + 1
+        local token = d.token
+        d.status:SetText(d.box:GetText():find("%S") and "Checking..." or "")
+        d.Check(false)
+        if C_Timer and C_Timer.After then
+            C_Timer.After(IMPORT_WAIT, function()
+                if d.token == token and d:IsShown() then d.Decode() end
+            end)
+        else
+            d.Decode()
+        end
+    end)
+    d.name:SetScript("OnTextChanged", function(_, userInput)
+        if userInput then d.nameTyped = true end
+        d.Check(false)
+    end)
+    d.name:SetScript("OnEscapePressed", function() d:Hide() end)
+    -- Enter in the name box reviews, never confirms; in the paste box it is
+    -- a new line.
+    d.name:SetScript("OnEnterPressed", function()
+        if d.Check(true) then d.review:Click() end
+    end)
+    d.review:SetScript("OnClick", function()
+        if not d.Check(true) then return end
+        -- Frozen at this click; the confirm never reads the dialog again.
+        local frozen = { class = PlayerClass(), category = d.category, name = d.name:GetText(),
+                         modules = ASS.Catalog.Copy(d.draft.modules) }
+        d:Hide()
+        Cmd().ImportEntry(frozen, function(e)
+            Panel.sel.category, Panel.sel.id, Panel.sel.noDefault = e.category, e.id, false
+            Panel.Refresh()
+        end)
+    end)
+    d:SetScript("OnShow", function() Panel.SyncEscape() end)
+    -- A decode still pending when the dialog hides does nothing (the timer
+    -- checks it is shown; reopening clears the box, a newer change).
+    d:SetScript("OnHide", function()
+        d.box:ClearFocus(); d.name:ClearFocus()
+        CloseMenu()
+        Panel.SyncEscape()
+    end)
+    d:Hide()
+    W.import = d
+    return d
+end
+
+local function ShowImport()
+    local d = ImportDialog()
+    CloseMenu()
+    local class = PlayerClass()
+    d.title:SetText("Import a loadout")
+    local items = {}
+    for _, c in ipairs(ASS.Categories.List(class) or {}) do items[#items + 1] = { text = c.label, value = c.key } end
+    d.cat.items = items
+    d.cat.onPick = function(key)
+        d.category, d.cat.value = key, key
+        d.cat.label:SetText(ASS.Categories.Label(class, key))
+        d.Check(false)
+    end
+    d.category, d.cat.value = "general", "general"
+    d.cat.label:SetText(ASS.Categories.Label(class, "general"))
+    d.nameTyped = false
+    d:Show()
+    d.box:SetText("")
+    d.name:SetText("")
+    d.nameTyped = false
+    d.draft = nil
+    d.Check(false)
+    d.box:SetFocus()
+end
+
+-- /altsync import, and the panel's Import... button.
+function Panel.OpenImport() ShowImport() end
+
+------------------------------------------------------------
 -- The window
 ------------------------------------------------------------
 
@@ -780,14 +1044,22 @@ local function BuildLoadouts(v)
                 { text = c.deletion and "Delete it here too..." or ("Use the version from " .. from .. "..."), value = "theirs" },
             }, function(choice) Cmd().ResolveCopy(e.id, choice) end)
         else
-            OpenMenu(self, { { text = "Rename...", value = "rename" }, { text = "Delete...", value = "delete" } },
+            OpenMenu(self, { { text = "Rename...", value = "rename" }, { text = "Share...", value = "share" },
+                             { text = "Delete...", value = "delete" } },
                 function(what)
                     local cur = Cmd().Own(e.id)
                     if not cur then return end
-                    if what == "rename" then ShowNameDialog("rename", cur) else Cmd().DeleteEntry(cur.id) end
+                    if what == "rename" then ShowNameDialog("rename", cur)
+                    elseif what == "share" then ShowShare(cur)
+                    else Cmd().DeleteEntry(cur.id) end
                 end)
         end
     end)
+    -- A loadout from a string (#71): a new entry, after a preview.
+
+    W.importBtn = GButton(v, "Import...", 90, "secondary")
+    W.importBtn:SetPoint("RIGHT", W.manage, "LEFT", -6, 0)
+    W.importBtn:SetScript("OnClick", function() ShowImport() end)
     W.loadHint = Text(v, "GameFontHighlightSmall", w, MUTED)
     W.loadHint:SetPoint("TOPLEFT", W.load, "BOTTOMLEFT", 2, -6)
 
@@ -1093,6 +1365,10 @@ function Panel.Refresh()
         W.loadHint:SetText(copy and ("A conflict with " .. tostring(s.from) .. ": settle it with Manage.") or "")
     end
     if s then W.manage:Show(); Set(W.manage, true) else W.manage:Hide() end
+    -- Without a browsed loadout, Import takes Manage's place.
+    W.importBtn:ClearAllPoints()
+    if s then W.importBtn:SetPoint("RIGHT", W.manage, "LEFT", -6, 0)
+    else W.importBtn:SetPoint("TOPRIGHT", W.box, "BOTTOMRIGHT", 0, -10) end
     W.manage:SetText(copy and "Resolve..." or "Manage...")
 
     -- The window fits its contents, so the footer keeps its own band.
@@ -1185,3 +1461,6 @@ end
 Panel._W = W
 function Panel._Frame() return frame end
 function Panel._Dialog() return Dialog() end
+function Panel._Share() return ShareDialog() end
+function Panel._Import() return ImportDialog() end
+Panel._ShowShare = function(e) ShowShare(e) end

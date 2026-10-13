@@ -272,6 +272,24 @@ AltStableSyncLAS = <LibAccountSync store only>   -- declared ONLY by AltStableSy
   same class/category list. The same name in another category is allowed. Names arriving by sync are
   never rejected. Names are always rendered as text.
 
+## Share strings (#71)
+
+A loadout as text, for another character, the beta → live move one loadout at a time, or a friend
+(`Share.lua`).
+- **The format** is the envelope's container (`ASE1:<adler32>:<Base64(Deflate(CBOR))>`) with
+  `{ s, share = { kind, class, category, name, modules } }` only: never an entry's id, versions,
+  `previous`, provenance or anything per character. A share string is never a sync message, and the
+  reverse (each decoder refuses the other's field).
+- **Import validates strictly**, since a string may come from anyone: a field allowlist at every
+  record level, and bounds on every collection, number and string. They cover the paste raw and
+  stripped of whitespace, the decompressed data, macro bodies (256 raw bytes, the measured 255 plus
+  the server's newline), and keys per command. Anything outside them refuses the whole string.
+- **Share checks its own output** the same way, so every string it shows imports on this build.
+- **Import is Save As from a string:** a preview shows every macro's full text, with `|` doubled so
+  no markup renders. The confirm creates one new entry from what Review froze, which sync then
+  carries like any Save As. It never loads anything.
+- **Load only binds the managed commands** (`PlanKeys`), whatever an entry holds.
+
 ## Trigger / write matrix
 
 Only an explicit confirmation click writes game state.
@@ -286,6 +304,8 @@ Only an explicit confirmation click writes game state.
 | OK on the "Turn on character keybindings?" preview (#7) | no | **only** the binding-set switch, verified, guarded (safety rule 8) |
 | Interruption (combat starts mid-apply) | no | stops writing. Resuming = a new preview + a new click |
 | Save / Save As / Delete / Recover / Keep-this-version (confirmed) | **yes** | no |
+| Import confirm (#71: a pasted share string, previewed) | **yes**, one new entry | **no**. Load stays a separate step |
+| Share (#71) | no | **no**. It only shows a string |
 | Catalog sync receipt (#18) | **yes**, by the receive rules | **no**, ever |
 | Beta → live transfer script (#12) | copies the file, client closed | **no** |
 

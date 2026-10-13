@@ -394,6 +394,80 @@ end
 
 function Commands.saveas(arg) return Commands.SaveAsEntry(arg, "general") end
 
+-- Import (#71): `frozen` = { class, category, name, modules }, fixed when
+-- Review was clicked; the confirm saves exactly that as a new entry, or
+-- nothing. Catalog only: no game state is read or written, and nothing is
+-- loaded. `onDone(entry)` runs after a successful save.
+function Commands.ImportEntry(frozen, onDone)
+    local S, L = ASS.Share, ASS.Share.Literal
+    local class = PlayerClass()
+    if ASS.disabled or not ASS.db then Print("Not imported: AltStableSync isn't available now.") return end
+    if frozen.class ~= class then
+        Print(("Not imported: this is a %s loadout."):format(S.ClassLabel(frozen.class))) return
+    end
+    if not ASS.Categories.IsValid(class, frozen.category) then Print("Not imported: " .. Copy("bad-category")) return end
+    local trimmed, nerr = ASS.Catalog.ValidateName("loadout", class, frozen.category, frozen.name)
+    if not trimmed then Print("Not imported: " .. Copy(nerr)) return end
+    local m = frozen.modules
+    local lines = {}
+    lines[#lines + 1] = ("A new loadout %q in %s: %s with an action, keys for %s, %s, %s."):format(L(trimmed),
+        ASS.Categories.Label(class, frozen.category), Plural(Count(m.actions), "slot"), Plural(Count(m.bindings), "command"),
+        Plural(Count(m.macros), "character macro"), Plural(Count(m.pet), "pet bar"))
+    -- Every macro's full text: that's the code a string brings.
+    local names = {}
+    for name in pairs(m.macros or {}) do names[#names + 1] = name end
+    table.sort(names)
+    if #names > 0 then
+        lines[#lines + 1] = "Character macros it holds (a Load creates or updates them, after its own preview):"
+        for _, name in ipairs(names) do
+            lines[#lines + 1] = ("  %s:"):format(L(name))
+            for line in (ASS.Game.Normalize(m.macros[name].body) .. "\n"):gmatch("([^\n]*)\n") do
+                lines[#lines + 1] = "    " .. L(line)
+            end
+        end
+    end
+    local account, seen = {}, {}
+    for _, a in pairs(m.actions or {}) do
+        if a.kind == "macro" and a.scope == "account" and not seen[a.name] then
+            seen[a.name] = true
+            account[#account + 1] = a
+        end
+    end
+    table.sort(account, function(x, y) return x.name < y.name end)
+    if #account > 0 then
+        lines[#lines + 1] = "Account macros its bars use (never created or changed: these load only where a macro of that name and text already exists):"
+        for _, a in ipairs(account) do
+            lines[#lines + 1] = ("  %s:"):format(L(a.name))
+            for line in (ASS.Game.Normalize(a.body) .. "\n"):gmatch("([^\n]*)\n") do
+                lines[#lines + 1] = "    " .. L(line)
+            end
+        end
+    end
+    if #names + #account > 0 then
+        lines[#lines + 1] = "A macro runs whatever its text says: check them if this string isn't yours."
+    end
+    lines[#lines + 1] = "Nothing on this character changes. Load it afterwards to use it."
+    ASS.Preview.Show({
+        title = "Import " .. L(trimmed) .. "?",
+        lines = lines,
+        confirm = "Import",
+        onConfirm = function()
+            if ASS.disabled or not ASS.db then Print("Not imported: AltStableSync isn't available now.") return end
+            -- Create checks the name again (one may have arrived by sync).
+            local e, err = ASS.Catalog.Create("loadout", { class = class, category = frozen.category, name = trimmed,
+                provenance = ASS.Loadout.Provenance() }, frozen.modules)
+            if not e then Print("Not imported: " .. Copy(err)) return end
+            Print(("Imported %q. Load it when you want to use it."):format(trimmed))
+            if onDone then onDone(e) end
+        end,
+    })
+end
+
+-- /altsync import: the panel's Import window.
+function Commands.import()
+    if ASS.Panel and ASS.Panel.OpenImport then ASS.Panel.OpenImport() end
+end
+
 -- Save over the loaded loadout, keeping what this character can't use or
 -- see (docs/DESIGN.md "Preserve intent on Save"). `drop`: those entries stop
 -- being part of the loadout instead.
