@@ -60,3 +60,12 @@ ignore:
   - Plugins/Link/Libs/LibAccountSync-1.0/Tools
   - Plugins/Link/Libs/LibAccountSync-1.0/CLAUDE.md
   - Plugins/Link/Libs/LibAccountSync-1.0/README.md
+  # The same paths with the package name: CurseForge's packager shipped the
+  # entries above in v0.1.0 (#66), though BigWigs honours them. Its guide
+  # applies ignores BEFORE move-folders, so these name the folder before the
+  # move, from the package root. Confirmed only by a CurseForge build.
+  - AltStableSync/Plugins/Link/Libs/LibAccountSync-1.0/tests
+  - AltStableSync/Plugins/Link/Libs/LibAccountSync-1.0/docs
+  - AltStableSync/Plugins/Link/Libs/LibAccountSync-1.0/Tools
+  - AltStableSync/Plugins/Link/Libs/LibAccountSync-1.0/CLAUDE.md
+  - AltStableSync/Plugins/Link/Libs/LibAccountSync-1.0/README.md
