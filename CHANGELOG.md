@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.0
 
 - **A minimap button.** Left-click opens or closes the window, right-click opens your backups, and
   dragging moves it around the minimap. Its tooltip names your save target. `/altsync minimap`
