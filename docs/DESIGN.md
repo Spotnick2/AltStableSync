@@ -531,6 +531,15 @@ One compact LibGlass window (`Panel.lua`, #9), one column, smoked glass under th
 doesn't show through. `/altsync` opens and closes it; `/altsync status` and every other subcommand
 stay. Later shortcuts (Talent frame, macro frame, AltStable) open the same panel.
 
+**Opening it (#62, `Minimap.lua`).** Each of these only opens the window; none writes game state or
+the catalog:
+- **A minimap button,** AltStable's own (no LibDBIcon): left-click toggles the window, right-click
+  opens it on Backups (`Panel.Open`), drag moves it. Its angle and visibility are the only things it
+  saves, as `AltStableSyncDB.minimap = { angle, hide }` (schema 9), into usable data only.
+  `/altsync minimap` hides or shows it.
+- **The minimap's addon list** (the TOC's `AddonCompartmentFunc*`): the same clicks.
+- **A key binding,** `Bindings.xml`: Key Bindings > AltStableSync, no default key.
+
 The panel is a **view and a launcher over the slash commands' flows**: every button opens the same
 preview the command would, and only that preview's confirm writes. A button passes the values it reads
 at the click (entry id, typed name, chosen category), and the flow fixes them in its preview, so changing

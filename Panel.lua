@@ -1163,6 +1163,14 @@ function Panel.Show()
     Panel.RefreshSave()
 end
 
+-- Open the window on a view ("loadouts", "backups" or "ui"), building and
+-- showing it first if needed (#62: the minimap button's right-click opens
+-- Backups). Panel.Show still starts on Loadouts and the save target.
+function Panel.Open(view)
+    if not (frame and frame:IsShown()) then Panel.Show() end
+    if view and view ~= Panel.view then ShowView(view) end
+end
+
 function Panel.Hide() if frame then frame:Hide() end end
 
 function Panel.Toggle()

@@ -13,7 +13,9 @@ dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
 
 local BLIZZARD_GLOBALS = { "SlashCmdList", "UISpecialFrames", "StaticPopupDialogs",
-                           "DEFAULT_CHAT_FRAME", "ChatFrame_AddMessageEventFilter" }
+                           "DEFAULT_CHAT_FRAME", "ChatFrame_AddMessageEventFilter",
+                           -- the minimap button's neighbours (#62)
+                           "Minimap", "GameTooltip", "AddonCompartmentFrame" }
 local PROTECTED = {}
 for _, g in ipairs(BLIZZARD_GLOBALS) do PROTECTED[g] = true end
 
@@ -60,7 +62,16 @@ do
         rawset(t, k, v)
     end })
     env._G = env
-    for _, f in ipairs({ "Preview.lua", "Panel.lua" }) do
+    -- The client's minimap and tooltip, for Minimap.lua's handlers (#62).
+    Minimap = NewWidget("Frame", "Minimap")
+    Minimap.width, Minimap.height = 198, 198
+    function Minimap:GetFrameLevel() return 2 end
+    function Minimap:GetCenter() return 500, 400 end
+    function Minimap:GetEffectiveScale() return 1 end
+    GameTooltip = NewWidget("GameTooltip", "GameTooltip")
+    function GameTooltip:AddLine() end
+    GetCursorPosition = function() return 500, 600 end
+    for _, f in ipairs({ "Preview.lua", "Panel.lua", "Minimap.lua" }) do
         local chunk = assert(loadfile(f))
         setfenv(chunk, env)
         chunk("AltStableSync", {})
@@ -76,10 +87,22 @@ do
     ASS.Preview.Show({ title = "t", lines = { "x" }, onConfirm = function() end })
     env.AltStableSyncPreview.confirm:Click()
     ASS.Panel.Toggle()
+    -- Minimap.lua's deferred handlers: login, resize, clicks, drag, tooltips.
+    WoW.fire("PLAYER_LOGIN")
+    local mb = ASS.MinimapButton._Button()
+    check("minimap button made in the recorder", mb ~= nil)
+    for _, h in ipairs((Minimap.hooks or {}).OnSizeChanged or {}) do h(Minimap) end
+    mb:Click("LeftButton"); mb:Click("RightButton")
+    mb.scripts.OnDragStart(mb); mb.scripts.OnUpdate(mb); mb.scripts.OnDragStop(mb)
+    mb.scripts.OnEnter(mb); mb.scripts.OnLeave(mb)
+    env.AltStableSync_OnAddonCompartmentClick("AltStableSync", "LeftButton")
+    env.AltStableSync_OnAddonCompartmentEnter("AltStableSync", NewWidget("Button"))
+    env.AltStableSync_OnAddonCompartmentLeave()
     check("windows write no Blizzard global", #writes == 0, table.concat(writes, ","))
     eq("windows show no StaticPopup", popups, 0)
     check("windows register for Escape by field", #UISpecialFrames == 2 and rawget(env, "UISpecialFrames") == nil)
     StaticPopup_Show, UnitClass = nil, unitClass
+    Minimap, GameTooltip, GetCursorPosition = nil, nil, nil
 end
 
 -- The recorder itself must catch every spelling (mutation check, in memory).
@@ -89,6 +112,7 @@ for _, src in ipairs({
     "rawset(_G, 'SlashCmdList', SlashCmdList)",
     "local a; a, SlashCmdList = 1, SlashCmdList",
     "if true then SlashCmdList = SlashCmdList end",
+    "Minimap = Minimap",
 }) do
     local writes = WritesOf(assert(loadstring(src)))
     check("recorder catches: " .. src, #writes == 1)

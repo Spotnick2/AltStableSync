@@ -85,6 +85,12 @@ def check(path):
         if len(set(versions.values())) != 1:
             raise ValueError(f"the two TOCs disagree on the version: {versions}")
 
+        # The key binding (#62): the client loads Bindings.xml by name, not from
+        # the TOC. Required, and the one file allowed outside the TOC's inputs.
+        if "AltStableSync/Bindings.xml" not in names:
+            raise ValueError("AltStableSync/Bindings.xml missing")
+        expected.add("AltStableSync/Bindings.xml")
+
         extra = []
         for n in sorted(names - expected):
             parts = PurePosixPath(n).parts

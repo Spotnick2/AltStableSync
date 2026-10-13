@@ -78,11 +78,20 @@ load it.
 If both accounts changed the same loadout, you get both versions, never a merge. Pick one with
 **Manage… > Resolve…**. `/altsync link off` turns sharing off.
 
+## Opening it
+
+- **The minimap button:** left-click opens or closes the window, right-click opens it on your
+  backups, and dragging moves it around the minimap. Its tooltip names your save target.
+- **The minimap's addon list** has an AltStableSync entry, even with the button hidden.
+- **A key binding:** Key Bindings > AltStableSync, with no key set by default.
+- **`/altsync`.**
+
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `/altsync` | Open or close the window |
+| `/altsync minimap` | Show or hide the minimap button |
 | `/altsync saveas <name>` | Save this character as a new loadout (General / Leveling) |
 | `/altsync save` | Update the save target (reviewed first) |
 | `/altsync list` | This class's loadouts, with their ids |
@@ -103,7 +112,6 @@ If both accounts changed the same loadout, you get both versions, never a merge.
   for you to fill.
 - **UI setups are coming.** The UI setup tab (your Edit Mode layout and UI settings) says so until
   it's ready.
-- **No minimap button or key binding yet.** They're on the way; until then, `/altsync`.
 - **Your loadouts are saved per WoW account**, with your backups, in
   `WTF\Account\<account>\SavedVariables\AltStableSync.lua`.
 

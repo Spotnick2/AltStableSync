@@ -109,6 +109,16 @@ function Widget:Click(button)
     if self.scripts.OnClick then self.scripts.OnClick(self, button or "LeftButton") end
     return true
 end
+-- Points and hooks are kept, so position and resize tests can fail (#62).
+function Widget:SetPoint(...) self.points = self.points or {}; self.points[#self.points + 1] = { ... } end
+function Widget:ClearAllPoints() self.points = {} end
+function Widget:GetPoint(i) local p = (self.points or {})[i or 1]; if p then return unpack(p) end end
+function Widget:HookScript(k, fn)
+    self.hooks = self.hooks or {}
+    self.hooks[k] = self.hooks[k] or {}
+    table.insert(self.hooks[k], fn)
+    return true
+end
 function Widget:GetParent() return self.parent end
 function Widget:GetName() return self.name end
 function Widget:CreateFontString() return NewWidget("FontString", nil, self) end
