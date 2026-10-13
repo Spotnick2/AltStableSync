@@ -313,6 +313,22 @@ function Pet.Snapshot(pp)
     return { family = pet.family, familyName = pet.familyName, guid = pet.guid, name = pet.name, slots = slots }
 end
 
+-- The bar of the pet that is out, in Snapshot's shape, for Back up now
+-- (#61). nil: no pet out. false: a pet, but it or its bar couldn't be read
+-- (the backup is refused, never stored without it). Restore puts it back
+-- only with that pet out (Pet.PlanRestore), as for any backup.
+function Pet.SnapshotNow()
+    local Game = G()
+    local pet = Game.Pet()
+    if pet == nil then return nil end
+    if not pet then return false end
+    local bar = Game.PetBar()
+    if not bar then return false end
+    local slots = {}
+    for i = 1, SLOTS do slots[i] = Stored(bar[i]) end
+    return { family = pet.family, familyName = pet.familyName, guid = pet.guid, name = pet.name, slots = slots }
+end
+
 ------------------------------------------------------------
 -- Execute
 ------------------------------------------------------------

@@ -845,7 +845,7 @@ local function BuildBackups(v)
     local w = WIDTH - 2 * PAD
     local intro = Text(v, "GameFontHighlightSmall", w, MUTED)
     intro:SetPoint("TOPLEFT", 0, 0)
-    intro:SetText("Taken before every load and restore. Restore puts this character's bars, keys and macros back exactly.")
+    intro:SetText("Taken before every load and restore, and by Back up now. Restore puts this character's bars and keys back as they were.")
     local sc = CreateFrame("ScrollFrame", nil, v)
     sc:SetSize(w, 260)
     sc:SetPoint("TOPLEFT", 0, -36)
@@ -862,6 +862,9 @@ local function BuildBackups(v)
     W.backupEmpty:SetPoint("TOPLEFT", 6, -42)
     W.restore = GButton(v, "Restore...", 140, "primary")
     W.restore:SetPoint("BOTTOMLEFT", 0, 10)
+    W.backupNow = GButton(v, "Back up now", 140, "secondary")
+    W.backupNow:SetPoint("LEFT", W.restore, "RIGHT", 10, 0)
+    W.backupNow:SetScript("OnClick", function() CloseMenu(); Cmd().backup() end)
     W.restore:SetScript("OnClick", function()
         local slot = Panel.SlotOf(Panel.sel.snap)
         if not slot then
@@ -1123,6 +1126,7 @@ function Panel.Refresh()
     W.backupEmpty:SetText(#m.backups == 0 and "No backups yet: one is taken before every load." or "")
     if m.backupGone then Panel.sel.snap = nil end
     Set(W.restore, canWrite and m.backupSelected, not m.backupSelected and "Select a backup first." or whyNot)
+    Set(W.backupNow, canWrite, whyNot)
 
     -- Footer: a recent command message, else the state.
     local text, dot

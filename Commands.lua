@@ -702,6 +702,67 @@ function Commands.backups()
     if not op and #ring == 0 then Print("No backups yet.") end
 end
 
+-- Back up now (#61): the bars, the main and pet bars' keys and the pet's
+-- bar into a new backup, from /altsync backup and the panel. It writes only
+-- the backups store. A ring that is full would drop its oldest backup, so
+-- that case is previewed first.
+local COVERAGE = "It covers every bar, the keys on your main action bar and pet bar (on character "
+    .. "keybindings), and your pet's bar. Restoring it leaves keys you bind later, and never recreates "
+    .. "or edits a macro."
+
+-- The slots left out, by bar and button, with what each holds.
+local function LeftLines(lines, left)
+    if #left == 0 then return end
+    lines[#lines + 1] = ("Left out (restoring leaves %s as %s):"):format(#left == 1 and "it" or "them",
+        #left == 1 and "it is" or "they are")
+    local items = {}
+    for _, l in ipairs(left) do items[#items + 1] = { slot = l.slot, text = tostring(l.what) } end
+    BySlot(lines, items)
+end
+
+local function BackedUp(p)
+    local parts = { Plural(p.count, "slot") .. " with an action", Plural(p.keys, "key") }
+    if p.snap.pet then parts[#parts + 1] = "the pet bar" end
+    local msg = "Backed up: " .. table.concat(parts, ", ") .. "."
+    if p.noKeys then msg = msg .. " Keys aren't backed up while you use your account keybindings." end
+    Print(msg)
+    Print(COVERAGE)
+    local lines = {}
+    LeftLines(lines, p.left)
+    for _, l in ipairs(lines) do Print(l) end
+end
+
+function Commands.backup()
+    local p, err = ASS.Loadout.PlanBackup()
+    if not p then Print("Not backed up: " .. tostring(err)) return end
+    if p.matches then
+        Print("Your newest backup already matches this character: nothing new to back up.")
+        return
+    end
+    local function commit(shown)
+        local r, why = ASS.Loadout.Backup(shown)
+        if r then BackedUp(r) else Print("Not backed up: " .. tostring(why)) end
+    end
+    if not p.evicts then return commit(p) end
+    local old = p.evicts
+    local lines = {
+        ("Your backups are full (%d). This drops the oldest: %s, %s."):format(ASS.Backups.RING,
+            tostring(old.reason or "a backup"), date and type(old.at) == "number" and date("%Y-%m-%d %H:%M", old.at) or "?"),
+        ("It backs up %s with an action and %s%s."):format(Plural(p.count, "slot"), Plural(p.keys, "key"),
+            p.snap.pet and ", and the pet bar" or ""),
+        COVERAGE,
+    }
+    if p.noKeys then lines[#lines + 1] = "Keys aren't backed up while you use your account keybindings." end
+    LeftLines(lines, p.left)
+    lines[#lines + 1] = "Your first backup and any interrupted load are kept, whatever happens."
+    ASS.Preview.Show({
+        title = "Back up now?",
+        lines = lines,
+        confirm = "Back up",
+        onConfirm = function() commit(p) end,
+    })
+end
+
 function Commands.restore(arg)
     local which = tostring(arg or ""):lower():match("^%s*(.-)%s*$")
     if which == "" then which = "1" end

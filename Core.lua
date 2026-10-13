@@ -331,7 +331,7 @@ local function SlashHandler(msg)
     elseif ASS.Commands and type(ASS.Commands[cmd]) == "function" then
         ASS.Commands[cmd](rest)
     else
-        Print("commands: /altsync (the window) | minimap | status | saveas <name> | save [drop] | list | load <id or name> | backups | restore [n or op]" .. " | rename <id or name> <new name> | delete <id or name> | conflicts | resolve <id or name> theirs or mine | link")
+        Print("commands: /altsync (the window) | minimap | backup | status | saveas <name> | save [drop] | list | load <id or name> | backups | restore [n or op]" .. " | rename <id or name> <new name> | delete <id or name> | conflicts | resolve <id or name> theirs or mine | link")
     end
 end
 ASS.SlashHandler = SlashHandler

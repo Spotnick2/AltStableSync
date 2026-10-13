@@ -1268,6 +1268,124 @@ end
 -- Restore (exact)
 ------------------------------------------------------------
 
+------------------------------------------------------------
+-- Back up now (#61)
+------------------------------------------------------------
+
+-- The whole setup as it is now, in the snapshot shape a load's backup has,
+-- so PlanRestore and Restore restore it unchanged: every supported slot
+-- (false when empty), each key on the commands this addon manages, the bar
+-- of the pet that is out. A slot holding something this build can't put
+-- back exactly (a flyout, a companion, an item no longer in the bags, an
+-- ambiguous macro name) is left out and listed, and Restore leaves it as it
+-- is. A read that fails means no backup at all. No macro is ever created,
+-- edited or deleted by restoring it (createdMacros is empty).
+-- Keys only on Character keybindings: restores write the Character set only,
+-- so keys read from the Account set would be copied into another set later.
+-- Returns snap, left = { { slot, what } } or nil, why.
+
+-- One slot's content, three ways, each read done once: "ok" (recorded),
+-- "left" (verified not restorable: left out and listed), or nil plus why
+-- (a read failed: no backup). Game.Restorable answers only yes or no, and
+-- would turn a failed read into an omission.
+local function Classify(a, book)
+    local Game = G()
+    if a == nil then return "ok" end
+    if a.kind == "spell" then
+        if book.byId[a.id] ~= nil then return "ok" end
+        -- Absent only when the whole book read and the client says no by id
+        -- too (as Resolve decides): a partly read book proves nothing.
+        local known = Game.SpellKnownById(a.id)
+        if known then return "ok" end
+        if known == nil or not book.complete then return nil, "Couldn't read your spells; try again." end
+        return "left"
+    elseif a.kind == "item" then
+        local n = Game.ItemCountRead(a.id)
+        if n == nil then return nil, "Couldn't read your bags; try again." end
+        return n > 0 and "ok" or "left"
+    elseif a.kind == "macro" then
+        local m = Game.MacrosNamed(a.name)
+        if m == nil then return nil, "Couldn't read your macros; try again." end
+        return #m == 1 and "ok" or "left"
+    elseif a.what == "unreadable" or a.what == "macros unreadable" then
+        return nil, "Couldn't read your action bars; try again."
+    end
+    return "left"
+end
+
+local function SnapshotNow(reason)
+    local Game = G()
+    local blocked = Loadout.Blocked()
+    if blocked then return nil, blocked end
+    local snap = { reason = reason, actions = {}, keys = {}, createdMacros = {},
+                   characterBindings = Game.CharacterBindings() }
+    local left = {}
+    local book = Game.Spellbook()
+    for _, slot in ipairs(Game.SLOT_LIST) do
+        local a = Game.ActionAt(slot)
+        local verdict, why = Classify(a, book)
+        if not verdict then return nil, why end
+        if verdict == "ok" then
+            snap.actions[slot] = a or false
+        else
+            left[#left + 1] = { slot = slot, what = a and (a.what or a.kind) or "?" }
+        end
+    end
+    if snap.characterBindings then
+        for _, cmd in ipairs(Game.COMMANDS) do
+            local keys = Game.KeysFor(cmd)
+            if not keys then return nil, "Couldn't read your key bindings; try again." end
+            for _, key in ipairs(keys) do snap.keys[key] = cmd end
+        end
+    end
+    local pet = ASS.Pet.SnapshotNow()
+    if pet == false then return nil, "Couldn't read your pet's bar; try again." end
+    snap.pet = pet
+    return snap, left
+end
+
+-- What a backup holds and how restoring it behaves: its slots, keys, pet
+-- bar, binding set, and the macros a restore would edit or keep.
+local function Content(s)
+    return Serialize({ a = s.actions or {}, k = s.keys or {}, p = s.pet or false, cb = s.characterBindings and true or false,
+                       e = s.editedMacros or false, c = s.createdMacros or {} })
+end
+
+-- What Back up now would do: the snapshot, what it leaves out, whether the
+-- newest backup already holds exactly this, and which backup a full ring
+-- would drop. The fingerprint covers all of it, so a confirm whose fresh
+-- plan differs is refused.
+function Loadout.PlanBackup()
+    local snap, left = SnapshotNow("Manual")
+    if not snap then return nil, left end
+    local ring = ASS.Backups.List()
+    local p = { snap = snap, left = left, count = 0, keys = 0, noKeys = not snap.characterBindings }
+    for _, a in pairs(snap.actions) do if a then p.count = p.count + 1 end end
+    for _ in pairs(snap.keys) do p.keys = p.keys + 1 end
+    -- "Nothing new" only against a backup that restores the same way: Content
+    -- includes the binding set and any macro edits, which a load's backup can
+    -- carry and a manual one never does.
+    p.matches = ring[1] ~= nil and Content(ring[1]) == Content(snap)
+    if #ring >= ASS.Backups.RING then p.evicts = ring[#ring] end
+    -- Everything the preview shows, by value: the content, what is left out,
+    -- and the backup that would drop (its content and time, not a reference).
+    p.fingerprint = Serialize({ s = Content(snap), l = left, n = #ring,
+        ev = p.evicts and { Content(p.evicts), p.evicts.at or false, p.evicts.reason or false } or false })
+    return p
+end
+
+-- Store it. Re-planned and refused unless it is what the caller was shown.
+function Loadout.Backup(shown)
+    local p, err = Loadout.PlanBackup()
+    if not p then return nil, err end
+    if p.fingerprint ~= shown.fingerprint then return nil, "Something changed since the preview: review it again." end
+    if p.matches then return nil, "Your newest backup already matches this character." end
+    p.snap.at = time and time() or 0
+    local ok, why = ASS.Backups.PushRing(p.snap)
+    if not ok then return nil, why end
+    return p
+end
+
 function Loadout.PlanRestore(which)
     local Game = G()
     local snap = ASS.Backups.Get(which)
