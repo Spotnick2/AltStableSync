@@ -527,20 +527,60 @@ the previous content. It is not a history product.
 
 ## UI
 
-One small LibGlass window with **UI setup** and **Loadouts** tabs and a quiet **Backups** link (#9).
-`/altsync` opens it. Later shortcuts (Talent frame, macro frame, AltStable) open the same panel.
+One compact LibGlass window (`Panel.lua`, #9), one column, smoked glass under the text so the world
+doesn't show through. `/altsync` opens and closes it; `/altsync status` and every other subcommand
+stay. Later shortcuts (Talent frame, macro frame, AltStable) open the same panel.
 
-- **Header:** "AltStableSync" and the character's class.
-- **Loadouts tab:** a category dropdown (player's choice) and a saved-loadout dropdown (that list only).
-  Then a summary of actions, bindings ("Destination: Character"), "Include character macros", and the
-  buttons Load, Save, Save As.
-- **UI setup tab:** a saved-setup dropdown; a Layout / Preferences / Addons summary with an "Included
-  settings" expander; the buttons Apply, Save, Save As.
-- **Choosing a dropdown entry never loads it.** After a load: "Loaded Everyday. Changes stay on this
-  character until you save."
+The panel is a **view and a launcher over the slash commands' flows**: every button opens the same
+preview the command would, and only that preview's confirm writes. A button passes the values it reads
+at the click (entry id, typed name, chosen category), and the flow fixes them in its preview, so changing
+the panel afterwards can't redirect a confirm. Redraws update the panel's own widgets only and never
+touch an open preview or dialog. Panel state is session-only.
+
+**Browsing and the save target are separate.** Load acts on the browsed entry. Save acts on the **save
+target**: the entry this character last loaded or saved (`AltStableSyncChar.loaded`, set by a load,
+including a no-op or a failed one, by Save and by Save As). Browsing, opening a preview and cancelling
+never move it. A load that fails partway makes the attempted entry the target with no usable comparison,
+so Save is refused until it is loaded again: the bars are partly that entry now, and the old target must
+not take a save of them.
+
+- **Header:** "AltStableSync", the class, a close button. **Navigation:** two tabs, Loadouts and UI
+  setup (gold underline on the active one), and a quieter **Backups…** link.
+- **Loadouts:** a **Category** picker and a **Saved loadout** picker, our own popup lists (Forever
+  documents no dropdown API; no Blizzard menus). Categories show their counts; a category a newer build
+  sent shows under its raw key. Each opening starts on the save target. Each entry shows every marker that
+  applies: save target (or "older version"), conflict, conflict copy, sync status.
+- **Saved contents** of the browsed entry, at once, each row as tall as its lines; under them "Saved
+  Oct 12, 10:52 by Karuzo-Macphisto" (the full time on hover): Action bars (saved actions), Keybindings (saved
+  key presses, "Destination: Character"), Macros (character macros), Pet bars when any. It describes
+  what is saved; changes are only ever shown by the planner's preview. Empty states say which: no
+  loadouts for this class, none in this category, or the browsed entry was removed (said, not quietly
+  replaced).
+- **Load…** (the primary button; "Review changes before loading") and **Manage…** (Rename…, Delete…;
+  for a conflict copy, **Resolve…** with the keep / use-theirs choices, then the resolve preview).
+- **Save this character:** "Save target: Raid Healing - Holy", "Browsing another loadout doesn't change
+  this target." when browsing elsewhere, a live status (a fresh `PlanSave` while open, when the bars,
+  keys, macros, cursor or combat change, after a catalog write, and every 5 s as a net:
+  "No unsaved changes" only when that comparison found none, and Save is then off; else why Save can't
+  run), **Save…** and **Save As…** (always available out of combat). A deleted or changed target is said, and Save stays off with the reason; it is never
+  redirected to the browsed entry.
+- **Save As** opens our own dialog: Category (default: the save target's, else General; never the browsed
+  one) and Name, checked as you type (no red text on an untouched or blank box), Review… opens the
+  preview. Enter reviews, Escape cancels. **Save As always previews**, from the panel and from
+  `/altsync saveas`.
+- **Backups…:** the incomplete operation, the ring newest first, then the first backup. Selection follows
+  the snapshot itself; **Restore…** finds its current slot at the click. An incomplete operation also
+  shows in the footer with **Undo it…**.
+- **UI setup:** "Saved UI setups (Edit Mode layout and settings) aren't available yet." Planned: a
+  saved-setup picker; a Layout / Preferences / Addons summary; Apply, Save, Save As.
+- **Footer:** the last command's message (refusals included), else the state, else the Link
+  availability ("Other account online": availability only, never "in sync").
+- **Buttons:** primary, secondary and disabled look different; a disabled button says why on hover
+  (the reason is `Loadout.Blocked`'s: combat, readiness, something on the cursor).
+- **Escape** closes only the topmost: a preview, the name dialog or a list first, then the panel.
+- **After a load:** "Loaded Everyday. Changes stay on this character until you save."
 - **Save** names its target explicitly ("Update Everyday?" … "Other characters keep their current
-  setup until they load this version"). Save As shows the destination category and checks the name
-  inline.
+  setup until they load this version").
 - **Every prompt is our own frame**, never a StaticPopup.
 - **First-login offer** (#10), after readiness and out of combat, only when at least one UI setup
   exists: "Make yourself at home. Start with your saved UI preferences." When exactly one exists it

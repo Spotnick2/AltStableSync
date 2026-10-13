@@ -1,5 +1,5 @@
 ------------------------------------------------------------
--- Commands.lua - /altsync commands for the #4 slice (until #9's panel)
+-- Commands.lua - /altsync commands, and the flows the panel (#9) calls
 --
 --   /altsync saveas <name>   Save As: a new loadout in this class's "general"
 --   /altsync save [drop]     Save over the loaded loadout (#28), previewed
@@ -20,7 +20,14 @@ local ASS = AltStableSync
 local Commands = {}
 ASS.Commands = Commands
 
-local function Print(msg) ASS.Print(msg) end
+-- Every line a command prints also reaches the panel's status line (#9),
+-- including refusals from a confirm.
+Commands.onMessage = nil
+local function Print(msg)
+    ASS.Print(msg)
+    local cb = Commands.onMessage
+    if cb then pcall(cb, msg) end
+end
 
 local function PlayerClass()
     local _, class = UnitClass("player")
@@ -69,6 +76,7 @@ local COPY = {
     ["not-conflict"] = "That conflict was already settled.",
     ["rename-empty"] = "Give it a name: /altsync rename <id or name> <new name>.",
     ["bad-modules"] = "Its saved data is damaged (no list of covered slots); nothing was changed.",
+    ["bad-category"] = "That category isn't one this class can save into.",
 }
 local function Copy(err) return COPY[err] or tostring(err) end
 
@@ -315,8 +323,8 @@ local function Ignored(lines, ignored, actions)
     BySlot(lines, items)
 end
 
-local function SaveAs(arg, p)
-    local e, cerr = ASS.Loadout.SaveAs(p, arg)
+local function SaveAs(name, category, p)
+    local e, cerr = ASS.Loadout.SaveAs(p, name, category)
     if not e then Print("Not saved: " .. Copy(cerr)) return end
     local msg = ("Saved %q (%d slots, bindings, %d character macros)."):format(e.name,
         Count(p.modules.actions), Count(p.modules.macros))
@@ -334,25 +342,41 @@ end
 -- Save As keeps what the loaded setup had and this character can't use
 -- (A09). Only when the last load left nothing to compare against, or the
 -- merge refuses, does it become a plain capture, and then it says so first.
-function Commands.saveas(arg)
+-- Always previewed (AGENTS.md rule 10: captures into the catalog only after a
+-- preview), from /altsync saveas and from the panel (#9). The name and
+-- category are fixed here: the confirm uses these, whatever the panel shows
+-- by then, and re-plans.
+function Commands.SaveAsEntry(name, category)
+    local class = PlayerClass()
+    category = category or "general"
+    if not ASS.Categories.IsValid(class, category) then Print("Not saved: " .. Copy("bad-category")) return end
+    local trimmed, nerr = ASS.Catalog.ValidateName("loadout", class, category, name)
+    if not trimmed then Print("Not saved: " .. Copy(nerr)) return end
     local p, err = ASS.Loadout.PlanSaveAs()
     if not p then Print("Not saved: " .. tostring(err)) return end
-    if not p.lossy and (p.added or 0) == 0 then return SaveAs(arg, p) end
-    local lines
+    local lines = {}
+    -- What may be lost or added comes first.
     if p.lossy then
-        lines = {
-            p.why or "No usable comparison with the loaded setup (its load didn't finish, it was restored over, or it was loaded by an older version).",
-            "Save As captures this character as it is now, and may leave out entries it inherited.",
-        }
-    else
-        lines = {
-            ("Adds %s the loaded setup didn't cover yet (%d with an action), from this character's bars."):format(
-                Plural(p.added, "slot"), p.addedFull or 0),
-            "Everything the loaded setup has is kept, as it would be on Save.",
-        }
+        lines[#lines + 1] = p.why or "No usable comparison with the loaded setup (its load didn't finish, it was restored over, or it was loaded by an older version)."
+        lines[#lines + 1] = "Save As captures this character as it is now, and may leave out entries it inherited."
+    elseif (p.added or 0) > 0 then
+        lines[#lines + 1] = ("Adds %s the loaded setup didn't cover yet (%d with an action), from this character's bars."):format(
+            Plural(p.added, "slot"), p.addedFull or 0)
+        lines[#lines + 1] = "Everything the loaded setup has is kept, as it would be on Save."
     end
+    local m = p.modules or {}
+    lines[#lines + 1] = ("A new loadout %q in %s: %s with an action, keys for %s, %s, %s."):format(trimmed,
+        ASS.Categories.Label(class, category), Plural(Count(m.actions), "slot"), Plural(Count(m.bindings), "command"),
+        Plural(Count(m.macros), "character macro"), Plural(Count(m.pet), "pet bar"))
+    if #(p.kept or {}) > 0 then
+        lines[#lines + 1] = ("Keeps %s from the loaded setup that this character can't use."):format(
+            Plural(#p.kept, "entry"):gsub("entrys", "entries"))
+    end
+    for _, n in ipairs(p.notes or {}) do lines[#lines + 1] = n end
+    Ignored(lines, p.ignored, m.actions)
+    lines[#lines + 1] = "Nothing on any character changes. This character's Save updates the new loadout from now on."
     ASS.Preview.Show({
-        title = "Save As " .. tostring(arg) .. "?",
+        title = "Save As " .. trimmed .. "?",
         lines = lines,
         confirm = "Save As",
         -- The confirm saves what the preview showed, or nothing.
@@ -363,10 +387,12 @@ function Commands.saveas(arg)
                 Print("Not saved: Something changed since the preview: review it again.")
                 return
             end
-            SaveAs(arg, q)
+            SaveAs(trimmed, category, q)
         end,
     })
 end
+
+function Commands.saveas(arg) return Commands.SaveAsEntry(arg, "general") end
 
 -- Save over the loaded loadout, keeping what this character can't use or
 -- see (docs/DESIGN.md "Preserve intent on Save"). `drop`: those entries stop
@@ -553,10 +579,8 @@ function Commands.AwaitLoad(id, name, opts)
         if ASS.Preview.Shown() ~= waiting then return end      -- cancelled or replaced
         if ASS.Ready.IsReady() then
             ASS.Preview.Hide()
-            local e = ASS.Catalog.Get(id)
-            if not e or e.deleted or e.kind ~= "loadout" or e.class ~= PlayerClass() then
-                Print(Copy("unknown-id")) return
-            end
+            local e = Commands.Own(id)
+            if not e then Print(Copy("unknown-id")) return end
             if not ASS.Game.CharacterBindings() then
                 Print(("Character keybindings aren't on any more, so nothing was loaded. /altsync load %s to start again.")
                     :format(name))
@@ -702,16 +726,33 @@ end
 -- and the catalog refuses if either account changed it since ("stale").
 ------------------------------------------------------------
 
+-- This class's live loadout with this id, or nil. The panel (#9) and the
+-- slash commands both reach the flows below with an id: each flow checks it
+-- here itself, so no caller can skip what parsing used to check.
+function Commands.Own(id)
+    local e = ASS.Catalog.Get(id)
+    if type(e) ~= "table" or e.deleted or e.kind ~= "loadout" or e.class ~= PlayerClass() then return nil end
+    return e
+end
+
 function Commands.rename(arg)
     local key, name = tostring(arg or ""):match("^%s*(%S+)%s+(.-)%s*$")
     if not key then Print("Usage: /altsync rename <id or one-word name> <new name>  (see /altsync list)") return end
     -- An id, or a one-word name (a name with spaces needs the id).
-    local e = ASS.Catalog.Get(key)
-    if not e or e.deleted or e.kind ~= "loadout" or e.class ~= PlayerClass() then
+    local e = Commands.Own(key)
+    if not e then
         local why
         e, why = FindEntry(key)
         if not e then for _, l in ipairs(why) do Print(l) end return end
     end
+    return Commands.RenameEntry(e.id, name)
+end
+
+-- The entry keeps its category, even one this build doesn't know (received
+-- by sync): no category check here.
+function Commands.RenameEntry(id, name)
+    local e = Commands.Own(id)
+    if not e then Print(Copy("unknown-id")) return end
     if e.conflict then Print(Copy("conflict-copy")) return end
     local trimmed, nerr = ASS.Catalog.ValidateName(e.kind, e.class, e.category, name, e.id)
     if not trimmed then Print("Not renamed: " .. Copy(nerr == "name-empty" and "rename-empty" or nerr)) return end
@@ -732,6 +773,12 @@ end
 function Commands.delete(arg)
     local e, why = FindEntry(arg)
     if not e then for _, l in ipairs(why) do Print(l) end return end
+    return Commands.DeleteEntry(e.id)
+end
+
+function Commands.DeleteEntry(id)
+    local e = Commands.Own(id)
+    if not e then Print(Copy("unknown-id")) return end
     if e.conflict then Print(Copy("conflict-copy")) return end
     local id, version = e.id, e.version
     ASS.Preview.Show({
@@ -780,6 +827,15 @@ function Commands.resolve(arg)
         end
         copy = copies[1]
     end
+    return Commands.ResolveCopy(copy.id, choice)
+end
+
+-- `choice`: "theirs" or "mine". A deleted root stays allowed, and so does a
+-- category this build doesn't know.
+function Commands.ResolveCopy(copyId, choice)
+    local copy = Commands.Own(copyId)
+    if not copy or type(copy.conflict) ~= "table" then Print(Copy("not-conflict")) return end
+    if choice ~= "theirs" and choice ~= "mine" then return end
     local root = ASS.Catalog.Get(copy.conflict.of)
     if not root then Print(Copy("unknown-id")) return end
     local from = tostring(copy.conflict.from or "your other account")

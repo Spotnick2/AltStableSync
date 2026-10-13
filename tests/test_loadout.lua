@@ -52,6 +52,13 @@ local function boot()
     end
 end
 
+-- /altsync saveas always previews (#9); these tests then confirm it.
+local function saveasConfirmed(name)
+    A._shown = nil
+    A.Commands.saveas(name)
+    if A._shown and A._shown.confirm == "Save As" then A._shown.onConfirm() end
+end
+
 local function ready()
     WoW.fire("PLAYER_ENTERING_WORLD", true, false)
     WoW.clock = WoW.clock + 10
@@ -1088,17 +1095,49 @@ do
     check("rename unknown: says so", table.concat(WoW.chat(), " "):find("No loadout named") ~= nil)
 end
 
+-- #9: Save As always previews, and saves nothing before its confirm.
+do
+    boot(); ready(); save()
+    local n = #A.Catalog.List("loadout", "PRIEST", "general")
+    A._shown = nil
+    A.Commands.saveas("Previewed")
+    eq("saveas: previewed", A._shown and A._shown.confirm, "Save As")
+    eq("saveas: nothing saved before the confirm", #A.Catalog.List("loadout", "PRIEST", "general"), n)
+    check("saveas: preview names the destination", A._shown and table.concat(A._shown.lines, "\n")
+        :find('A new loadout "Previewed" in General / Leveling', 1, true) ~= nil)
+    A._shown.onConfirm()
+    eq("saveas: saved on the confirm", #A.Catalog.List("loadout", "PRIEST", "general"), n + 1)
+    -- A category: valid for the class, fixed at the preview.
+    A._shown = nil
+    A.Commands.SaveAsEntry("Holy one", "holy")
+    A._shown.onConfirm()
+    eq("saveas: into its category", #A.Catalog.List("loadout", "PRIEST", "holy"), 1)
+    WoW.chatLines = {}; A._shown = nil
+    A.Commands.SaveAsEntry("Nope", "arms")
+    eq("saveas: another class's category: no preview", A._shown, nil)
+    check("saveas: another class's category: says so", table.concat(WoW.chat(), " "):find("category", 1, true) ~= nil)
+    -- A duplicate that arrives (by sync) between the preview and the confirm: refused.
+    A._shown = nil
+    A.Commands.SaveAsEntry("Twin", "general")
+    A.Catalog.Create("loadout", { class = "PRIEST", category = "general", name = "Twin" }, A.Catalog.Get(entry.id).modules)
+    WoW.chatLines = {}
+    A._shown.onConfirm()
+    local twins = 0
+    for _, e in ipairs(A.Catalog.List("loadout", "PRIEST", "general")) do if e.name == "Twin" then twins = twins + 1 end end
+    eq("saveas: duplicate after the preview refused", twins, 1)
+end
+
 -- #39: Save As carries the Link addon's off note (Link stubbed: test_sync covers Link itself).
 do
     boot(); ready(); save()
     WoW.chatLines = {}
     A.Link = { OffNote = function() return "Link is off: test" end }
-    A.Commands.saveas("Noted")
+    saveasConfirmed("Noted")
     local said = table.concat(WoW.chat(), " ")
     check("saveas: off note after the result", (said:find("Link is off", 1, true) or 0) > (said:find("Saved", 1, true) or 1e9), said)
     A.Link = nil
     WoW.chatLines = {}
-    A.Commands.saveas("Plain")
+    saveasConfirmed("Plain")
     said = table.concat(WoW.chat(), " ")
     check("saveas: no Link addon, no note", said:find("Saved", 1, true) and not said:find("Link is off", 1, true), said)
 end
@@ -1245,7 +1284,7 @@ do
     eq("A39: stale refused", m, nil)
     check("A39: says load again or Save As", tostring(why):find("changed since you loaded", 1, true) ~= nil, why)
     eq("A39: catalog untouched", A.Catalog.Get(entry.id).version, "ffffffffffff:1")
-    A.Commands.saveas("Fork")
+    saveasConfirmed("Fork")
     local fork
     for _, e in ipairs(A.Catalog.List("loadout", "PRIEST", "general")) do if e.name == "Fork" then fork = e end end
     check("A09: fork made", fork ~= nil)
@@ -1309,7 +1348,7 @@ do
     -- (b) Never had a Character comparison: keys kept, said so; never set by a Save.
     boot(); ready(); main()
     G.bindingSet = 1
-    A.Commands.saveas("Fresh")
+    saveasConfirmed("Fresh")
     eq("fresh under account: no key comparison", rec().after.bindings, nil)
     G.bindingSet = 2
     G.keys["9"] = "ACTIONBUTTON9"
@@ -1777,7 +1816,7 @@ do
     boot(); ready(); main()
     A.Commands.save()
     check("no record: Save points to Save As", table.concat(WoW.chat(), " "):find("saveas", 1, true) ~= nil)
-    A.Commands.saveas("Mine")
+    saveasConfirmed("Mine")
     eq("fresh Save As: record set", A.Catalog.Get(rec().id).name, "Mine")
     check("fresh Save As: comparison set", rec().after ~= nil)
     loadedAlt()
@@ -2064,7 +2103,7 @@ do
     check("#48: next Save is a no-op", L.PlanSave().noop)
     -- Save As keeps it too, and so does a Save on the new entry.
     WoW.chatLines = {}
-    A.Commands.saveas("Fork")
+    saveasConfirmed("Fork")
     local fork
     for _, x in ipairs(A.Catalog.List("loadout", "PRIEST", "general")) do if x.name == "Fork" then fork = x end end
     eq("#48: Save As keeps the loadout's spell", fork and fork.modules.actions[3].id, 2060)

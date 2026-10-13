@@ -45,6 +45,43 @@ do
         and rawget(env, "SlashCmdList") == nil)
 end
 
+-- The windows (#9): Preview.lua and Panel.lua, built and their handlers run
+-- (tabs, buttons, a preview's Cancel and confirm, hiding), in one recording
+-- environment. No Blizzard global written, and no StaticPopup ever shown.
+do
+    WoW.reset()
+    local popups = 0
+    StaticPopup_Show = function() popups = popups + 1 end
+    local unitClass = UnitClass
+    UnitClass = unitClass or function() return "Priest", "PRIEST", 5 end   -- the client always has it
+    local writes = {}
+    local env = setmetatable({}, { __index = _G, __newindex = function(t, k, v)
+        if PROTECTED[k] then writes[#writes + 1] = k end
+        rawset(t, k, v)
+    end })
+    env._G = env
+    for _, f in ipairs({ "Preview.lua", "Panel.lua" }) do
+        local chunk = assert(loadfile(f))
+        setfenv(chunk, env)
+        chunk("AltStableSync", {})
+    end
+    local ASS = env.AltStableSync
+    ASS.Panel.Show()                                   -- no SavedVariables: the blocked view
+    for _, b in pairs(ASS.Panel._W.tabs) do b:Click() end
+    ASS.Panel._Frame().scripts.OnUpdate(ASS.Panel._Frame(), 1)
+    ASS.Preview.Show({ title = "t", lines = { "x" }, confirm = "OK", onConfirm = function() end,
+                       check = { text = "c", checked = true, onToggle = function() end } })
+    env.AltStableSyncPreview.check:Click()
+    env.AltStableSyncPreview.cancel:Click()
+    ASS.Preview.Show({ title = "t", lines = { "x" }, onConfirm = function() end })
+    env.AltStableSyncPreview.confirm:Click()
+    ASS.Panel.Toggle()
+    check("windows write no Blizzard global", #writes == 0, table.concat(writes, ","))
+    eq("windows show no StaticPopup", popups, 0)
+    check("windows register for Escape by field", #UISpecialFrames == 2 and rawget(env, "UISpecialFrames") == nil)
+    StaticPopup_Show, UnitClass = nil, unitClass
+end
+
 -- The recorder itself must catch every spelling (mutation check, in memory).
 for _, src in ipairs({
     "SlashCmdList = SlashCmdList or {}",

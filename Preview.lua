@@ -9,7 +9,7 @@
 -- One frame, reused; parented to UIParent; Escape and Cancel close it without
 -- writing anything. onConfirm runs at most once per Show.
 -- Preview.Shown() is the options table on screen now, or nil.
--- #9 replaces this with the two-tab panel; the contract stays.
+-- The panel (#9) opens these same previews; it never writes by itself.
 ------------------------------------------------------------
 
 AltStableSync = AltStableSync or {}
@@ -21,16 +21,9 @@ ASS.Preview = Preview
 local frame
 local current
 
-local function Build()
-    local f = CreateFrame("Frame", "AltStableSyncPreview", UIParent, "BackdropTemplate")
-    f:SetSize(460, 320)
-    f:SetPoint("CENTER")
-    f:SetFrameStrata("DIALOG")
-    f:EnableMouse(true)
-    f:SetMovable(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
+-- The LibGlass "large" look, or the dialog backdrop without LibGlass. The
+-- panel (#9) uses it too.
+function Preview.Glass(f)
     local Glass = LibStub and LibStub("LibGlass-1.0", true)
     if Glass and Glass.New then
         local okG, inst = pcall(Glass.New, Glass)
@@ -41,6 +34,25 @@ local function Build()
                         tile = true, tileSize = 32, edgeSize = 32,
                         insets = { left = 11, right = 12, top = 12, bottom = 11 } })
     end
+end
+
+-- Called whenever the preview shows or hides (the panel's Escape handling).
+Preview.onVisibility = nil
+local function Visibility()
+    if Preview.onVisibility then pcall(Preview.onVisibility) end
+end
+
+local function Build()
+    local f = CreateFrame("Frame", "AltStableSyncPreview", UIParent, "BackdropTemplate")
+    f:SetSize(460, 320)
+    f:SetPoint("CENTER")
+    f:SetFrameStrata("DIALOG")
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    Preview.Glass(f)
     tinsert(UISpecialFrames, "AltStableSyncPreview")
     f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     f.title:SetPoint("TOPLEFT", 20, -18)
@@ -88,7 +100,9 @@ local function Build()
         local cb = self.onCancel
         self.onConfirm, self.onCancel = nil, nil
         if cb then cb() end
+        Visibility()
     end)
+    f:SetScript("OnShow", Visibility)
     f.cancel:SetScript("OnClick", function() f:Hide() end)
     f.confirm:SetScript("OnClick", function()
         local cb = f.onConfirm
@@ -119,6 +133,9 @@ function Preview.Show(opts)
     end
     frame:Show()
     current = opts
+    -- Said here too: the frame is created shown, so its first Show() fires
+    -- no OnShow.
+    Visibility()
 end
 
 function Preview.Shown() return current end

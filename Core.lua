@@ -290,6 +290,11 @@ end
 local function SlashHandler(msg)
     local cmd, rest = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
     cmd = (cmd or ""):lower()
+    -- The window shows the refused or uninitialised state itself (#9).
+    if cmd == "" and ASS.Panel then
+        ASS.Panel.Toggle()
+        return
+    end
     if ASS.disabled then
         Print("disabled: " .. ASS.disabled)
         return
@@ -317,7 +322,7 @@ local function SlashHandler(msg)
     elseif ASS.Commands and type(ASS.Commands[cmd]) == "function" then
         ASS.Commands[cmd](rest)
     else
-        Print("commands: /altsync status | saveas <name> | save [drop] | list | load <id or name> | backups | restore [n or op]" .. " | rename <id or name> <new name> | delete <id or name> | conflicts | resolve <id or name> theirs or mine | link")
+        Print("commands: /altsync (the window) | status | saveas <name> | save [drop] | list | load <id or name> | backups | restore [n or op]" .. " | rename <id or name> <new name> | delete <id or name> | conflicts | resolve <id or name> theirs or mine | link")
     end
 end
 ASS.SlashHandler = SlashHandler

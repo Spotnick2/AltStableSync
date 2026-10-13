@@ -26,7 +26,10 @@ Backups.RING = RING
 
 local function Now() return time and time() or 0 end
 
--- This character's record. Only writers pass `create`: reading never adds one.
+-- This character's record. Only writers pass `create`: reading never adds or
+-- repairs anything (the panel reads it every half second, #9). A record
+-- without a ring still shows its pinned operation and first backup; only the
+-- writers give it a ring.
 local function Store(create)
     local guid = UnitGUID("player")
     if type(guid) ~= "string" then return nil end
@@ -36,9 +39,11 @@ local function Store(create)
         all[guid] = { ring = {} }
     end
     local b = all[guid]
-    b.ring = b.ring or {}
+    if create and type(b.ring) ~= "table" then b.ring = {} end
     return b
 end
+
+local function Ring(b) return type(b.ring) == "table" and b.ring or {} end
 
 -- Newest first; past RING the oldest goes, except `keep` (the snapshot a
 -- restore is reading from, so restoring the oldest backup can be retried).
@@ -96,11 +101,11 @@ function Backups.Get(which)
     if which == "op" then return b.operation and b.operation.snapshot end
     if which == "first" then return b.firstSeen end
     local n = tonumber(which)
-    if n and n == math.floor(n) then return b.ring[n] end
+    if n and n == math.floor(n) then return Ring(b)[n] end
     return nil
 end
 
 function Backups.List()
     local b = Store()
-    return b and b.ring or {}, b and b.operation, b and b.firstSeen
+    return b and Ring(b) or {}, b and b.operation, b and b.firstSeen
 end
