@@ -85,6 +85,24 @@ for _, dir in ipairs({ "docs", "tests", "Tools", ".claude", ".github" }) do
     check(".pkgmeta ignores " .. dir, pkg:find("\n  %- " .. dir:gsub("%.", "%%.") .. "\r?\n") ~= nil)
 end
 
+-- The key binding (#62): Bindings.xml in the root, its own category, and the
+-- one call it makes exists. The client loads it by name, not from the TOC.
+do
+    local b = read("Bindings.xml")
+    check("Bindings.xml exists", b ~= nil)
+    b = b or ""
+    check("binding name and its own category",
+          b:find('<Binding%s+name="ALTSTABLESYNC_TOGGLE"%s+category="AltStableSync">') ~= nil)
+    check("binding opens or closes the window", b:find("AltStableSync.Panel.Toggle()", 1, true) ~= nil)
+    check("binding's line text is defined", (read("Minimap.lua") or ""):find("BINDING_NAME_ALTSTABLESYNC_TOGGLE = ", 1, true) ~= nil)
+    check("Bindings.xml not listed in the TOC", not toc:find("Bindings.xml", 1, true))
+    for _, fn in ipairs({ "AltStableSync_OnAddonCompartmentClick", "AltStableSync_OnAddonCompartmentEnter",
+                          "AltStableSync_OnAddonCompartmentLeave" }) do
+        check("TOC names compartment function " .. fn, toc:find(": " .. fn, 1, true) ~= nil)
+        check("Minimap.lua defines " .. fn, (read("Minimap.lua") or ""):find(fn, 1, true) ~= nil)
+    end
+end
+
 -- Never a StaticPopup (it taints Blizzard's dialog pool; measured 70205): no
 -- shipped file may call or touch one.
 for _, line in ipairs(files) do

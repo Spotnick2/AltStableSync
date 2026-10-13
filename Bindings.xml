@@ -1,0 +1,9 @@
+<Bindings>
+	<!-- #62: Key Bindings > AltStableSync, a section of its own (a binding with no
+	     category lands in "Other"; measured in Gnomesweeper). The client loads this
+	     file by name, not from the TOC. The line's text is BINDING_NAME_ALTSTABLESYNC_TOGGLE
+	     in Minimap.lua. It only opens or closes the window. -->
+	<Binding name="ALTSTABLESYNC_TOGGLE" category="AltStableSync">
+		AltStableSync.Panel.Toggle()
+	</Binding>
+</Bindings>

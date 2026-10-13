@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **A minimap button.** Left-click opens or closes the window, right-click opens your backups, and
+  dragging moves it around the minimap. Its tooltip names your save target. `/altsync minimap`
+  hides or shows it.
+- **In the minimap's addon list** too, even with the button hidden.
+- **A key binding:** Key Bindings > AltStableSync opens or closes the window. No key is set by
+  default.
+
 ## v0.1.1
 
 - **A smaller download.** The package no longer includes the sharing library's tests, tools and

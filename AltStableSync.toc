@@ -7,6 +7,9 @@
 ## OptionalDeps: AltStable
 ## SavedVariables: AltStableSyncDB
 ## SavedVariablesPerCharacter: AltStableSyncChar
+## AddonCompartmentFunc: AltStableSync_OnAddonCompartmentClick
+## AddonCompartmentFuncOnEnter: AltStableSync_OnAddonCompartmentEnter
+## AddonCompartmentFuncOnLeave: AltStableSync_OnAddonCompartmentLeave
 
 Libs\LibGlass-1.0\LibGlass-1.0.xml
 Libs\LibStub\LibStub.lua
@@ -23,3 +26,4 @@ Loadout.lua
 Preview.lua
 Commands.lua
 Panel.lua
+Minimap.lua
