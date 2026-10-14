@@ -85,8 +85,9 @@ Measured on the live client unless marked otherwise. Details and sources:
 - **Characters on one WoW account share account-wide SavedVariables** without any network.
 - **Beta WTF layout** (measured on disk): `_classic_beta_\WTF\Account\<id>\SavedVariables\`; realm
   folder `70\`; character folders `Name-Surname\`. Blizzard's server-side binding, macro and Edit
-  Mode caches are per flavour. The live Forever folder name is **unknown**, so tools take explicit
-  paths.
+  Mode caches are per flavour. The live Forever folder is `_forever_` (product `wowf`, `Wow.exe`;
+  pre-installed 2026-10-14 for the stress test, its WTF layout not yet seen). Tools still take
+  explicit paths.
 - **Hard rules inherited from siblings:**
   - Never a StaticPopup; it taints Blizzard's dialog pool.
   - No protected work in combat.
