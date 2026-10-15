@@ -196,9 +196,16 @@ and keep them closed until the step ends.
 
    Check that **nothing changed** on your bars, keys or macros, and that `/altsync list` shows the
    beta catalog.
-5. **Launch gate.** Load a loadout on one character (preview, then Load). Do the same on a second
-   character, a lower-level one if possible. Exit fully, relaunch, and compare bars, keys and
-   macros with the previews. Then Restore one backup on one character, and check it's exact.
+5. **Launch gate.**
+   - **Before any Load**, on the first character, record its state outside the addon: screenshots of
+     every action bar, of the macro window's character tab with each macro's text, and of the keys on
+     Action Bar 1 (Key Bindings). The addon's own backup is not an independent record.
+   - Load a loadout on that character (preview, then Load). Do the same on a second character, a
+     lower-level one if possible. Exit fully, relaunch, and compare bars, keys and macros with the
+     previews.
+   - On the first character, Restore the backup that Load took (`/altsync backups`, the newest).
+     **Exit fully again**, relaunch, and compare its bars, macros and keys with the screenshots.
+     Restore passes only if they match after that restart (A43).
 6. **Link.** Log both live accounts in at the same time. `/altsync link` on each (paste both).
    Save As a loadout on one, and check it appears in `/altsync list` on the other. After a full
    exit I check `<live>\...\AltStableSyncLink.lua` is a new store, never the beta's.
