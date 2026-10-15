@@ -21,11 +21,12 @@ manual-changelog:
 # Comments on their own lines only - the packager's YAML reader keeps an inline
 # "# ..." as part of the value (measured in GlassUnitFrames' migration).
 externals:
-  # r5: what the v0.1.0 panel was tried with in game (only tests and docs
-  # changed after it).
+  # r7 (7d0dca4): a disabled surface's wash and edge glow now dim too. r6
+  # added the opt-in clean preset; this addon uses neither, and the default
+  # look is the same as r5's, which the v0.1.0 panel was tried with in game.
   Libs/LibGlass-1.0:
     url: https://github.com/Spotnick2/LibGlass
-    tag: r5
+    tag: r7
   # r5 (76fedef): messages mode and SendTo, both required by Link.lua.
   Libs/LibAccountSync-1.0:
     url: https://github.com/Spotnick2/LibAccountSync
