@@ -5,8 +5,11 @@ Operational notes for working on AltStableSync against a WoW: Forever client. Th
 
 ## Install and paths
 
-The beta is `C:\Program Files (x86)\World of Warcraft\_classic_beta_` (executable `WowB.exe`). The
-**live Forever flavour folder is not known yet** — every script takes an explicit path for it.
+The beta is `C:\Program Files (x86)\World of Warcraft\_classic_beta_` (executable `WowB.exe`).
+**Live Forever** is `C:\Program Files (x86)\World of Warcraft\_forever_` (Battle.net product `wowf`,
+executable `Wow.exe`), pre-installed on 2026-10-14 at 1.60.1.70245 for the stress test. It has no
+`WTF` or `Interface\AddOns` folder until its first launch. Its layout is expected to match the
+beta's below; the stress test confirms it. Every script still takes an explicit path.
 
 Measured on the beta, account `50284074#1`:
 
@@ -33,7 +36,7 @@ the whole point of this addon on day one.
 ## Verifying persistence
 
 `/reload` proves nothing about persistence — the process and its Lua state survive it. To prove a
-write: **Exit Game**, wait for `WowB.exe` to go, relaunch, and check the value in game or in the
+write: **Exit Game**, wait for `WowB.exe` (live: `Wow.exe`) to go, relaunch, and check the value in game or in the
 file. SavedVariables are written only on a clean logout/exit or `/reload`. **Close the client
 before editing or copying any SavedVariables file**, or the client overwrites it on exit.
 
@@ -44,7 +47,7 @@ See `.claude/skills/client-update/SKILL.md`. The API dump itself is taken from t
 ## Full-exit proof
 
 A claim that something persisted (a loaded loadout, a restored backup, a saved catalog entry, a
-binding set) needs: note the values, **Exit Game**, wait for `WowB.exe` to go, relaunch, log the same
+binding set) needs: note the values, **Exit Game**, wait for `WowB.exe` (live: `Wow.exe`) to go, relaunch, log the same
 character in, compare. Record the build, the character (class, race, faction, level) and what was
 compared. A `/reload`, a stub test or the HTML mockup is never that proof.
 
@@ -163,6 +166,63 @@ The beta backups travel inside the file, as inert data: they are keyed by beta c
 live characters don't share. Live per-character files stay as they are; every character starts
 fresh only on a fresh live install.
 
+## Stress test (2026-10-19): the launch dress rehearsal
+
+Blizzard's stress test runs on the **live** client (`_forever_`, build 1.60.1.70245), so it rehearses
+day one for real (#13). 70245 is older than the beta's measured build: the addon says once at login
+that it "is not the measured build", which is expected. Between the 70245 and 70338 API dumps only
+voice chat, Discord and LFG changed, nothing AltStableSync calls.
+
+Below, `<beta>` is `C:\Program Files (x86)\World of Warcraft\_classic_beta_` and `<live>` is
+`C:\Program Files (x86)\World of Warcraft\_forever_`. Close every WoW client before steps 2 and 3,
+and keep them closed until the step ends.
+
+**Before the 19th, on beta:**
+- Loadouts saved for the classes you'll play on the stress test (two classes if you can).
+- One loadout's Share string, and your Edit Mode layout's Share string, each in a text file.
+- A copy of `<beta>\WTF\Account` outside the game folder.
+
+**On the 19th:**
+1. **First launch.** Log each live WoW account in once (any character), then exit fully. Tell me:
+   I read `<live>\WTF\Account` from disk (the account folders, the realm folder, the character
+   folders).
+2. **Transfer**, for each live account, dry run first:
+   `pwsh Tools/Transfer-Profiles.ps1 -From "<beta>\WTF\Account\<id>" -To "<live>\WTF\Account\<id>" -WhatIf`
+   then the same without `-WhatIf`.
+3. **Deploy:** `pwsh Tools/deploy.ps1 -AddOnsPath "<live>\Interface\AddOns"`.
+4. **First login with the addon.** `/console scriptErrors 1`, then paste:
+   - the lines `/altsync status` prints;
+   - `/run print(WOW_PROJECT_ID, GetCurrentRegion(), GetBuildInfo())`.
+
+   Check that **nothing changed** on your bars, keys or macros, and that `/altsync list` shows the
+   beta catalog.
+5. **Launch gate.**
+   - **Before any Load**, on the first character, record its state outside the addon: screenshots of
+     every action bar, of the macro window's character tab with each macro's text, and of the keys on
+     Action Bar 1 (Key Bindings). The addon's own backup is not an independent record.
+   - Load a loadout on that character (preview, then Load). Do the same on a second character, a
+     lower-level one if possible. Exit fully, relaunch, and compare bars, keys and macros with the
+     previews.
+   - On the first character, Restore the backup that Load took (`/altsync backups`, the newest).
+     **Exit fully again**, relaunch, and compare its bars, macros and keys with the screenshots.
+     Restore passes only if they match after that restart (A43).
+6. **Link.** Log both live accounts in at the same time. `/altsync link` on each (paste both).
+   Save As a loadout on one, and check it appears in `/altsync list` on the other. After a full
+   exit I check `<live>\...\AltStableSyncLink.lua` is a new store, never the beta's.
+7. **Share / Import.** Import the beta loadout's Share string on a live character.
+8. **Edit Mode by hand** (the section above): import your layout's string as an Account layout,
+   and note which characters log in on a different layout afterwards.
+
+Paste any Lua error whole. After the session I read the SavedVariables from disk, record the results
+in `docs/forever-api-notes.md` (a `## Build 70245, live client` section) and on #13.
+
+**After the stress test.** The live `AltStableSync.lua` stays on disk, so the launch-day transfer
+refuses ("already exists"). On launch day, either run it with `-Force` (it replaces the stress-test
+catalog with the beta's, after keeping a verified `.pre-transfer-<time>` copy), or keep the live file
+if it's the one you want. Stress-test backups are keyed by stress-test character GUIDs: inert if
+Blizzard wipes the characters. Whether Blizzard's server-side keys, macros and layouts from the
+stress test survive to launch is unknown.
+
 ## Nov 4 launch — day-one checklist (draft; finalised by #13)
 
 1. **Before launch, on beta:** UI setups and loadouts saved for every class and category you play;
@@ -174,6 +234,8 @@ fresh only on a fresh live install.
    the real one (#12, see "Transfer" below):
    `pwsh Tools/Transfer-Profiles.ps1 -From "<beta>\WTF\Account\<id>" -To "<live>\WTF\Account\<id>" -WhatIf`
    `pwsh Tools/Transfer-Profiles.ps1 -From "<beta>\WTF\Account\<id>" -To "<live>\WTF\Account\<id>"`
+   (`<beta>` = `...\_classic_beta_`, `<live>` = `...\_forever_`). If the stress test left an
+   `AltStableSync.lua` there, it refuses: add `-Force` (see "After the stress test" above).
 4. `pwsh Tools/deploy.ps1 -AddOnsPath "<live>\Interface\AddOns"`.
 5. Log in one character. **Nothing is written.** If a UI setup exists, the addon *offers* it
    ("Make yourself at home"); beta backups stay inert (they are keyed by beta GUIDs).
