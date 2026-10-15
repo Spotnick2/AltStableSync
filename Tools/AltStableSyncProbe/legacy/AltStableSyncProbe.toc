@@ -1,0 +1,9 @@
+## Interface: 16001
+## Title: AltStableSync Probe
+## Notes: Throwaway measurement addon for AltStableSync issue #2. Never shipped - lives under Tools/.
+## Author: Spotnick
+## Version: dev
+## SavedVariables: AltStableSyncProbeDB
+## SavedVariablesPerCharacter: AltStableSyncProbeCharDB
+
+Probe.lua

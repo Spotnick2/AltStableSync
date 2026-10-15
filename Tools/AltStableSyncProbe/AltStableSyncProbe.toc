@@ -1,9 +1,10 @@
 ## Interface: 16001
-## Title: AltStableSync Probe
-## Notes: Throwaway measurement addon for AltStableSync issue #2. Never shipped - lives under Tools/.
+## Title: AltStableSyncProbe
+## Notes: Throwaway probe for AltStableSync: the launch rehearsal's independent record of bars, macros, keys and the pet bar. A ForeverProbe module: /fp sync
 ## Author: Spotnick
 ## Version: dev
+## Dependencies: ForeverProbe
+## OptionalDeps: AltStableSync
 ## SavedVariables: AltStableSyncProbeDB
-## SavedVariablesPerCharacter: AltStableSyncProbeCharDB
 
-Probe.lua
+AltStableSyncProbe.lua

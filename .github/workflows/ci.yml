@@ -43,6 +43,8 @@ jobs:
           echo "LIBACCOUNTSYNC=$RUNNER_TEMP/LibAccountSync" >> "$GITHUB_ENV"
 
       - name: Unit tests
+        env:
+          FOREVERPROBE_OPTIONAL: "1"   # ForeverProbe is private and local: test_probe.lua runs locally only
         run: |
           set -e
           failed=0
