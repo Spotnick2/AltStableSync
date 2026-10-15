@@ -7,17 +7,15 @@ allowed-tools: [Bash, Read, Edit, Write, Grep, Glob]
 
 # A new Forever client build
 
-AltStableSync does **not** own the API dump tooling: the dump is taken and converted from the
-AltStable repo (`..\AltStable\Tools\ForeverAPIDump\`, see AltStable's own `client-update` skill),
-which writes `C:\Projects\WoW\References\forever-api-<version>.<build>.md`. This skill starts once that
-file exists.
+The dump, its conversion and the diff are shared by every project: run the `forever-api-dump`
+skill (`C:\Projects\WoW\.claude\skills\forever-api-dump\SKILL.md`) first. This skill covers what
+is specific to AltStableSync.
 
 ## Who does what
 
 | Step | Who | What |
 |---|---|---|
-| 1. Dump + convert | owner + the AltStable session | `/apidump`, `/reload`, `Convert-Dump.ps1` in AltStable |
-| 2. Diff | you | `pwsh ..\AltStable\Tools\ForeverAPIDump\Compare-Dumps.ps1` |
+| 1-2. Dump, convert, diff | owner + you | the shared `forever-api-dump` skill |
 | 3. Sync-surface check | you | grep this repo for every changed name (below) |
 | 4. Behaviour | **owner** pastes `/run` lines; you judge them | the probe lines recorded with each `## Build` section of `docs/forever-api-notes.md` (from #2 on) |
 | 5. Bump PR | you | edits, tests, branch, PR (commit/push only when asked; never merge without approval) |
