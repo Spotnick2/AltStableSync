@@ -189,29 +189,34 @@ and keep them closed until the step ends.
 2. **Transfer**, for each live account, dry run first:
    `pwsh Tools/Transfer-Profiles.ps1 -From "<beta>\WTF\Account\<id>" -To "<live>\WTF\Account\<id>" -WhatIf`
    then the same without `-WhatIf`.
-3. **Deploy:** `pwsh Tools/deploy.ps1 -AddOnsPath "<live>\Interface\AddOns"`.
-4. **First login with the addon.** `/console scriptErrors 1`, then paste:
-   - the lines `/altsync status` prints;
-   - `/run print(WOW_PROJECT_ID, GetCurrentRegion(), GetBuildInfo())`.
+3. **Deploy** the addon and the probe (#85, a ForeverProbe module; `..\ForeverProbe` must be
+   checked out):
+   `pwsh Tools/deploy.ps1 -AddOnsPath "<live>\Interface\AddOns"`
+   `pwsh Tools/deploy-probe.ps1 -AddOnsPath "<live>\Interface\AddOns"`
+4. **The launch gate, as a procedure.** On the first character: `/console scriptErrors 1`, then
+   `/fp steps sync stress`, and follow the panel's buttons. It takes an **independent record** of
+   the bars, macros, every bound key and the pet bar (read from the client, not from AltStableSync)
+   and compares them, with its Yes/No questions, Note box and screenshots saved to disk:
+   - before any Load, after the Load, and after a full exit, on two characters (the second a
+     lower-level one if you can), each with Character Specific Keybindings on;
+   - then a Restore of the backup that Load took on the first character, and another full exit
+     (A43).
 
-   Check that **nothing changed** on your bars, keys or macros, and that `/altsync list` shows the
-   beta catalog.
-5. **Launch gate.**
-   - **Before any Load**, on the first character, record its state outside the addon: screenshots of
-     every action bar, of the macro window's character tab with each macro's text, and of the keys on
-     Action Bar 1 (Key Bindings). The addon's own backup is not an independent record.
-   - Load a loadout on that character (preview, then Load). Do the same on a second character, a
-     lower-level one if possible. Exit fully, relaunch, and compare bars, keys and macros with the
-     previews.
-   - On the first character, Restore the backup that Load took (`/altsync backups`, the newest).
-     **Exit fully again**, relaunch, and compare its bars, macros and keys with the screenshots.
-     Restore passes only if they match after that restart (A43).
-6. **Link.** Log both live accounts in at the same time. `/altsync link` on each (paste both).
+   Its first steps log AltStableSync's version, schema and catalog counts (the beta catalog should
+   be there), and ask whether anything changed at login. ForeverProbe records the build,
+   `WOW_PROJECT_ID`, region and locale itself. Nothing is pasted back: I read
+   `AltStableSyncProbe.lua` and `ForeverProbe.lua` from disk after its last `/reload`. Steps 5
+   to 7 stay by hand.
+5. **Link.** Log both live accounts in at the same time. `/altsync link` on each (paste both).
    Save As a loadout on one, and check it appears in `/altsync list` on the other. After a full
    exit I check `<live>\...\AltStableSyncLink.lua` is a new store, never the beta's.
-7. **Share / Import.** Import the beta loadout's Share string on a live character.
-8. **Edit Mode by hand** (the section above): import your layout's string as an Account layout,
+6. **Share / Import.** Import the beta loadout's Share string on a live character.
+7. **Edit Mode by hand** (the section above): import your layout's string as an Account layout,
    and note which characters log in on a different layout afterwards.
+
+**Dry run on beta first** (before the 19th): `pwsh Tools/deploy-probe.ps1`, then the same
+`/fp steps sync stress` on two beta characters, to find what the procedure gets wrong while there's
+time to fix it.
 
 Paste any Lua error whole. After the session I read the SavedVariables from disk, record the results
 in `docs/forever-api-notes.md` (a `## Build 70245, live client` section) and on #13.
