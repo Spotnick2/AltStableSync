@@ -320,10 +320,16 @@ S.Answer(true)                                       -- 6: Loaded, as previewed
 S.Run(); shoot()                                     -- 7: after Load
 eq("the after-Load check passes", result(7).check, "PASS")
 
--- Evidence is frozen: going Back can't replace it.
+-- Evidence is frozen: recording a label again keeps the first record.
 do
-    local ok, err = pcall(NS.Capture, "first", "before")
-    check("before can't be recorded again", not ok and tostring(err):find("already recorded", 1, true) ~= nil, err)
+    local mine = DB.rehearsal.records[FIRST]
+    local kept = mine.before
+    G.actions[7] = { kind = "spell", id = 75 }
+    local ok, out = pcall(NS.Capture, "first", "before")
+    G.actions[7] = nil
+    check("recording before again doesn't throw", ok, out)
+    check("it says the record is kept", tostring(out):find("kept", 1, true) ~= nil, out)
+    check("and the record is the same one, unread", mine.before == kept and mine.before.slots[7] == false)
 end
 
 S.Next()                                             -- 8: log in the second character
@@ -378,15 +384,15 @@ S.Answer(false)                                      -- 22: it was a /reload
 S.Run()                                              -- 23
 eq("a No to the full exit: not a PASS, whatever the state", result(23).check, "FAIL")
 check("saying it's unverified", tostring(result(23).checkDetail):find("unverified", 1, true) ~= nil, result(23).checkDetail)
-S.Back(); S.Back()
+-- The owner corrects the answer through the panel's own buttons.
+local kept = DB.rehearsal.records[FIRST].afterRestoreExit
+S.Click("back"); S.Click("back")
 eq("Back to the question", at(), AT.exit2)
-S.Answer(true)
-do
-    local ok, err = pcall(NS.Capture, "first", "afterRestoreExit")
-    check("the record already taken is frozen", not ok and tostring(err):find("already recorded", 1, true) ~= nil, err)
-end
-S.Next()                                             -- past the record: its check runs again on Next
+S.Click("primary")                                   -- Yes
+eq("at the record step again", at(), AT.exit2 + 1)
+S.Click("primary")                                   -- Record: keeps the evidence, checks it again
 eq("with a Yes, the same record passes", result(23).check, "PASS", result(23).checkDetail)
+check("on the same record", DB.rehearsal.records[FIRST].afterRestoreExit == kept)
 
 FP.run = FP.run + 1
 S.Resume()                                           -- 24: /reload

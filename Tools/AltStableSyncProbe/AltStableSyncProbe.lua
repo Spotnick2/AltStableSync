@@ -422,10 +422,12 @@ end
 
 -- Record `label` for `role` ("first" | "second") into the rehearsal. Refuses
 -- (throws: the step stays) BEFORE reading anything when it's the wrong
--- character, the label already holds a complete record (evidence is frozen
--- once taken: going Back can't replace it, only a new rehearsal can), the
--- addon isn't ready, or, for a `before`, character keybindings are off. An
--- incomplete record may be taken again.
+-- character, the addon isn't ready, or, for a `before`, character
+-- keybindings are off. Evidence is frozen once complete: when the label
+-- already holds a complete record, Record keeps it, reads nothing, and the
+-- step completes so its check runs again on that same evidence (after the
+-- owner corrected an answer, say). Only a new rehearsal replaces it. An
+-- incomplete record is taken again.
 function NS.Capture(role, label)
     local R = rehearsal()
     assert(LABELS[role] and LABELS[role][label], "unknown record " .. tostring(role) .. " " .. tostring(label))
@@ -439,7 +441,9 @@ function NS.Capture(role, label)
     end
     local mine = R.records[guid] or {}
     if mine[label] and mine[label].valid then
-        error(role .. " " .. label .. " is already recorded: evidence can't be replaced; start a new rehearsal", 0)
+        local kept = ("%s %s: already recorded, kept (evidence is never replaced); checking it again"):format(role, label)
+        say(kept)
+        return kept
     end
     local A = rawget(_G, "AltStableSync")
     if type(A) ~= "table" or type(A.Ready) ~= "table" then error("AltStableSync isn't loaded", 0) end
