@@ -170,8 +170,8 @@ fresh only on a fresh live install.
 
 Blizzard's stress test runs on the **live** client (`_forever_`, build 1.60.1.70245), so it rehearses
 day one for real (#13). 70245 is older than the beta's measured build: the addon says once at login
-that it "is not the measured build", which is expected. Between the 70245 and 70338 API dumps only
-voice chat, Discord and LFG changed, nothing AltStableSync calls.
+that it "is not the measured build", which is expected. Between the 70245 and 70450 API dumps only
+voice chat, Discord, LFG, mail and a few unrelated functions changed, nothing AltStableSync calls.
 
 Below, `<beta>` is `C:\Program Files (x86)\World of Warcraft\_classic_beta_` and `<live>` is
 `C:\Program Files (x86)\World of Warcraft\_forever_`. Close every WoW client before steps 2 and 3,
