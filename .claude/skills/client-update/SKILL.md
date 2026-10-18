@@ -1,6 +1,6 @@
 ---
 name: client-update
-description: Handle a new WoW Forever client build for AltStableSync - check the newest API dump in C:\Projects\WoW\References against what this addon calls, re-verify the measured behaviour that sync depends on, and prepare the MEASURED_ON_BUILD bump PR. Use when the owner says there is a new build/API bump, "apidump done", "new api build", or the addon's login warning names a build other than MEASURED_ON_BUILD.
+description: Handle a new WoW Forever client build for AltStableSync - check the newest API dump in C:\Projects\WoW\References\Forever\api against what this addon calls, re-verify the measured behaviour that sync depends on, and prepare the MEASURED_ON_BUILD bump PR. Use when the owner says there is a new build/API bump, "apidump done", "new api build", or the addon's login warning names a build other than MEASURED_ON_BUILD.
 version: 1.0.0
 allowed-tools: [Bash, Read, Edit, Write, Grep, Glob]
 ---

@@ -43,8 +43,8 @@ standalone, `## OptionalDeps: AltStable`, with a sidebar tab when AltStable is p
   written without a preview and a click (M1 milestone).
 
 The canonical, addon-agnostic Forever porting guide is
-`C:\Projects\WoW\References\PORTING-TBC-TO-FOREVER.md`; the API dump is
-`C:\Projects\WoW\References\forever-api-<version>.<build>.md`. Addon-specific measurements go in
+`C:\Projects\WoW\References\Docs\PORTING-TBC-TO-FOREVER.md`; the API dump is
+`C:\Projects\WoW\References\Forever\api\forever-api-<version>.<build>.md`. Addon-specific measurements go in
 `docs/forever-api-notes.md`. `MEASURED_ON_BUILD` in `Core.lua` names the build they describe.
 
 ## The safety rules (non-negotiable)
