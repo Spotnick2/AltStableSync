@@ -54,7 +54,7 @@ sibling repos, and Lua parsing in PowerShell.
 ## Facts established by research (treat as given)
 
 Measured on the live client unless marked otherwise. Details and sources:
-`docs/forever-api-notes.md` (this addon) and `C:\Projects\WoW\References\PORTING-TBC-TO-FOREVER.md`
+`docs/forever-api-notes.md` (this addon) and `C:\Projects\WoW\References\Docs\PORTING-TBC-TO-FOREVER.md`
 (shared).
 
 - **One spec per class, no dual spec** (70245). So a loadout's specialization is a **category the

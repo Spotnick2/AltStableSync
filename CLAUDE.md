@@ -37,7 +37,7 @@ PowerShell) we replaced with something simpler and testable.
   the design the owner rejected on 2026-10-08.
 - **Forever, not Classic/TBC.** Vanilla content on the Mainline client; many Classic globals are
   gone (`PickupSpell`, `GetSpellInfo`, `MAX_ACCOUNT_MACROS`, `EasyMenu`…). Use what the API dump in
-  `C:\Projects\WoW\References` declares and `docs/forever-api-notes.md` measures.
+  `C:\Projects\WoW\References\Forever\api` declares and `docs/forever-api-notes.md` measures.
 - **No StaticPopups**, measured to taint.
 - **SavedVariables shape** — there is real data on disk once M1 ships; a shape change needs a schema
   bump and a test, and the addon refuses newer schemas.

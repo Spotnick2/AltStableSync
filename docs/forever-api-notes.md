@@ -1,8 +1,8 @@
 # Forever API notes — AltStableSync
 
 Facts **measured on the client** that this addon depends on. Declared shapes come from the dump
-(`C:\Projects\WoW\References\forever-api-<version>.<build>.md`); addon-agnostic findings belong in the
-canonical `C:\Projects\WoW\References\PORTING-TBC-TO-FOREVER.md`, not here.
+(`C:\Projects\WoW\References\Forever\api\forever-api-<version>.<build>.md`); addon-agnostic findings belong in the
+canonical `C:\Projects\WoW\References\Docs\PORTING-TBC-TO-FOREVER.md`, not here.
 
 `MEASURED_ON_BUILD` in `Core.lua` names the build this file describes: **70291**. The 70245 measurements below were
 re-checked on 70291 (see its section).
