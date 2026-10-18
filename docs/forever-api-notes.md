@@ -4,8 +4,8 @@ Facts **measured on the client** that this addon depends on. Declared shapes com
 (`C:\Projects\WoW\References\Forever\api\forever-api-<version>.<build>.md`); addon-agnostic findings belong in the
 canonical `C:\Projects\WoW\References\Docs\PORTING-TBC-TO-FOREVER.md`, not here.
 
-`MEASURED_ON_BUILD` in `Core.lua` names the build this file describes: **70291**. The 70245 measurements below were
-re-checked on 70291 (see its section).
+`MEASURED_ON_BUILD` in `Core.lua` names the build this file describes: **70450**. The 70245 measurements below were
+re-checked on each later build (see the `## Build` sections, newest first).
 
 ## Declared on 70235 (from the dump; the documented surface of 70245 is identical)
 
@@ -148,6 +148,35 @@ Event counts: UPDATE_BINDINGS ×5, UPDATE_MACROS ×6, ACTIONBAR_SLOT_CHANGED ×2
 - The decode round trip is **deep-equal**, and integer keys survive as numbers.
 - **Consequence for #17/#18:** the envelope is small. A whole profile fits well under LibAccountSync's 16 KB.
 - **Measured with real loadouts on 70291 (#5, 2026-10-09):** the largest of 5 saved entries, covering every bar, encodes to **1,508 bytes** on the wire (envelope plus id and version).
+
+## Build 1.60.1.70450 (2026-10-18) - client update, re-checked by hand
+
+The client was built on Oct 15, 2026, interface 16001. The addon was never bumped to 70374 or 70425;
+the diff below runs straight from 70338, so it covers both.
+
+**Dump diff against 70338** (`Compare-Dumps.ps1`):
+- **Mail:** `C_SecureTransfer.GetMailInfo` is replaced by `GetMailSendInfo` and `GetMailReceiveInfo`
+  (structures `MailSendInfo`, `MailReceiveInfo`); new `TakeMailMoney` and mail events.
+- **Changed:** `C_GameRules.SetSDHDToggleValue` takes a usage location; `PLAYER_LEVEL_UP` gained
+  `spiritDelta`; `PVPScoreInfo` gained `gender`; `GroupBuffItem` gained `displaySpellID`.
+- **Removed:** `C_GamepadTargeting.HasReticleHoverTarget`.
+- **New functions:** auction house, Battle.net friends, external event URLs, credits, cursor
+  position and visibility, pet and off-hand combat stats.
+- **Unchanged:** every function and event this addon or LibAccountSync calls; widget methods (7530).
+  None of the changed names appear in the addon, its stubs or `Libs/`.
+
+**Behaviour.** The owner ran these lines on an orc mage, out of combat:
+
+| `/run` line | 70450 | Same as 70338? |
+|---|---|---|
+| `print(GetBuildInfo())` | `1.60.1 70450 Oct 15 2026 16001` | build moved, as expected |
+| `print(WOW_PROJECT_ID, GetCurrentRegion(), GetNumSpecGroups(), C_SpecializationInfo.GetActiveSpecGroup(), GetCurrentBindingSet())` | `18 110 1 1 1` | yes; binding set 1 (Account) because this character never switched to character bindings |
+| `for s=1,12 do local t,i,u=GetActionInfo(s) if t then print(s,t,i,u,GetActionText(s)) end end` | `spell <id> spell` for spells; `item <id> nil` for items | yes |
+| `local s=1 print(GetActionInfo(s)) print(GetActionText(s)) PickupAction(s) print(GetCursorInfo()) PlaceAction(s)` (Attack) | `spell 6603 spell`; no text; `spell 1 spell 6603 nil` | yes: a spell on the cursor reports its book slot, book type and spell ID |
+| `for s=1,120 do if GetActionInfo(s)=="macro" then print(s,GetActionInfo(s)) print(GetActionText(s)) PickupAction(s) print(GetCursorInfo()) PlaceAction(s) return end end print("no macro")` (account macro `Defias`, no spell) | `5 macro 2`; `Defias`; `macro 2` | yes: no third value, and the cursor gives the real index |
+| `local E=C_EncodingUtil local s=E.EncodeBase64(E.CompressString(E.SerializeCBOR({s=1,a="x"}))) local t=E.DeserializeCBOR(E.DecompressString(E.DecodeBase64(s))) print(#s,t.s,t.a)` | `16 1 x` | yes, round trip intact |
+
+**Verdict:** nothing this addon depends on changed. `MEASURED_ON_BUILD` is now 70450.
 
 ## Build 1.60.1.70338 (2026-10-11) - client update, covered by in-game use
 

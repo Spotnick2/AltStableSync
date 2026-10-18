@@ -24,7 +24,7 @@ function WoW.reset()
     WoW.frames = {}
     WoW.chatLines = {}
     WoW.drawn = {}
-    WoW.build = "70338"
+    WoW.build = "70450"
     WoW.now = 1760000000          -- what time() returns; test_catalog moves it forward
     WoW.clock = 1000              -- what GetTime() returns (seconds of uptime)
     WoW.metadata = { AltStableSync = { Version = "dev" } }
