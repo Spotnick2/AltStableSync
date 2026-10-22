@@ -15,7 +15,7 @@ local A, P, W
 local function boot(ui)
     WoW.reset()
     for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Game.lua", "Pet.lua", "Backups.lua",
-                         "Ready.lua", "Loadout.lua", "UISetup.lua", "Preview.lua", "Commands.lua", "Panel.lua" }) do
+                         "Ready.lua", "Loadout.lua", "UISetup.lua", "Preview.lua", "Reload.lua", "Commands.lua", "Panel.lua" }) do
         assert(loadfile(f))("AltStableSync", {})
     end
     WoW.fire("ADDON_LOADED", "AltStableSync")
@@ -68,6 +68,53 @@ do
     UI.editMode = true
     P.Refresh()
     check("edit mode: Apply off", not W.uiApply:IsEnabled())
+end
+
+-- #91 review: bars written by an apply only show after a reload, so the
+-- report opens "Reload to finish" with a secure /reload button. It never
+-- reloads by itself, and it never opens or stays open in combat.
+do
+    boot()
+    local R = A.Reload._test
+    local b = R.button
+    check("reload: a secure action button", tostring(b.template):find("SecureActionButtonTemplate", 1, true) ~= nil)
+    eq("reload: macro type", b:GetAttribute("type"), "macro")
+    eq("reload: runs /reload", b:GetAttribute("macrotext"), "/reload")
+    check("reload: both mouse edges", b.clicks and b.clicks[1] == "AnyUp" and b.clicks[2] == "AnyDown")
+    check("reload: parented to UIParent, not to the prompt", b.parent == UIParent)
+    for _, p in ipairs(b.points or {}) do
+        check("reload: placed against UIParent only", p[2] == UIParent)
+    end
+    check("reload: hidden at load", not R.prompt:IsShown() and not b:IsShown())
+
+    A.Catalog.Create("ui", { name = "Bars" }, { bars = { [2] = true, [3] = true, [4] = true, [5] = true,
+        [6] = false, [7] = false, [8] = false } })
+    P.Open("ui")
+    W.uiApply:Click()
+    check("reload: the preview says so", lines():find("change after a reload", 1, true) ~= nil)
+    previewFrame().confirm:Click()
+    check("reload: asked after the apply", R.prompt:IsShown() and b:IsShown())
+    R.prompt.later:Click()
+    check("reload: Later hides both", not R.prompt:IsShown() and not b:IsShown())
+
+    -- Restoring the bars asks again; combat starting hides both.
+    A.Commands.restore("1")
+    previewFrame().confirm:Click()
+    check("reload: asked after a restore of the bars", R.prompt:IsShown() and b:IsShown())
+    WoW.fire("PLAYER_REGEN_DISABLED")
+    check("reload: combat start hides both", not R.prompt:IsShown() and not b:IsShown())
+    G.combat = true
+    check("reload: never opens in combat", A.Reload.Ask("x") == false and not b:IsShown())
+    G.combat = false
+
+    -- An apply that doesn't touch the bars doesn't ask.
+    boot()
+    R = A.Reload._test
+    A.Catalog.Create("ui", { name = "Meter" }, { cvars = { damageMeterEnabled = "1" } })
+    P.Open("ui")
+    W.uiApply:Click()
+    previewFrame().confirm:Click()
+    eq("reload: no bars, no prompt", R.prompt:IsShown(), false)
 end
 
 finish("test_uisetup_panel")
