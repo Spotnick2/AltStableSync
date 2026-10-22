@@ -80,7 +80,8 @@ do
     local names = {}
     for _, t in ipairs(base.modules.chat.tabs) do names[t.name] = t.groups end
     check("saveas: Whispers tab", names.Whispers and #names.Whispers == 2)
-    check("saveas: Voice tab captured as a tab", names.Voice ~= nil)
+    check("saveas: an empty tab (Voice) left out", names.Voice == nil)
+    check("saveas: and said so", lines():find('Chat: tab "Voice" receives no message types; not saved.', 1, true) ~= nil)
     check("saveas: Combat Log never captured", names["Combat Log"] == nil)
     eq("saveas: the template is this character's save target", AltStableSyncChar.loaded.ui.id, base.id)
     check("saveas: valid at the catalog", A.Catalog.GoodUIModules(base.modules))
@@ -143,7 +144,7 @@ end
 do
     newCharacterWith(base)
     A.Commands.ui("apply Base")
-    UI.cvars.enableMouseoverCast = "1"
+    UI.cvars.raidFramesDisplayPowerBars = "1"
     A._shown.onConfirm()
     check("stale: refused", said("Something changed since the preview"), table.concat(WoW.chat(), " | "))
     eq("stale: nothing written", #UI.calls, 0)
@@ -213,22 +214,22 @@ do
     local e = A.Catalog.Copy(base)
     e.modules.cvars.raidFramesHealthBarColorBG = "red"
     e.modules.cvars.someOtherCVar = "1"
-    newCharacterWith(e, { cvarInfo = { enableMouseoverCast = { secure = true },
+    newCharacterWith(e, { cvarInfo = { raidFramesDisplayPowerBars = { secure = true },
                                        damageMeterEnabled = { account = true } } })
     local cv = UI.cvars
     cv.someOtherCVar = "0"
     A.Commands.ui("apply Base")
     local text = lines()
-    check("cvar: protected skipped", text:find("Mouseover casting: protected by the client", 1, true) ~= nil)
+    check("cvar: protected skipped", text:find("Raid frames: power bars: protected by the client", 1, true) ~= nil)
     check("cvar: not allowlisted skipped", text:find("someOtherCVar: not supported on this build", 1, true) ~= nil)
     check("cvar: bad value skipped", text:find("the saved value isn't valid", 1, true) ~= nil)
     check("cvar: account scope said", text:find("Damage meter: off -> on (affects this WoW account)", 1, true) ~= nil)
     A._shown.onConfirm()
-    eq("cvar: protected never written", UI.count("SetCVar:enableMouseoverCast"), 0)
+    eq("cvar: protected never written", UI.count("SetCVar:raidFramesDisplayPowerBars"), 0)
     eq("cvar: not allowlisted never written", UI.count("SetCVar:someOtherCVar"), 0)
     eq("cvar: bad value never written", UI.count("SetCVar:raidFramesHealthBarColorBG"), 0)
-    eq("cvar: others written", UI.cvars.raidFramesDisplayPowerBars, "1")
-    check("cvar: skipped keys recorded", AltStableSyncChar.loaded.ui.skipped.cvars.enableMouseoverCast ~= nil)
+    eq("cvar: others written", UI.cvars.raidFramesDisplayClassColor, "1")
+    check("cvar: skipped keys recorded", AltStableSyncChar.loaded.ui.skipped.cvars.raidFramesDisplayPowerBars ~= nil)
 end
 
 -- Chat: click-through dock, unknown group, no free window, two tabs of a name.
@@ -282,6 +283,39 @@ do
     eq("preflight: zero group mutations", mutated, 0)
     check("preflight: XP still there", has(UI.windows[1].groups, "COMBAT_XP_GAIN"))
     check("preflight: restore partial", said("Not everything was restored"))
+end
+
+-- Measured on the beta (2026-10-22): General holds types outside
+-- ChatTypeGroup (SYSTEM_NOMENU, BN_WHISPER_INFORM, ...). One that stays as
+-- it is never blocks the restore; only one to add or remove does.
+do
+    newCharacterWith(base, { windows = { [1] = { name = "General", shown = true, docked = true,
+        groups = { "SAY", "SYSTEM", "SYSTEM_NOMENU", "BN_WHISPER_INFORM" } } } })
+    A.Commands.ui("apply Base")
+    A._shown.onConfirm()
+    check("unknown kept: XP added", has(UI.windows[1].groups, "COMBAT_XP_GAIN"))
+    UI.calls = {}
+    WoW.chatLines = {}
+    A.Commands.restore("1")
+    A._shown.onConfirm()
+    check("unknown kept: XP removed", not has(UI.windows[1].groups, "COMBAT_XP_GAIN"))
+    check("unknown kept: the unknown types untouched", has(UI.windows[1].groups, "SYSTEM_NOMENU")
+        and has(UI.windows[1].groups, "BN_WHISPER_INFORM"))
+    eq("unknown kept: one group written", UI.count("RemoveMessageGroup:COMBAT_XP_GAIN"), 1)
+    check("unknown kept: restore complete", said("Restored:") and not said("Not everything was restored"))
+end
+
+-- Mouseover casting is protected on Forever (measured 2026-10-22): an
+-- entry holding it keeps it, and it is never written.
+do
+    local e = A.Catalog.Copy(base)
+    e.modules.cvars.enableMouseoverCast = "1"
+    newCharacterWith(e)
+    UI.cvars.enableMouseoverCast = "0"
+    A.Commands.ui("apply Base")
+    check("mouseover: not supported", lines():find("enableMouseoverCast: not supported on this build", 1, true) ~= nil)
+    A._shown.onConfirm()
+    eq("mouseover: never written", UI.count("SetCVar:enableMouseoverCast"), 0)
 end
 
 -- PR #91 review P2: a chat read that fails at write time stops before any

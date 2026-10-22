@@ -36,13 +36,14 @@ local PRESET, ACCOUNT, CHARACTER = 0, 1, 2
 
 -- The CVars a UI setup may write (#16), each with its value domain. Checked
 -- again at plan time with GetCVarInfo (secure, read-only, locked: skipped).
+-- Not here: enableMouseoverCast, which GetCVarInfo reports as protected
+-- (measured on the beta, 2026-10-22): it stays a manual setting.
 local CVARS = {
     damageMeterEnabled = "bool",
     damageMeterResetOnNewInstance = "bool",
     raidFramesDisplayClassColor = "bool",
     raidFramesDisplayPowerBars = "bool",
     raidFramesHealthBarColorBG = "color",
-    enableMouseoverCast = "bool",
 }
 UISetup.CVARS = CVARS
 local DOMAIN = {
@@ -56,7 +57,6 @@ local CVAR_LABEL = {
     raidFramesDisplayClassColor = "Raid frames: class colours",
     raidFramesDisplayPowerBars = "Raid frames: power bars",
     raidFramesHealthBarColorBG = "Raid frames: health bar background",
-    enableMouseoverCast = "Mouseover casting",
 }
 local BAR_LABEL = { [2] = "Action Bar 2", [3] = "Action Bar 3", [4] = "Action Bar 4", [5] = "Action Bar 5",
                     [6] = "Action Bar 6", [7] = "Action Bar 7", [8] = "Action Bar 8" }
@@ -336,6 +336,10 @@ function UISetup.Capture()
                         notes[#notes + 1] = ('Chat: two tabs are named "%s"; neither is saved.'):format(w[i].name)
                         count[w[i].name] = -1
                     end
+                elseif count[w[i].name] == 1 and #w[i].groups == 0 then
+                    -- Channels only, or nothing (an addon's console tab): a
+                    -- setup carries message types, so it would arrive empty.
+                    notes[#notes + 1] = ('Chat: tab "%s" receives no message types; not saved.'):format(w[i].name)
                 elseif count[w[i].name] == 1 and #chat.tabs < 9 then
                     chat.tabs[#chat.tabs + 1] = { name = w[i].name, groups = Copy(w[i].groups) }
                 end
@@ -831,18 +835,23 @@ function UISetup.PlanRestore(which)
                     cant(label, "changed since the backup, left as is")
                     return
                 end
-                -- Both sets must be ones the client knows, so this restore's
-                -- own backup could put the window back (Codex round 3).
-                for _, g in ipairs(groups) do
-                    if not Known(g) then cant(label, g .. " is not a chat type on this client; left as is") return end
-                end
-                for _, g in ipairs(now.groups) do
-                    if not Known(g) then cant(label, "it holds " .. g .. ", unknown to this client; left as is") return end
-                end
                 local want, has = Set(groups), Set(now.groups)
                 local add, remove = {}, {}
                 for _, g in ipairs(groups) do if not has[g] then add[#add + 1] = g end end
                 for _, g in ipairs(now.groups) do if not want[g] then remove[#remove + 1] = g end end
+                -- Every group to add or remove must be one the client knows, so
+                -- the write can reach the target and this restore's own backup
+                -- could put the window back (Codex round 3). A type outside
+                -- ChatTypeGroup that stays as it is is never written: General
+                -- holds seven such on Forever (SYSTEM_NOMENU, BN_WHISPER_INFORM,
+                -- ...; measured 2026-10-22), so requiring every type to be known
+                -- made General impossible to restore.
+                for _, g in ipairs(add) do
+                    if not Known(g) then cant(label, g .. " is not a chat type on this client; left as is") return end
+                end
+                for _, g in ipairs(remove) do
+                    if not Known(g) then cant(label, "it holds " .. g .. ", unknown to this client; left as is") return end
+                end
                 if #add + #remove > 0 then
                     plan.chat.add[#plan.chat.add + 1] = { slot = slot, name = now.name, groups = add, remove = remove,
                                                           from = Copy(now.groups), exact = Copy(groups) }

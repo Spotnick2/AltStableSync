@@ -686,8 +686,9 @@ refuses any backup with a kind.
 - **Action bars 2-8:** `SetActionBarToggles` with all seven values (measured), so
   `enableMultiActionBars` has one owner.
 - **Settings** (#16): the allowlist `damageMeterEnabled`, `damageMeterResetOnNewInstance`,
-  `raidFramesDisplayClassColor`, `raidFramesDisplayPowerBars`, `enableMouseoverCast` ("0"/"1") and
-  `raidFramesHealthBarColorBG` (8 hex digits). At plan time each is checked with `GetCVarInfo`:
+  `raidFramesDisplayClassColor`, `raidFramesDisplayPowerBars` ("0"/"1") and
+  `raidFramesHealthBarColorBG` (8 hex digits). `enableMouseoverCast` is not on it: `GetCVarInfo`
+  reports it protected (measured on the beta, 2026-10-22), so it stays a manual setting. At plan time each is checked with `GetCVarInfo`:
   secure, read-only or locked is skipped; account-stored says "affects this WoW account". A name
   outside this build's list, or a value outside its domain, stays in the entry and is skipped.
 - **Chat** (#10): window 1 by role (its name is the player's), custom tabs by a unique name among the
@@ -698,7 +699,9 @@ refuses any backup with a kind.
   click-through (docking would change that for the whole dock). Apply never removes a group from an
   existing window, closes, renames, moves or re-docks one, or touches channels, colours or position.
   **Restore** sets each snapshotted window's groups back exactly (window identified by slot and name;
-  every wanted **and** current group must be known to the client, else the window is left alone),
+  every group it would add **or remove** must be known to the client, else the window is left alone;
+  a type outside `ChatTypeGroup` that stays as it is never blocks it: General holds seven on Forever,
+  `SYSTEM_NOMENU`, `BN_WHISPER_INFORM` and others, measured on the beta, 2026-10-22),
   adding before removing, each read back. Every chat write (#91 review) first re-reads the window: a
   failed read stops before any write, and the window must still hold what the preview saw. After its
   writes the whole window is read again and must be exactly the target (a restore, a new tab) or hold
@@ -709,7 +712,9 @@ refuses any backup with a kind.
   no restore since. It updates only the parts the entry has; a part or setting the apply skipped keeps
   the entry's value, as do unknown keys and groups this client doesn't know. Chat saves the windows as
   they are now, so groups a window had before an additive apply join the entry; the preview lists each
-  group added or removed. **Save As** captures all four parts.
+  group added or removed. **Save As** captures all four parts;
+  a tab that receives no message types (channels only, or an addon's console tab) is left out and
+  said so.
 - **Addon settings** (#22, #23): later, provider by provider. Never assign arbitrary SavedVariables
   or another addon's profile keys. A field never has two owners (UI setup vs loadout).
 
