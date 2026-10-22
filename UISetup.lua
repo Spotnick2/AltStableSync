@@ -272,6 +272,114 @@ local function FreeSlots(w)
 end
 
 ------------------------------------------------------------
+-- The damage meter (Blizzard_DamageMeter, Mainline source; UNMEASURED on
+-- Forever: the PR's in-game check). Only Blizzard's own DamageMeter methods
+-- write; DamageMeterPerCharacterSettings is Blizzard's and never touched here
+-- (measured, #29). Window 1 is the primary: it can't be hidden, moved or
+-- locked, and its place is the Edit Mode layout's.
+------------------------------------------------------------
+
+local DM_METHODS = { "GetSessionWindow", "GetMaxSessionWindowCount", "ShowNewSecondarySessionWindow",
+                     "SetSessionWindowDamageMeterType", "SetSessionWindowSessionID", "SetSessionWindowLocked",
+                     "HideSessionWindow" }
+local DM_WINDOW = { "GetDamageMeterType", "GetSessionType", "GetSessionID", "IsLocked", "IsShown" }
+local UNSUPPORTED = "not supported on this build"
+
+-- Blizzard's DamageMeter frame, or nil plus why (a visible skip).
+local function MeterAPI()
+    local dm = DamageMeter
+    if type(dm) ~= "table" then return nil, UNSUPPORTED end
+    for _, k in ipairs(DM_METHODS) do
+        if type(dm[k]) ~= "function" then return nil, UNSUPPORTED end
+    end
+    local t, s = Enum and Enum.DamageMeterType, Enum and Enum.DamageMeterSessionType
+    if type(t) ~= "table" or type(s) ~= "table" or s.Overall ~= 0 or s.Current ~= 1 then return nil, UNSUPPORTED end
+    return dm
+end
+
+local function KnownMeterType(v)
+    if type(v) ~= "number" then return false end
+    for _, x in pairs(Enum.DamageMeterType) do if x == v then return true end end
+    return false
+end
+local function KnownSession(v) return v == 0 or v == 1 end
+
+local METER_TYPE_LABEL = { [0] = "Damage Done", [1] = "DPS", [2] = "Healing Done", [3] = "HPS", [4] = "Absorbs",
+                           [5] = "Interrupts", [6] = "Dispels", [7] = "Damage Taken", [8] = "Avoidable Damage Taken",
+                           [9] = "Deaths", [10] = "Enemy Damage Taken" }
+local function MeterTypeText(v) return METER_TYPE_LABEL[v] or ("meter type " .. tostring(v)) end
+local function SessionText(v)
+    if v == 1 then return "Current Segment" elseif v == 0 then return "Overall" end
+    if v == nil then return "a single fight" end
+    return "segment " .. tostring(v)
+end
+
+local function Plain(v)
+    if issecretvalue then
+        local ok, secret = pcall(issecretvalue, v)
+        if not ok or secret then return false end
+    end
+    return type(v) == "number" and v == v and v > -100000 and v < 100000
+end
+local function Round(v) return math.floor(v * 10 + 0.5) / 10 end
+
+-- A secondary window's rect, or nil: one anchor, to UIParent or the screen,
+-- plain numbers. Recorded only, never applied.
+local function ReadRect(f)
+    local ok, n = pcall(f.GetNumPoints, f)
+    if not ok or n ~= 1 then return nil end
+    local okP, point, rel, relPoint, x, y = pcall(f.GetPoint, f, 1)
+    if not okP or type(point) ~= "string" or type(relPoint) ~= "string" then return nil end
+    if rel ~= nil and rel ~= UIParent then return nil end
+    local okW, w = pcall(f.GetWidth, f)
+    local okH, h = pcall(f.GetHeight, f)
+    if not (okW and okH and Plain(x) and Plain(y) and Plain(w) and Plain(h)) or w <= 0 or h <= 0 then return nil end
+    if not (point:match("^%u+$") and relPoint:match("^%u+$")) or #point > 16 or #relPoint > 16 then return nil end
+    return { point = point, relativePoint = relPoint, x = Round(x), y = Round(y), width = Round(w), height = Round(h) }
+end
+
+-- One window: { index, shown, type, session, sessionID, locked, rect } or
+-- nil when unreadable (never taken as "absent"). No frame = not shown.
+local function ReadMeterWindow(dm, i)
+    local ok, f = pcall(dm.GetSessionWindow, dm, i)
+    if not ok then return nil end
+    if f == nil then return { index = i, shown = false } end
+    if type(f) ~= "table" then return nil end
+    for _, k in ipairs(DM_WINDOW) do if type(f[k]) ~= "function" then return nil end end
+    local okS, shown = pcall(f.IsShown, f)
+    local okT, t = pcall(f.GetDamageMeterType, f)
+    local okY, s = pcall(f.GetSessionType, f)
+    local okI, id = pcall(f.GetSessionID, f)
+    local okL, locked = pcall(f.IsLocked, f)
+    if not (okS and okT and okY and okI and okL) or type(t) ~= "number" then return nil end
+    if s ~= nil and type(s) ~= "number" then return nil end
+    return { index = i, frame = f, shown = shown and true or false, type = t, session = s, sessionID = id,
+             locked = locked and true or false, rect = i > 1 and ReadRect(f) or nil }
+end
+
+-- { max, [i] = window } for i = 1..max, or nil plus why.
+local function ReadMeter()
+    local dm, why = MeterAPI()
+    if not dm then return nil, why end
+    local ok, max = pcall(dm.GetMaxSessionWindowCount, dm)
+    if not ok or type(max) ~= "number" or max < 1 then return nil, "couldn't read the damage meter" end
+    local m = { max = math.min(max, 3) }
+    for i = 1, m.max do
+        m[i] = ReadMeterWindow(dm, i)
+        if not m[i] then return nil, "couldn't read the damage meter" end
+    end
+    if not m[1].shown then return nil, "couldn't read the damage meter" end
+    return m
+end
+
+-- The shown secondaries, in index order.
+local function ShownSecondaries(m)
+    local out = {}
+    for i = 2, m.max do if m[i].shown then out[#out + 1] = i end end
+    return out
+end
+
+------------------------------------------------------------
 -- Blocked and capture
 ------------------------------------------------------------
 

@@ -52,6 +52,7 @@ function U.setup(opts)
     for i = 1, 10 do
         _G["ChatFrame" .. i] = { id = i, GetID = function(self) return self.id end }
     end
+    U.setupMeter(opts)
 end
 
 local function call(name)
@@ -171,3 +172,160 @@ function FCF_OpenNewWindow(name, noDefaultChannels)
     end
 end
 function FCF_Close() error("FCF_Close must never be called by AltStableSync", 2) end
+
+------------------------------------------------------------
+-- The damage meter (Blizzard_DamageMeter): a copy of the Mainline mixin's
+-- window logic (wow-ui-source live, 12.1.5 (70448), DamageMeter.lua and
+-- DamageMeterSessionWindow.lua). UNMEASURED on Forever: the PR's in-game
+-- check is what proves the client matches. Driven by WoW.ui.setup{ meter = {
+--   windows = { [i] = { type, sessionType, sessionID, locked, shown, rect } } } }
+-- (window 1 always exists and is shown) or { noMeter = true } (API absent).
+-- U.dmSaved is Blizzard's DamageMeterPerCharacterSettings: only this stub's
+-- "Blizzard" code writes it, as only Blizzard's SetSavedWindowData does.
+------------------------------------------------------------
+
+Enum = Enum or {}
+Enum.DamageMeterType = { DamageDone = 0, Dps = 1, HealingDone = 2, Hps = 3, Absorbs = 4, Interrupts = 5,
+                         Dispels = 6, DamageTaken = 7, AvoidableDamageTaken = 8, Deaths = 9, EnemyDamageTaken = 10 }
+Enum.DamageMeterSessionType = { Overall = 0, Current = 1, Expired = 2 }
+
+local MAX_DM = 3
+
+local function NewSessionWindow(owner, i)
+    local w = { index = i, shown = false, owner = owner,
+                rect = { point = "TOPLEFT", relativeTo = UIParent, relativePoint = "TOPLEFT",
+                         x = (i - 1) * 40, y = (i - 1) * -40, width = 300, height = 200 } }
+    function w:GetDamageMeterType() return self.damageMeterType end
+    function w:GetSessionType() return self.sessionType end
+    function w:GetSessionID() return self.sessionID end
+    function w:IsLocked() return self.isLocked end
+    function w:IsShown() return self.shown end
+    function w:Show() self.shown = true end
+    function w:Hide() self.shown = false end
+    function w:GetSessionWindowIndex() return self.index end
+    function w:GetNumPoints() return self.rect and 1 or 0 end
+    function w:GetPoint(n)
+        local r = self.rect
+        if n ~= 1 or not r then return nil end
+        return r.point, r.relativeTo, r.relativePoint, r.x, r.y
+    end
+    function w:GetWidth() return self.rect and self.rect.width end
+    function w:GetHeight() return self.rect and self.rect.height end
+    _G["DamageMeterSessionWindow" .. i] = w
+    return w
+end
+
+local function SaveWindow(i, d)
+    U.dmSaved.windowDataList[i] = U.dmSaved.windowDataList[i] or {}
+    local s = U.dmSaved.windowDataList[i]
+    s.damageMeterType, s.sessionType = d.damageMeterType, d.sessionType
+    s.shown = d.sessionWindow and d.sessionWindow:IsShown() or false
+    s.locked = d.locked
+end
+
+local function Setup(dm, i, d)
+    local w = d.sessionWindow or NewSessionWindow(dm, i)
+    d.sessionWindow = w
+    w.damageMeterType, w.sessionType, w.sessionID = d.damageMeterType, d.sessionType, d.sessionID
+    w:Show()
+    if d.locked then w.isLocked = true end
+end
+
+local function NewDamageMeter()
+    local dm = { windowDataList = {}, sessionType = Enum.DamageMeterSessionType.Overall }
+    local function data(w) return w.index, dm.windowDataList[w.index] end
+    function dm:GetSessionWindow(i) return self.windowDataList[i] and self.windowDataList[i].sessionWindow or nil end
+    function dm:GetMaxSessionWindowCount() return MAX_DM end
+    function dm:GetCurrentSessionWindowCount()
+        local n = 0
+        for _, d in pairs(self.windowDataList) do if d.sessionWindow and d.sessionWindow:IsShown() then n = n + 1 end end
+        return n
+    end
+    function dm:ShowNewSecondarySessionWindow()
+        call("ShowNewSecondarySessionWindow")
+        if self:GetCurrentSessionWindowCount() >= MAX_DM then return end
+        -- An existing window that isn't shown is reused with its old data.
+        for i = 2, MAX_DM do
+            local d = self.windowDataList[i]
+            if d and (d.sessionWindow == nil or not d.sessionWindow:IsShown()) then
+                Setup(self, i, d)
+                SaveWindow(i, d)
+                after("ShowNewSecondarySessionWindow")
+                return
+            end
+        end
+        for i = 2, MAX_DM do
+            if not self.windowDataList[i] then
+                local d = { damageMeterType = Enum.DamageMeterType.DamageDone, sessionType = self.sessionType }
+                self.windowDataList[i] = d
+                Setup(self, i, d)
+                SaveWindow(i, d)
+                after("ShowNewSecondarySessionWindow")
+                return
+            end
+        end
+    end
+    function dm:HideSessionWindow(w)
+        call("HideSessionWindow:" .. tostring(w and w.index))
+        if w == nil or w == self:GetSessionWindow(1) then return end
+        local i, d = data(w)
+        d.sessionWindow:Hide()
+        SaveWindow(i, d)
+        after("HideSessionWindow")
+    end
+    function dm:SetSessionWindowDamageMeterType(w, t)
+        call("SetSessionWindowDamageMeterType:" .. w.index)
+        if U.dmIgnore == "type" then return end   -- a client that drops the write
+        local i, d = data(w)
+        d.damageMeterType = t
+        SaveWindow(i, d)
+        w.damageMeterType = t
+        after("SetSessionWindowDamageMeterType")
+    end
+    function dm:GetSessionWindowDamageMeterType(w) local _, d = data(w); return d.damageMeterType end
+    function dm:SetSessionWindowSessionID(w, sessionType, sessionID)
+        call("SetSessionWindowSessionID:" .. w.index)
+        local i, d = data(w)
+        d.sessionType, d.sessionID = sessionType, sessionID
+        SaveWindow(i, d)
+        w.sessionType, w.sessionID = sessionType, sessionID
+        after("SetSessionWindowSessionID")
+    end
+    function dm:SetSessionWindowLocked(w, locked)
+        call("SetSessionWindowLocked:" .. w.index)
+        local i, d = data(w)
+        d.locked = locked
+        SaveWindow(i, d)
+        w.isLocked = locked
+        after("SetSessionWindowLocked")
+    end
+    return dm
+end
+
+function U.setupMeter(opts)
+    U.dmIgnore = nil
+    for i = 1, MAX_DM do _G["DamageMeterSessionWindow" .. i] = nil end
+    if opts.noMeter then
+        DamageMeter, DamageMeterPerCharacterSettings = nil, nil
+        return
+    end
+    U.dmSaved = { windowDataList = {} }
+    DamageMeterPerCharacterSettings = U.dmSaved
+    DamageMeter = NewDamageMeter()
+    local spec = (opts.meter and opts.meter.windows) or {}
+    spec[1] = spec[1] or {}
+    for i = 1, MAX_DM do
+        local s = spec[i]
+        if s then
+            local d = { damageMeterType = s.type or Enum.DamageMeterType.DamageDone,
+                        sessionType = s.sessionType == nil and (not s.sessionID and 0 or nil) or s.sessionType,
+                        sessionID = s.sessionID, locked = s.locked }
+            DamageMeter.windowDataList[i] = d
+            if i == 1 or s.shown ~= false then
+                Setup(DamageMeter, i, d)
+                if s.rect ~= nil then d.sessionWindow.rect = s.rect or nil end
+            end
+            SaveWindow(i, d)
+        end
+    end
+end

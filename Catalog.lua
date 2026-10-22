@@ -218,6 +218,35 @@ local function Groups(t)
     return true
 end
 
+local function Int(v, lo, hi) return type(v) == "number" and v == math.floor(v) and v >= lo and v <= hi end
+local function Finite(v, lo, hi) return type(v) == "number" and v == v and v >= lo and v <= hi end
+
+-- A damage meter window's recorded rect (secondaries only; recorded, never
+-- applied): one anchor, plain finite numbers.
+local function Rect(r)
+    if type(r) ~= "table" then return false end
+    for _, k in ipairs({ "point", "relativePoint" }) do
+        if type(r[k]) ~= "string" or #r[k] > 16 or not r[k]:match("^%u+$") then return false end
+    end
+    return Finite(r.x, -100000, 100000) and Finite(r.y, -100000, 100000)
+        and Finite(r.width, 0, 100000) and r.width > 0 and Finite(r.height, 0, 100000) and r.height > 0
+end
+
+-- The damage meter part's windows: 1..3, [1] the primary (no lock, no rect).
+-- Types and segments are checked against the client at plan time, so a
+-- newer client's value isn't refused here. Unknown keys are kept.
+local function GoodMeterWindows(w)
+    local function window(x)
+        if type(x) ~= "table" or not Int(x.type, 0, 255) then return false end
+        if x.session ~= nil and not Int(x.session, 0, 15) then return false end
+        if x.locked ~= nil and type(x.locked) ~= "boolean" then return false end
+        if x.rect ~= nil and not Rect(x.rect) then return false end
+        return true
+    end
+    if not ArrayOf(w, 3, window) or w[1] == nil then return false end
+    return w[1].locked == nil and w[1].rect == nil
+end
+
 -- A UI setup's parts (#10). Every known part is optional, and a malformed
 -- one rejects the entry, here or received. Unknown keys (a newer build's
 -- parts) are kept as they are: never applied, kept by Save.
@@ -267,6 +296,10 @@ local function GoodUIModules(m)
             end
             if not ArrayOf(ch.tabs, 9, tab) then return false end
         end
+    end
+    local dm = m.meter
+    if dm ~= nil then
+        if type(dm) ~= "table" or not GoodMeterWindows(dm.windows) then return false end
     end
     return true
 end
