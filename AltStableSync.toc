@@ -30,3 +30,4 @@ Reload.lua
 Commands.lua
 Panel.lua
 Minimap.lua
+Offer.lua
