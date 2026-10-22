@@ -158,6 +158,8 @@ function NewWidget(kind, name, parent)
     return f
 end
 
+function Widget:SetFrameLevel(n) self.level = n end
+function Widget:GetFrameLevel() return self.level or 1 end
 function Widget:SetAttribute(k, v) self.attributes = self.attributes or {}; self.attributes[k] = v end
 function Widget:GetAttribute(k) return self.attributes and self.attributes[k] end
 function Widget:RegisterForClicks(...) self.clicks = { ... } end
