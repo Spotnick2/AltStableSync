@@ -704,7 +704,11 @@ refuses any backup with a kind.
   existing window, closes, renames, moves or re-docks one, or touches channels, colours or position.
   **Restore** sets each snapshotted window's groups back exactly (window identified by slot and name;
   every wanted **and** current group must be known to the client, else the window is left alone),
-  adding before removing, each read back. **Tabs an apply created are kept** and listed, as a load's
+  adding before removing, each read back. Every chat write (#91 review) first re-reads the window: a
+  failed read stops before any write, and the window must still hold what the preview saw. After its
+  writes the whole window is read again and must be exactly the target (a restore, a new tab) or hold
+  everything it held plus the additions (an apply); otherwise the operation stops and keeps its
+  backup pinned. **Tabs an apply created are kept** and listed, as a load's
   created macros are (safety rule 9): closing a tab loses its channels and position.
 - **Save** replaces the entry this character applied, at that version, only after a complete apply and
   no restore since. It updates only the parts the entry has; a part or setting the apply skipped keeps

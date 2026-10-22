@@ -449,7 +449,7 @@ function UISetup.Plan(entry)
             end
             if chat.primary then
                 local add = missing(w[1].groups, chat.primary, "Main chat window")
-                if #add > 0 then plan.chat.add[#plan.chat.add + 1] = { slot = 1, name = w[1].name, groups = add } end
+                if #add > 0 then plan.chat.add[#plan.chat.add + 1] = { slot = 1, name = w[1].name, groups = add, from = Copy(w[1].groups) } end
             end
             local creates = {}
             for _, t in ipairs(chat.tabs or {}) do
@@ -458,7 +458,7 @@ function UISetup.Plan(entry)
                     Skip(plan, "chat", ('Tab "%s"'):format(t.name), why)
                 elseif slot then
                     local add = missing(w[slot].groups, t.groups, ('Tab "%s"'):format(t.name))
-                    if #add > 0 then plan.chat.add[#plan.chat.add + 1] = { slot = slot, name = t.name, groups = add } end
+                    if #add > 0 then plan.chat.add[#plan.chat.add + 1] = { slot = slot, name = t.name, groups = add, from = Copy(w[slot].groups) } end
                 else
                     local groups = {}
                     for _, g in ipairs(t.groups) do
@@ -537,19 +537,49 @@ local function HasGroup(slot, g)
     return Set(now)[g] == true
 end
 
--- Add, then (only when told) remove, one group at a time, each read back.
-local function SetGroups(slot, add, remove)
+local function SameSet(a, b)
+    local x, y = Set(a), Set(b)
+    for g in pairs(x) do if not y[g] then return false end end
+    for g in pairs(y) do if not x[g] then return false end end
+    return true
+end
+
+-- Add, then remove, one group at a time, each read back; a failed read
+-- stops before any write (nil is never taken as "absent"). `from`: the
+-- groups the plan saw, which the window must still hold before the first
+-- write. After the writes the whole window is read again: it must be
+-- exactly `exact` (a restore, a new tab), or else hold everything it held
+-- plus `add` (an additive apply).
+local function SetGroups(slot, add, remove, from, exact)
     local frame = ChatFrameAt(slot)
     if not frame then return nil, "chat window gone" end
+    local before = ReadGroups(slot)
+    if not before then return nil, "chat window unreadable" end
+    if from and not SameSet(before, from) then return nil, "chat window changed since the preview" end
     for _, g in ipairs(add or {}) do
-        if not HasGroup(slot, g) then
+        local has = HasGroup(slot, g)
+        if has == nil then return nil, "chat window unreadable" end
+        if not has then
             local ok = pcall(ChatFrame_AddMessageGroup, frame, g)
             if not ok or HasGroup(slot, g) ~= true then return nil, "chat " .. g .. " read-back" end
         end
     end
     for _, g in ipairs(remove or {}) do
-        local ok = pcall(ChatFrame_RemoveMessageGroup, frame, g)
-        if not ok or HasGroup(slot, g) ~= false then return nil, "chat " .. g .. " read-back" end
+        local has = HasGroup(slot, g)
+        if has == nil then return nil, "chat window unreadable" end
+        if has then
+            local ok = pcall(ChatFrame_RemoveMessageGroup, frame, g)
+            if not ok or HasGroup(slot, g) ~= false then return nil, "chat " .. g .. " read-back" end
+        end
+    end
+    local after = ReadGroups(slot)
+    if not after then return nil, "chat window unreadable" end
+    if exact then
+        if not SameSet(after, exact) then return nil, "chat window doesn't match after the write" end
+    else
+        local has = Set(after)
+        for _, g in ipairs(before) do if not has[g] then return nil, "chat window lost " .. g end end
+        for _, g in ipairs(add or {}) do if not has[g] then return nil, "chat " .. g .. " read-back" end end
     end
     return true
 end
@@ -575,7 +605,7 @@ local function CreateTab(name, groups)
     if not have then return nil, "chat read-back" end
     local want, extra = Set(groups), {}
     for _, g in ipairs(have) do if not want[g] then extra[#extra + 1] = g end end
-    local okG, why = SetGroups(slot, groups, extra)
+    local okG, why = SetGroups(slot, groups, extra, have, groups)
     if not okG then return nil, why end
     return slot
 end
@@ -653,7 +683,7 @@ local function Execute(plan)
         g = Guard()
         if g then return stop(g, "chat") end
         if not SameWindow(op.slot, op.name) then return stop("chat window changed", "chat") end
-        local ok, why = SetGroups(op.slot, op.groups, op.remove)
+        local ok, why = SetGroups(op.slot, op.groups, op.remove, op.from, op.exact)
         if not ok then return stop(why, "chat") end
         result.changed = result.changed + 1
     end
@@ -814,7 +844,8 @@ function UISetup.PlanRestore(which)
                 for _, g in ipairs(groups) do if not has[g] then add[#add + 1] = g end end
                 for _, g in ipairs(now.groups) do if not want[g] then remove[#remove + 1] = g end end
                 if #add + #remove > 0 then
-                    plan.chat.add[#plan.chat.add + 1] = { slot = slot, name = now.name, groups = add, remove = remove }
+                    plan.chat.add[#plan.chat.add + 1] = { slot = slot, name = now.name, groups = add, remove = remove,
+                                                          from = Copy(now.groups), exact = Copy(groups) }
                 end
             end
             if type(chat.primary) == "table" then restore(1, nil, chat.primary.groups or {}, "Main chat window") end

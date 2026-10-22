@@ -131,6 +131,7 @@ function GetChatWindowInfo(i)
     return w.name, 14, 0, 0, 0, 1, w.shown, false, w.docked, w.uninteractable
 end
 function GetChatWindowMessages(i)
+    if U.readFail then error("GetChatWindowMessages failed", 2) end   -- a test turns reads off mid-operation
     local w = U.windows[i]
     return unpack(w and w.groups or {})
 end
@@ -155,6 +156,7 @@ function ChatFrame_RemoveMessageGroup(frame, g)
     local w = U.windows[frame.id]
     local i = indexOf(w.groups, g)
     if ChatTypeGroup[g] and i then table.remove(w.groups, i) end
+    after("RemoveMessageGroup:" .. g)
 end
 function FCF_OpenNewWindow(name, noDefaultChannels)
     call("FCF_OpenNewWindow")
