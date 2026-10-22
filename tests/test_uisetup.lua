@@ -305,6 +305,36 @@ do
     check("unknown kept: restore complete", said("Restored:") and not said("Not everything was restored"))
 end
 
+-- Beta, 2026-10-22: a setup saved before Save As left empty tabs out still
+-- held one (GABProbe). Apply never creates an empty tab, Save drops it, and
+-- the contents mark a setting this build doesn't write.
+do
+    local e = A.Catalog.Copy(base)
+    e.modules.chat.tabs[#e.modules.chat.tabs + 1] = { name = "GABProbe", groups = {} }
+    e.modules.cvars.enableMouseoverCast = "0"
+    newCharacterWith(e)
+    A.Commands.ui("apply Base")
+    check("empty tab: skipped", lines():find('Tab "GABProbe": receives no message types; not created', 1, true) ~= nil)
+    A._shown.onConfirm()
+    eq("empty tab: one tab created (Whispers)", UI.count("FCF_OpenNewWindow"), 1)
+    check("contents: unsupported marked", table.concat(S.Contents(e.modules), "\n")
+        :find("enableMouseoverCast: 0 (not supported on this build)", 1, true) ~= nil)
+
+    -- The template still has its empty tab: Save drops it from the entry.
+    boot(templateUI())
+    UI.windows[5] = { name = "GABProbe", shown = false, docked = true, groups = {} }
+    AltStableSyncDB.presets[e.id] = A.Catalog.Copy(e)
+    AltStableSyncChar.loaded = { ui = { id = e.id, version = e.version, baseline = A.Catalog.Copy(e.modules),
+                                        complete = true, skipped = {} } }
+    A.Commands.ui("save")
+    check("save: says the empty tab goes", lines():find('Tab "GABProbe": removed (it receives no message types)', 1, true) ~= nil)
+    A._shown.onConfirm()
+    local saved = A.Catalog.Get(e.id).modules.chat.tabs
+    local names = {}
+    for _, t in ipairs(saved) do names[t.name] = true end
+    check("save: empty tab dropped", not names.GABProbe and names.Whispers)
+end
+
 -- Mouseover casting is protected on Forever (measured 2026-10-22): an
 -- entry holding it keeps it, and it is never written.
 do
