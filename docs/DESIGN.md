@@ -651,7 +651,12 @@ not take a save of them.
   is named; when several exist the offer says "Choose a saved UI setup" and opens the UI setup tab.
   Buttons: Not now, and Preview and apply (or Choose). Not now, opening the preview, opening the
   tab through Choose, and applying all set `onboarding.handled`, so the offer never repeats on that
-  character.
+  character. Built in `Offer.lua`: one ticker per session from the first `PLAYER_ENTERING_WORLD`; it
+  waits while a UI setup write would be blocked (readiness, combat, Edit Mode, chat settings) or any
+  preview is open, and offers setups that are live, not conflict copies and not saved from this
+  character. Not now is the preview's own `onCancelButton`; **Escape is no answer**, so the offer
+  returns at the next login. A setup that arrives by sync later in the session is offered then.
+  `/altsync ui offer` shows it again for testing without recording an answer.
 - **Edge states:**
 
   | State | Copy |

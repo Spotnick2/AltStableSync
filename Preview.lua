@@ -3,6 +3,7 @@
 -- Blizzard's dialog pool, measured 70205)
 --
 -- Preview.Show{ title, lines, confirm = "Load", onConfirm = fn, onCancel = fn,
+--               cancel = "Cancel", onCancelButton = fn,
 --               check = { text, checked, onToggle = fn(checked) } }
 -- `check`: one optional tick box ("Include character macros", #6). Ticking
 -- it writes nothing: onToggle shows a new preview of the changed plan.
@@ -103,7 +104,13 @@ local function Build()
         Visibility()
     end)
     f:SetScript("OnShow", Visibility)
-    f.cancel:SetScript("OnClick", function() f:Hide() end)
+    -- `onCancelButton` runs only for a click on this button: Escape and any
+    -- other hide run `onCancel` alone (the first-login offer's "Not now", #10).
+    f.cancel:SetScript("OnClick", function()
+        local cb = current and current.onCancelButton
+        f:Hide()
+        if cb then cb() end
+    end)
     f.confirm:SetScript("OnClick", function()
         local cb = f.onConfirm
         f.onConfirm, f.onCancel = nil, nil
@@ -125,6 +132,11 @@ function Preview.Show(opts)
     frame.content:SetHeight(math.max(10, frame.body:GetStringHeight() + 8))
     frame.scroll:SetVerticalScroll(0)
     frame.confirm:SetText(opts.confirm or "Load")
+    frame.cancel:SetText(opts.cancel or "Cancel")
+    -- A longer label ("Preview and apply") widens its button to fit.
+    local fs = frame.confirm.GetFontString and frame.confirm:GetFontString()
+    local tw = fs and fs.GetStringWidth and fs:GetStringWidth()
+    frame.confirm:SetWidth(math.max(110, (type(tw) == "number" and tw or 0) + 24))
     if opts.confirm == false then frame.confirm:Hide() else frame.confirm:Show() end
     frame.onConfirm, frame.onCancel = opts.onConfirm, opts.onCancel
     if opts.check then
