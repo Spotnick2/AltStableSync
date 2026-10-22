@@ -284,6 +284,47 @@ do
     check("preflight: restore partial", said("Not everything was restored"))
 end
 
+-- PR #91 review P2: a chat read that fails at write time stops before any
+-- chat write; nil is never taken as "absent".
+do
+    newCharacterWith(base)
+    UI.after["SetCVar:raidFramesHealthBarColorBG"] = function() UI.readFail = true end
+    A.Commands.ui("apply Base")
+    A._shown.onConfirm()
+    UI.readFail = false
+    check("read fails: stopped", said("Stopped (chat window unreadable"))
+    eq("read fails: no group added", UI.count("AddMessageGroup:COMBAT_XP_GAIN"), 0)
+    eq("read fails: no tab created", UI.count("FCF_OpenNewWindow"), 0)
+    local _, op = B.List()
+    check("read fails: pin kept", op ~= nil)
+end
+
+-- PR #91 review P1: a window that changed after the preview stops the
+-- write, and a restore is complete only when the whole window matches.
+do
+    newCharacterWith(base)
+    UI.after["SetCVar:raidFramesHealthBarColorBG"] = function() table.insert(UI.windows[1].groups, "LOOT") end
+    A.Commands.ui("apply Base")
+    A._shown.onConfirm()
+    check("drift on apply: stopped", said("chat window changed since the preview"))
+    eq("drift on apply: nothing added", UI.count("AddMessageGroup:COMBAT_XP_GAIN"), 0)
+
+    -- An apply stopped after XP was added; restoring it while something
+    -- slips another group in must not count as complete.
+    newCharacterWith(base)
+    UI.after["AddMessageGroup:COMBAT_XP_GAIN"] = function() G.combat = true end
+    A.Commands.ui("apply Base")
+    A._shown.onConfirm()
+    G.combat = false
+    UI.after = { ["RemoveMessageGroup:COMBAT_XP_GAIN"] = function() table.insert(UI.windows[1].groups, "LOOT") end }
+    WoW.chatLines = {}
+    A.Commands.restore("op")
+    A._shown.onConfirm()
+    check("drift on restore: not complete", said("Stopped (chat window doesn't match after the write"))
+    local _, op = B.List()
+    check("drift on restore: pin kept", op ~= nil and AltStableSyncChar.interrupted ~= nil)
+end
+
 -- A backup whose groups the client no longer knows: that window is left
 -- alone, nothing removed from it.
 do
