@@ -39,9 +39,13 @@ local ADDON_NAME = "AltStableSync"
 -- ({ angle, hide }), created only when the minimap button first writes one;
 -- and 9 -> 10 (#10), a stamp too: 10 adds UI setup backups (`kind = "ui"`)
 -- and the loaded record `loaded.ui`, so a schema-9 build refuses a file
--- holding a UI backup instead of restoring it as an empty loadout.
+-- holding a UI backup instead of restoring it as an empty loadout; and
+-- 10 -> 11 (the damage meter part), a stamp too: 11 adds the optional
+-- `meter` part of a UI setup and of a UI backup (with the windows that
+-- apply opened), so a schema-10 build refuses the file instead of
+-- restoring such a backup partially and calling it complete.
 -- There is no migration framework.
-local SCHEMA = 10
+local SCHEMA = 11
 ASS.SCHEMA = SCHEMA
 
 ------------------------------------------------------------
@@ -193,7 +197,7 @@ local function Validate(db, char)
         end
         dbAction = "upgrade1"
     elseif db.schema ~= SCHEMA and db.schema ~= 2 and db.schema ~= 3 and db.schema ~= 4 and db.schema ~= 5
-        and db.schema ~= 6 and db.schema ~= 7 and db.schema ~= 8 and db.schema ~= 9 then
+        and db.schema ~= 6 and db.schema ~= 7 and db.schema ~= 8 and db.schema ~= 9 and db.schema ~= 10 then
         return WrongSchema("saved data", db.schema)
     else
         for _, field in ipairs(DB_TABLES) do
@@ -223,7 +227,7 @@ local function Validate(db, char)
     elseif char.schema == nil then
         return "AltStableSyncChar has data but no schema"
     elseif char.schema ~= SCHEMA and char.schema ~= 2 and char.schema ~= 3 and char.schema ~= 4 and char.schema ~= 5
-        and char.schema ~= 6 and char.schema ~= 7 and char.schema ~= 8 and char.schema ~= 9 then
+        and char.schema ~= 6 and char.schema ~= 7 and char.schema ~= 8 and char.schema ~= 9 and char.schema ~= 10 then
         return WrongSchema("character data", char.schema)
     elseif char.loaded ~= nil and type(char.loaded) ~= "table" then
         return "AltStableSyncChar.loaded is a " .. type(char.loaded) .. ", not a table"

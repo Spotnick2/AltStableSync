@@ -15,7 +15,10 @@ dofile("tests/wow_stubs.lua")
 local BLIZZARD_GLOBALS = { "SlashCmdList", "UISpecialFrames", "StaticPopupDialogs",
                            "DEFAULT_CHAT_FRAME", "ChatFrame_AddMessageEventFilter",
                            -- the minimap button's neighbours (#62)
-                           "Minimap", "GameTooltip", "AddonCompartmentFrame" }
+                           "Minimap", "GameTooltip", "AddonCompartmentFrame",
+                           -- Blizzard's damage meter, which UI setups drive only
+                           -- through its own methods
+                           "DamageMeter", "DamageMeterPerCharacterSettings" }
 local PROTECTED = {}
 for _, g in ipairs(BLIZZARD_GLOBALS) do PROTECTED[g] = true end
 
@@ -160,6 +163,11 @@ for _, path in ipairs(shippedLua()) do
                 if code:match("^%s*" .. g .. "%s*=[^=]") then
                     check(("%s:%d does not reassign %s"):format(path, n, g), false, line)
                 end
+            end
+            -- Blizzard's damage meter SavedVariables are written by Blizzard
+            -- only (measured, #29): no addon code even names them.
+            if code:find("DamageMeterPerCharacterSettings", 1, true) then
+                check(("%s:%d never touches DamageMeterPerCharacterSettings"):format(path, n), false, line)
             end
         end
     end

@@ -1,7 +1,7 @@
 ------------------------------------------------------------
 -- UISetup.lua - UI setups: capture, plan, apply and exact restore (#10)
 --
--- A UI setup is a catalog entry of kind "ui" with up to four parts, each
+-- A UI setup is a catalog entry of kind "ui" with up to five parts, each
 -- optional (docs/DESIGN.md "UI setups: parts"):
 --   layout = { type = 1, name } | { type = 0, index, name }   -- select an existing
 --            Edit Mode layout (Account by name, preset by index); never
@@ -9,6 +9,9 @@
 --   bars   = { [2..8] = bool }      -- SetActionBarToggles
 --   cvars  = { [name] = "value" }   -- the allowlist below, each with a domain
 --   chat   = { primary = { groups }, tabs = { { name, groups } } }
+--   meter  = { windows = { { type, session }, { type, session, locked, rect } } }
+--            -- the damage meter: window 1 the primary, then the shown
+--            secondaries in index order; rect is recorded, never applied
 -- Unknown keys (a newer build's parts) are kept and never applied.
 --
 -- The rules are the loadout's (docs/DESIGN.md safety model): Plan only
@@ -28,8 +31,7 @@ local ASS = AltStableSync
 local UISetup = {}
 ASS.UISetup = UISetup
 
-local PARTS = { "layout", "bars", "cvars", "chat" }
-local KNOWN = { layout = true, bars = true, cvars = true, chat = true }
+local KNOWN = { layout = true, bars = true, cvars = true, chat = true, meter = true }
 
 -- Enum.EditModeLayoutType.
 local PRESET, ACCOUNT, CHARACTER = 0, 1, 2
@@ -279,7 +281,7 @@ end
 -- locked, and its place is the Edit Mode layout's.
 ------------------------------------------------------------
 
-local DM_METHODS = { "GetSessionWindow", "GetMaxSessionWindowCount", "ShowNewSecondarySessionWindow",
+local DM_METHODS = { "GetSessionWindow", "GetWindowDataList", "GetMaxSessionWindowCount", "ShowNewSecondarySessionWindow",
                      "SetSessionWindowDamageMeterType", "SetSessionWindowSessionID", "SetSessionWindowLocked",
                      "HideSessionWindow" }
 local DM_WINDOW = { "GetDamageMeterType", "GetSessionType", "GetSessionID", "IsLocked", "IsShown" }
@@ -338,12 +340,24 @@ local function ReadRect(f)
     return { point = point, relativePoint = relPoint, x = Round(x), y = Round(y), width = Round(w), height = Round(h) }
 end
 
--- One window: { index, shown, type, session, sessionID, locked, rect } or
--- nil when unreadable (never taken as "absent"). No frame = not shown.
-local function ReadMeterWindow(dm, i)
+-- One window: { index, shown, data, type, session, sessionID, locked, rect, frame }
+-- or nil when unreadable (never taken as "absent"). `data`: Blizzard holds
+-- settings for this index (a frame, or remembered window data a "Show new
+-- window" reopens with). Values come from the frame, else, read only, from
+-- the remembered data. No frame = not shown.
+local function ReadMeterWindow(dm, i, list)
     local ok, f = pcall(dm.GetSessionWindow, dm, i)
     if not ok then return nil end
-    if f == nil then return { index = i, shown = false } end
+    if f == nil then
+        local d = list[i]
+        if d == nil then return { index = i, shown = false, data = false } end
+        if type(d) ~= "table" or type(d.damageMeterType) ~= "number"
+            or (d.sessionType ~= nil and type(d.sessionType) ~= "number") then
+            return nil
+        end
+        return { index = i, shown = false, data = true, type = d.damageMeterType, session = d.sessionType,
+                 locked = d.locked and true or false }
+    end
     if type(f) ~= "table" then return nil end
     for _, k in ipairs(DM_WINDOW) do if type(f[k]) ~= "function" then return nil end end
     local okS, shown = pcall(f.IsShown, f)
@@ -353,8 +367,9 @@ local function ReadMeterWindow(dm, i)
     local okL, locked = pcall(f.IsLocked, f)
     if not (okS and okT and okY and okI and okL) or type(t) ~= "number" then return nil end
     if s ~= nil and type(s) ~= "number" then return nil end
-    return { index = i, frame = f, shown = shown and true or false, type = t, session = s, sessionID = id,
-             locked = locked and true or false, rect = i > 1 and ReadRect(f) or nil }
+    -- Blizzard's IsLocked is nil on a window never locked: false here.
+    return { index = i, frame = f, shown = shown and true or false, data = true, type = t, session = s,
+             sessionID = id, locked = locked and true or false, rect = i > 1 and ReadRect(f) or nil }
 end
 
 -- { max, [i] = window } for i = 1..max, or nil plus why.
@@ -362,14 +377,62 @@ local function ReadMeter()
     local dm, why = MeterAPI()
     if not dm then return nil, why end
     local ok, max = pcall(dm.GetMaxSessionWindowCount, dm)
-    if not ok or type(max) ~= "number" or max < 1 then return nil, "couldn't read the damage meter" end
+    local okL, list = pcall(dm.GetWindowDataList, dm)
+    if not ok or type(max) ~= "number" or max < 1 or not okL or type(list) ~= "table" then
+        return nil, "couldn't read the damage meter"
+    end
     local m = { max = math.min(max, 3) }
     for i = 1, m.max do
-        m[i] = ReadMeterWindow(dm, i)
+        m[i] = ReadMeterWindow(dm, i, list)
         if not m[i] then return nil, "couldn't read the damage meter" end
     end
     if not m[1].shown then return nil, "couldn't read the damage meter" end
-    return m
+    return m, nil, dm
+end
+
+-- What a window shows, as compared and fingerprinted: its type, its segment
+-- (nil with a fight id: a single fight), its lock.
+local function MeterValues(w)
+    return { type = w.type, session = w.session, sessionID = w.sessionID, locked = w.locked }
+end
+local function SameValues(a, b)
+    return a.type == b.type and a.session == b.session and a.sessionID == b.sessionID and a.locked == b.locked
+end
+
+-- The whole meter as the plan saw it (in the fingerprint): any change to a
+-- window's state, shown or remembered, makes the preview stale.
+local function MeterSeen(m)
+    local s = {}
+    for i = 1, m.max do
+        local w = m[i]
+        s[i] = { shown = w.shown, data = w.data, type = w.type, session = w.session, sessionID = w.sessionID,
+                 locked = w.locked }
+    end
+    return s
+end
+
+-- Where `n` "Show new window" calls would put windows, by Blizzard's own
+-- rule (DamageMeter.lua ShowNewSecondarySessionWindow): the lowest hidden
+-- index Blizzard holds data for (reopened as it was), else the lowest index
+-- it holds nothing for (new: Damage Done, Overall); none once max are shown.
+-- Returns { { index, reopen } }, possibly fewer than n.
+local function PredictOpens(m, n)
+    local out, taken, shown = {}, {}, 0
+    for i = 1, m.max do if m[i].shown then shown = shown + 1 end end
+    for _ = 1, n do
+        if shown >= m.max then break end
+        local pick, reopen
+        for i = 2, m.max do
+            if not pick and not taken[i] and not m[i].shown and m[i].data then pick, reopen = i, true end
+        end
+        for i = 2, m.max do
+            if not pick and not taken[i] and not m[i].data then pick, reopen = i, false end
+        end
+        if not pick then break end
+        taken[pick], shown = true, shown + 1
+        out[#out + 1] = { index = pick, reopen = reopen }
+    end
+    return out
 end
 
 -- The shown secondaries, in index order.
@@ -458,6 +521,34 @@ function UISetup.Capture()
     else
         notes[#notes + 1] = "Chat: couldn't read the chat windows; not saved."
     end
+    local dm, whyM = ReadMeter()
+    if dm then
+        local wins = {}
+        local live = { 1 }
+        for _, i in ipairs(ShownSecondaries(dm)) do live[#live + 1] = i end
+        for _, i in ipairs(live) do
+            local w = dm[i]
+            local x = { type = w.type }
+            if KnownSession(w.session) then
+                x.session = w.session
+            else
+                -- A single fight (or an expired one): tied to this
+                -- character's recent fights, so never saved.
+                notes[#notes + 1] = ("Damage meter window %d shows a single fight; its segment isn't saved."):format(i)
+            end
+            if i > 1 then
+                x.locked = w.locked
+                x.rect = w.rect
+                if not w.rect then
+                    notes[#notes + 1] = ("Damage meter window %d: position couldn't be read; not saved."):format(i)
+                end
+            end
+            wins[#wins + 1] = x
+        end
+        m.meter = { windows = wins }
+    else
+        notes[#notes + 1] = "Damage meter: " .. tostring(whyM) .. "; not saved."
+    end
     return m, notes
 end
 
@@ -485,10 +576,72 @@ end
 
 local function Empty(plan)
     return not plan.layout and not plan.bars and #plan.cvars == 0 and #plan.chat.add == 0 and #plan.chat.create == 0
+        and #plan.meter.opens == 0 and #plan.meter.sets == 0 and #plan.meter.hides == 0
+end
+
+local function NewMeterPlan() return { opens = {}, sets = {}, hides = {} } end
+
+-- The damage meter part of an apply plan. Entry window 1 is the primary;
+-- entry window k >= 2 is the (k-1)th secondary of the shown set AFTER the
+-- opens, in index order (an open may land below a shown window). Apply never
+-- hides a window or touches one beyond the entry's count; an unset field
+-- (no segment, no lock) is never written.
+local function PlanMeter(plan, want)
+    local m, why = ReadMeter()
+    if not m then
+        Skip(plan, "meter", "Damage meter", why, "*")
+        return
+    end
+    local wins = want.windows
+    plan.meter.seen = MeterSeen(m)
+    local final = ShownSecondaries(m)
+    local opens = PredictOpens(m, math.max(0, (#wins - 1) - #final))
+    local opening = {}
+    for _, o in ipairs(opens) do
+        final[#final + 1] = o.index
+        opening[o.index] = o
+    end
+    table.sort(final)
+    for k, w in ipairs(wins) do
+        local i = k == 1 and 1 or final[k - 1]
+        if not i then
+            Skip(plan, "meter", ("Damage meter: the setup's window %d"):format(k),
+                 "no free damage meter window (three are shown)", k .. ":window")
+        else
+            local label = ("Damage meter window %d"):format(i)
+            local o = opening[i]
+            local cur = m[i]
+            local op = { index = i }
+            if not KnownMeterType(w.type) then
+                Skip(plan, "meter", label .. ": " .. MeterTypeText(w.type), "not a meter type on this client", k .. ":type")
+            elseif o or cur.type ~= w.type then
+                op.type = w.type
+            end
+            if w.session ~= nil then
+                if not KnownSession(w.session) then
+                    Skip(plan, "meter", label .. ": " .. SessionText(w.session), "not a segment on this client", k .. ":session")
+                elseif o or cur.session ~= w.session or cur.sessionID ~= nil then
+                    op.session = w.session
+                end
+            end
+            if k > 1 and w.locked ~= nil and (o or cur.locked ~= w.locked) then op.locked = w.locked end
+            if o then
+                op.open = true
+                plan.meter.sets[#plan.meter.sets + 1] = op
+            elseif op.type ~= nil or op.session ~= nil or op.locked ~= nil then
+                op.from = MeterValues(cur)
+                plan.meter.sets[#plan.meter.sets + 1] = op
+            end
+        end
+    end
+    -- In the order Blizzard picks them: Execute checks each lands as predicted.
+    for _, o in ipairs(opens) do plan.meter.opens[#plan.meter.opens + 1] = { index = o.index, reopen = o.reopen } end
+    table.sort(plan.meter.sets, function(a, b) return a.index < b.index end)
 end
 
 function UISetup.Plan(entry)
-    local plan = { kind = "apply", cvars = {}, chat = { add = {}, create = {} }, skips = {}, unsupported = {} }
+    local plan = { kind = "apply", cvars = {}, chat = { add = {}, create = {} }, meter = NewMeterPlan(), skips = {},
+                   unsupported = {} }
     if type(entry) ~= "table" or entry.kind ~= "ui" or entry.deleted or type(entry.modules) ~= "table" then
         plan.blocked = "Not a UI setup."
         return Finish(plan)
@@ -606,6 +759,8 @@ function UISetup.Plan(entry)
             end
         end
     end
+
+    if type(m.meter) == "table" then PlanMeter(plan, m.meter) end
 
     plan.noop = Empty(plan) or nil
     return Finish(plan)
@@ -728,6 +883,90 @@ local function CreateTab(name, groups)
     return slot
 end
 
+-- The damage meter. Every write goes through Blizzard's own DamageMeter
+-- methods, is read back from the frame, and never touches
+-- DamageMeterPerCharacterSettings (Blizzard's setters save it).
+
+-- `snap.meter.opened`: the windows this apply opened, each with what the
+-- apply last left in it (Restore hides one only while it still holds that).
+local function RecordOpened(snap, w)
+    local list = snap and snap.meter and snap.meter.opened
+    if not list then return end
+    local rec
+    for _, r in ipairs(list) do if r.index == w.index then rec = r end end
+    if not rec then
+        rec = { index = w.index }
+        list[#list + 1] = rec
+    end
+    rec.type, rec.session, rec.sessionID, rec.locked = w.type, w.session, w.sessionID, w.locked
+end
+
+local function MeterFieldIs(w, field, value)
+    if field == "type" then return w.type == value end
+    if field == "session" then return w.session == value and w.sessionID == nil end
+    return w.locked == value
+end
+
+-- One field of shown window i, read back. Returns the window as it is now,
+-- nil, and whether it wrote; or nil plus why. A field already as wanted
+-- isn't written.
+local function WriteMeterField(i, field, value)
+    local m, _, dm = ReadMeter()
+    local w = m and m[i]
+    if not w or not w.shown or not w.frame then return nil, "couldn't read damage meter window " .. i end
+    if MeterFieldIs(w, field, value) then return w, nil, false end
+    local ok
+    if field == "type" then
+        ok = pcall(dm.SetSessionWindowDamageMeterType, dm, w.frame, value)
+    elseif field == "session" then
+        ok = pcall(dm.SetSessionWindowSessionID, dm, w.frame, value, nil)
+    else
+        ok = pcall(dm.SetSessionWindowLocked, dm, w.frame, value)
+    end
+    if not ok then return nil, "damage meter window " .. i .. " write failed" end
+    local after = ReadMeter()
+    local a = after and after[i]
+    if not a or not a.shown or not MeterFieldIs(a, field, value) then
+        return nil, "damage meter window " .. i .. " read-back"
+    end
+    return a, nil, true
+end
+
+-- "Show new window", which must open exactly window `expect`. Every window
+-- that appeared is recorded as opened before the result is judged.
+local function OpenMeterWindow(expect, snap)
+    local m, why, dm = ReadMeter()
+    if not m then return nil, why end
+    if not m[expect] or m[expect].shown then return nil, "damage meter changed since the preview" end
+    local ok = pcall(dm.ShowNewSecondarySessionWindow, dm)
+    local after = ReadMeter()
+    if not after then return nil, "couldn't read the damage meter" end
+    local new = {}
+    for i = 1, after.max do
+        if after[i].shown and not (m[i] and m[i].shown) then
+            new[#new + 1] = i
+            RecordOpened(snap, after[i])
+        end
+    end
+    if not ok then return nil, "couldn't open a damage meter window" end
+    if #new ~= 1 or new[1] ~= expect or _G["DamageMeterSessionWindow" .. expect] ~= after[expect].frame then
+        return nil, "the new damage meter window isn't the one planned"
+    end
+    return true
+end
+
+local function HideMeterWindow(i, from)
+    local m, _, dm = ReadMeter()
+    local w = m and m[i]
+    if not w or not w.frame then return nil, "couldn't read damage meter window " .. i end
+    if not w.shown or not SameValues(MeterValues(w), from) then return nil, "damage meter window changed" end
+    local ok = pcall(dm.HideSessionWindow, dm, w.frame)
+    if not ok then return nil, "couldn't hide damage meter window " .. i end
+    local after = ReadMeter()
+    if not after or after[i].shown then return nil, "damage meter window " .. i .. " read-back" end
+    return true
+end
+
 ------------------------------------------------------------
 -- Snapshot (the backup) of what a plan touches
 ------------------------------------------------------------
@@ -762,16 +1001,32 @@ local function Snapshot(plan, reason)
         end
         for _, c in ipairs(plan.chat.create) do snap.chat.creating[#snap.chat.creating + 1] = c.name end
     end
+    local mp = plan.meter
+    if #mp.opens + #mp.sets + #mp.hides > 0 then
+        -- Only the windows the plan touches (an open's too: a reopened
+        -- window's remembered settings are put back before Restore hides it),
+        -- as plain values; never the frame.
+        local m = ReadMeter()
+        if not m then return nil end
+        local seen, windows = MeterSeen(m), {}
+        for _, list in ipairs({ mp.opens, mp.sets, mp.hides }) do
+            for _, op in ipairs(list) do windows[op.index] = seen[op.index] end
+        end
+        snap.meter = { windows = windows, opened = {} }
+    end
     return snap
 end
 
 ------------------------------------------------------------
 -- Execute a plan (Apply's ops, or Restore's): fixed order layout, bars,
--- cvars, chat. result = { changed, failed, at, created = { names } }.
+-- cvars, chat, damage meter. result = { changed, failed, at, created =
+-- { names }, opened = { damage meter window numbers } }. `snap`: the backup
+-- taken for this plan; the damage meter windows an apply opens are recorded
+-- in it as they open.
 ------------------------------------------------------------
 
-local function Execute(plan)
-    local result = { changed = 0, created = {} }
+local function Execute(plan, snap)
+    local result = { changed = 0, created = {}, opened = {} }
     local function stop(why, at)
         result.failed, result.at = why, at
         return result
@@ -816,6 +1071,48 @@ local function Execute(plan)
         result.created[#result.created + 1] = c.name
         result.changed = result.changed + 1
     end
+    local mp = plan.meter
+    if #mp.opens + #mp.sets + #mp.hides > 0 then
+        g = Guard()
+        if g then return stop(g, "damage meter") end
+        local m, why = ReadMeter()
+        if not m then return stop(why, "damage meter") end
+        if Serialize(MeterSeen(m)) ~= Serialize(mp.seen) then return stop("damage meter changed since the preview", "damage meter") end
+        for _, o in ipairs(mp.opens) do
+            g = Guard()
+            if g then return stop(g, "damage meter") end
+            local ok, whyO = OpenMeterWindow(o.index, snap)
+            if not ok then return stop(whyO, "damage meter") end
+            result.opened[#result.opened + 1] = o.index
+            result.changed = result.changed + 1
+        end
+        for _, op in ipairs(mp.sets) do
+            if op.from then
+                local now = ReadMeter()
+                local w = now and now[op.index]
+                if not w or not w.shown or not SameValues(MeterValues(w), op.from) then
+                    return stop("damage meter window changed since the preview", "damage meter")
+                end
+            end
+            for _, field in ipairs({ "type", "session", "locked" }) do
+                if op[field] ~= nil then
+                    g = Guard()
+                    if g then return stop(g, "damage meter") end
+                    local a, whyW, wrote = WriteMeterField(op.index, field, op[field])
+                    if not a then return stop(whyW, "damage meter") end
+                    if op.open then RecordOpened(snap, a) end
+                    if wrote then result.changed = result.changed + 1 end
+                end
+            end
+        end
+        for _, h in ipairs(mp.hides) do
+            g = Guard()
+            if g then return stop(g, "damage meter") end
+            local ok, whyH = HideMeterWindow(h.index, h.from)
+            if not ok then return stop(whyH, "damage meter") end
+            result.changed = result.changed + 1
+        end
+    end
     return result
 end
 
@@ -834,6 +1131,20 @@ local function Skipped(plan)
         elseif k.part == "cvars" and k.key then
             s.cvars = s.cvars or {}
             s.cvars[k.key] = k.reason
+        elseif k.part == "meter" and k.key then
+            -- "*": the whole part; "<k>:<field>": one window's field, or
+            -- "<k>:window" for the whole window.
+            s.meter = s.meter or {}
+            if k.key == "*" then
+                s.meter.all = k.reason
+            else
+                local n, field = k.key:match("^(%d+):(%a+)$")
+                n = tonumber(n)
+                if n then
+                    s.meter[n] = s.meter[n] or {}
+                    s.meter[n][field] = k.reason
+                end
+            end
         end
     end
     return s
@@ -879,7 +1190,7 @@ function UISetup.Apply(entry, shown, abandon)
     local ok, err = ASS.Backups.Pin(snap, { kind = "ui", id = live.id, version = live.version,
                                             name = "UI setup " .. tostring(live.name) })
     if not ok then return nil, err end
-    local result = Execute(plan)
+    local result = Execute(plan, snap)
     result.skips = plan.skips
     if result.failed then
         ASS.char.interrupted = { id = live.id, version = live.version, why = result.failed, at = result.at }
@@ -896,11 +1207,92 @@ end
 -- Restore a UI backup exactly
 ------------------------------------------------------------
 
+-- The damage meter, restored exactly. A window shown in the backup and now
+-- gets its type, segment and lock back. A window that apply opened is first
+-- put back to what Blizzard remembered for it (a reopened window), then
+-- hidden, and only while it still holds what the apply left in it. Restore
+-- never opens a window; a window shown now that the backup didn't list as
+-- opened by the apply is kept and said.
+local function PlanRestoreMeter(plan, sm, cant)
+    local m, why = ReadMeter()
+    if not m then
+        cant("Damage meter", why)
+        return
+    end
+    plan.meter.seen = MeterSeen(m)
+    local opened = {}
+    for _, r in ipairs(type(sm.opened) == "table" and sm.opened or {}) do
+        if type(r) == "table" and type(r.index) == "number" then opened[r.index] = r end
+    end
+    local function note(s) plan.notes[#plan.notes + 1] = s end
+    for i = 1, m.max do
+        local was, now = sm.windows[i], m[i]
+        local label = ("Damage meter window %d"):format(i)
+        local o = opened[i]
+        if type(was) == "table" and o and i > 1 and not was.data then
+            -- Blizzard had nothing for this index: it made the window fresh
+            -- (DamageMeter.lua GetDefaultWindowData). Put those values back so
+            -- the next "Show new window" behaves as if the apply never ran.
+            was = { shown = false, data = true, type = Enum.DamageMeterType.DamageDone,
+                    session = Enum.DamageMeterSessionType.Overall, locked = false }
+        end
+        if type(was) ~= "table" then
+            -- Not touched by the plan that took the backup: left alone.
+        elseif o and i > 1 then
+            local left = { type = o.type, session = o.session, sessionID = o.sessionID, locked = o.locked and true or false }
+            if not now.shown then
+                note(label .. " (opened by that apply) is hidden already; the game keeps its settings for the next new window.")
+            elseif not SameValues(MeterValues(now), left) then
+                note(label .. " (opened by that apply) changed since; kept. Hide it yourself if you don't want it.")
+            else
+                local op, after = { index = i, from = MeterValues(now) }, MeterValues(now)
+                if was.data then
+                    if KnownMeterType(was.type) and now.type ~= was.type then op.type, after.type = was.type, was.type end
+                    if KnownSession(was.session) and (now.session ~= was.session or now.sessionID ~= nil) then
+                        op.session, after.session, after.sessionID = was.session, was.session, nil
+                    elseif not KnownSession(was.session) then
+                        note(label .. ": its earlier segment was a single fight; not put back.")
+                    end
+                    local lock = was.locked and true or false
+                    if now.locked ~= lock then op.locked, after.locked = lock, lock end
+                    if op.type ~= nil or op.session ~= nil or op.locked ~= nil then
+                        plan.meter.sets[#plan.meter.sets + 1] = op
+                    end
+                end
+                plan.meter.hides[#plan.meter.hides + 1] = { index = i, from = after }
+            end
+        elseif was.shown and now.shown then
+            local op = { index = i, from = MeterValues(now) }
+            if not KnownMeterType(was.type) then
+                cant(label, MeterTypeText(was.type) .. " is not a meter type on this client; left as is")
+            elseif now.type ~= was.type then
+                op.type = was.type
+            end
+            if not KnownSession(was.session) then
+                if now.session ~= was.session or now.sessionID ~= was.sessionID then
+                    cant(label, "showed a single fight; pick its segment yourself")
+                end
+            elseif now.session ~= was.session or now.sessionID ~= nil then
+                op.session = was.session
+            end
+            local lock = was.locked and true or false
+            if i > 1 and now.locked ~= lock then op.locked = lock end
+            if op.type ~= nil or op.session ~= nil or op.locked ~= nil then
+                plan.meter.sets[#plan.meter.sets + 1] = op
+            end
+        elseif was.shown and not now.shown then
+            cant(label, "closed since the backup; left as is")
+        elseif not was.shown and now.shown then
+            note(label .. " was opened since the backup; kept. Hide it yourself if you don't want it.")
+        end
+    end
+end
+
 -- plan = { kind = "restore", which, layout, bars, cvars, chat = { add = {slot,name,groups,remove} },
 --          kept = { names }, unavailable = { { what, reason } }, noop, blocked, fingerprint }
 function UISetup.PlanRestore(which)
-    local plan = { kind = "restore", which = which, cvars = {}, chat = { add = {}, create = {} }, skips = {},
-                   unavailable = {}, kept = {} }
+    local plan = { kind = "restore", which = which, cvars = {}, chat = { add = {}, create = {} }, meter = NewMeterPlan(),
+                   skips = {}, unavailable = {}, kept = {}, notes = {} }
     local snap = ASS.Backups.Get(which)
     if not snap then plan.blocked = "No such backup." return Finish(plan) end
     if snap.kind ~= "ui" then plan.blocked = "Not a UI setup backup." return Finish(plan) end
@@ -989,6 +1381,10 @@ function UISetup.PlanRestore(which)
         end
     end
 
+    if type(snap.meter) == "table" and type(snap.meter.windows) == "table" then
+        PlanRestoreMeter(plan, snap.meter, cant)
+    end
+
     plan.noop = Empty(plan) or nil
     return Finish(plan)
 end
@@ -1004,7 +1400,7 @@ function UISetup.Restore(which, shown)
         local snap = Snapshot(plan, "restore")
         if not snap then return nil, "Couldn't read the current setup for the backup; nothing was changed." end
         ASS.Backups.PushRing(snap, ASS.Backups.Get(which))
-        result = Execute(plan)
+        result = Execute(plan, snap)
         -- The UI no longer holds what the last apply left: Save must not
         -- write the restored state into that entry (apply it again first).
         local rec = ASS.char.loaded and ASS.char.loaded.ui
@@ -1031,6 +1427,58 @@ local function KeepUnknown(now, saved)
         if not Known(g) and not has[g] then out[#out + 1] = g end
     end
     return out
+end
+
+-- Save's damage meter: each window of the entry, mapped as Apply maps it
+-- (1 the primary, k the (k-1)th shown secondary), takes the live values. A
+-- field or window the apply skipped, a single-fight segment, a recorded
+-- position and unknown keys keep the entry's. Windows beyond the entry's
+-- count aren't added (Save As includes them).
+local function SaveMeter(p, old, new, skipped)
+    local function note(s) p.notes[#p.notes + 1] = s end
+    if skipped.all then note("Damage meter: skipped by the apply; kept as saved.") return end
+    local m, why = ReadMeter()
+    if not m then note("Damage meter: " .. tostring(why) .. "; kept as saved.") return end
+    local live = ShownSecondaries(m)
+    for k, w in ipairs(old.windows) do
+        local sk = skipped[k] or {}
+        local i = k == 1 and 1 or live[k - 1]
+        local x = new.windows[k]
+        local label = ("Damage meter window %d"):format(k)
+        if sk.window then
+            note(label .. ": skipped by the apply; kept as saved.")
+        elseif not i then
+            note(("Damage meter: no window here for the setup's window %d; kept as saved."):format(k))
+        else
+            local now = m[i]
+            local function change(s) p.changes[#p.changes + 1] = label .. ": " .. s end
+            if not sk.type and now.type ~= w.type then
+                change(MeterTypeText(w.type) .. " -> " .. MeterTypeText(now.type))
+                x.type = now.type
+            end
+            if not sk.session and KnownSession(now.session) and now.session ~= w.session then
+                change(SessionText(w.session) .. " -> " .. SessionText(now.session))
+                x.session = now.session
+            end
+            if k > 1 then
+                if not sk.locked and now.locked ~= w.locked then
+                    change(now.locked and "locked" or "unlocked")
+                    x.locked = now.locked
+                end
+                -- The position isn't applied, so a window here sits where the
+                -- game put it: Save keeps a recorded position (Save As records
+                -- a new one) and only fills one in when the entry has none.
+                if now.rect and w.rect == nil then
+                    change("position and size recorded")
+                    x.rect = now.rect
+                end
+            end
+        end
+    end
+    if #live + 1 > #old.windows then
+        note(("Damage meter: %d more window(s) shown here aren't in the setup; use Save As to include them.")
+            :format(#live + 1 - #old.windows))
+    end
 end
 
 -- Save over the entry this character applied. p = { entry, modules, changes,
@@ -1110,6 +1558,9 @@ function UISetup.PlanSave()
         end
         new.chat.tabs = #tabs > 0 and tabs or nil
     end
+    if type(old.meter) == "table" and type(old.meter.windows) == "table" then
+        SaveMeter(p, old.meter, new.meter, skipped.meter or {})
+    end
     p.modules = new
     p.noop = Serialize(new) == Serialize(old) or nil
     return done()
@@ -1127,7 +1578,7 @@ function UISetup.Save(shown)
     return { entry = e, changes = #p.changes }
 end
 
--- Save As: a fresh capture of all four parts. p = { modules, notes, fingerprint }.
+-- Save As: a fresh capture of all five parts. p = { modules, notes, fingerprint }.
 function UISetup.PlanSaveAs()
     local p = { notes = {} }
     p.blocked = UISetup.Blocked()
@@ -1179,8 +1630,63 @@ function UISetup.Contents(modules)
             lines[#lines + 1] = ('Chat tab "%s": %s'):format(t.name, table.concat(t.groups, ", "))
         end
     end
+    if type(modules.meter) == "table" then
+        for k, w in ipairs(modules.meter.windows or {}) do
+            local bits = { MeterTypeText(w.type) }
+            if w.session ~= nil then bits[#bits + 1] = SessionText(w.session) end
+            if w.locked then bits[#bits + 1] = "locked" end
+            lines[#lines + 1] = ("Damage meter window %d: %s"):format(k, table.concat(bits, ", "))
+            if type(w.rect) == "table" then
+                lines[#lines + 1] = ("  Position and size recorded (%sx%s at %s %s,%s); not applied: place it yourself.")
+                    :format(tostring(w.rect.width), tostring(w.rect.height), tostring(w.rect.point),
+                            tostring(w.rect.x), tostring(w.rect.y))
+            end
+        end
+    end
     for _, k in ipairs(Sorted(modules)) do
         if not KNOWN[k] then lines[#lines + 1] = ("%s: not supported on this build"):format(tostring(k)) end
+    end
+    return lines
+end
+
+local function DescribeMeter(plan)
+    local lines = {}
+    local mp = plan.meter
+    if not mp then return lines end
+    local reopen = {}
+    for _, o in ipairs(mp.opens) do reopen[o.index] = o.reopen end
+    local seen = mp.seen or {}
+    for _, op in ipairs(mp.sets) do
+        local label = ("Damage meter window %d"):format(op.index)
+        if op.open then
+            local bits = {}
+            if op.type ~= nil then bits[#bits + 1] = MeterTypeText(op.type) end
+            if op.session ~= nil then bits[#bits + 1] = SessionText(op.session) end
+            if op.locked ~= nil then bits[#bits + 1] = op.locked and "locked" or "unlocked" end
+            lines[#lines + 1] = ("New damage meter window %d: %s"):format(op.index, table.concat(bits, ", "))
+            if reopen[op.index] then
+                lines[#lines + 1] = "  The game reopens a window you hid before, as you left it (click-through, minimized)."
+            end
+            lines[#lines + 1] = "  It opens where the game places it: move it yourself (a saved position isn't applied)."
+        else
+            local from = op.from or seen[op.index] or {}
+            if op.type ~= nil then
+                lines[#lines + 1] = ("%s: %s -> %s"):format(label, MeterTypeText(from.type), MeterTypeText(op.type))
+            end
+            if op.session ~= nil then
+                lines[#lines + 1] = ("%s: %s -> %s"):format(label, SessionText(from.session), SessionText(op.session))
+            end
+            if op.locked ~= nil then lines[#lines + 1] = ("%s: %s"):format(label, op.locked and "lock" or "unlock") end
+        end
+    end
+    -- Opened windows that wrote nothing still say they open.
+    local listed = {}
+    for _, op in ipairs(mp.sets) do if op.open then listed[op.index] = true end end
+    for _, o in ipairs(mp.opens) do
+        if not listed[o.index] then lines[#lines + 1] = ("New damage meter window %d"):format(o.index) end
+    end
+    for _, h in ipairs(mp.hides) do
+        lines[#lines + 1] = ("Damage meter window %d: hide (opened by that apply)"):format(h.index)
     end
     return lines
 end
@@ -1220,6 +1726,7 @@ function UISetup.Describe(plan)
         lines[#lines + 1] = ('New chat tab "%s": %s'):format(c.name, table.concat(c.groups, ", "))
         lines[#lines + 1] = "  It opens docked beside your other tabs, and is selected."
     end
+    for _, l in ipairs(DescribeMeter(plan)) do lines[#lines + 1] = l end
     if plan.noop then
         if #plan.skips + #(plan.unavailable or {}) == 0 then
             lines[#lines + 1] = "Already matches the selected settings."
@@ -1235,6 +1742,7 @@ function UISetup.Describe(plan)
         lines[#lines + 1] = "Can't be restored:"
         for _, u in ipairs(plan.unavailable) do lines[#lines + 1] = ("  %s: %s"):format(u.what, u.reason) end
     end
+    for _, n in ipairs(plan.notes or {}) do lines[#lines + 1] = n end
     if #(plan.kept or {}) > 0 then
         for _, name in ipairs(plan.kept) do
             lines[#lines + 1] = ('Chat tab "%s" is kept (created by that apply, or by you): close it yourself if you don\'t want it.'):format(name)
@@ -1250,4 +1758,5 @@ function UISetup.Describe(plan)
     return lines
 end
 
-UISetup._test = { Layouts = Layouts, ReadChat = ReadChat, ReadBars = ReadBars, Snapshot = Snapshot }
+UISetup._test = { Layouts = Layouts, ReadChat = ReadChat, ReadBars = ReadBars, Snapshot = Snapshot,
+                  ReadMeter = ReadMeter, PredictOpens = PredictOpens }

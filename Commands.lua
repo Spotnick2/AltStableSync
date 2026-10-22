@@ -1082,6 +1082,9 @@ local function UIReport(kind, result, err, name)
     if skipped > 0 then msg = msg .. (", %d skipped (see the preview's list)"):format(skipped) end
     msg = msg .. "."
     if #(result.created or {}) > 0 then msg = msg .. " New chat tab: " .. table.concat(result.created, ", ") .. "." end
+    if #(result.opened or {}) > 0 then
+        msg = msg .. " New damage meter window: " .. table.concat(result.opened, ", ") .. " (move it where you want it)."
+    end
     if apply then msg = msg .. " Undo it from Backups." end
     if result.partial then msg = msg .. " Not everything was restored; the backup is kept." end
     Print(msg .. kept)

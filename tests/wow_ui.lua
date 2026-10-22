@@ -236,6 +236,7 @@ local function NewDamageMeter()
     local function data(w) return w.index, dm.windowDataList[w.index] end
     function dm:GetSessionWindow(i) return self.windowDataList[i] and self.windowDataList[i].sessionWindow or nil end
     function dm:GetMaxSessionWindowCount() return MAX_DM end
+    function dm:GetWindowDataList() return self.windowDataList end
     function dm:GetCurrentSessionWindowCount()
         local n = 0
         for _, d in pairs(self.windowDataList) do if d.sessionWindow and d.sessionWindow:IsShown() then n = n + 1 end end
