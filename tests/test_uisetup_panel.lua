@@ -107,6 +107,32 @@ do
     check("reload: never opens in combat", A.Reload.Ask("x") == false and not b:IsShown())
     G.combat = false
 
+    -- #91 review: an apply that stops after writing the bars still asks,
+    -- and keeps its backup pinned.
+    boot()
+    R = A.Reload._test
+    A.Catalog.Create("ui", { name = "Both" }, { bars = { [2] = true, [3] = true, [4] = true, [5] = true,
+        [6] = false, [7] = false, [8] = false }, cvars = { damageMeterEnabled = "1", damageMeterResetOnNewInstance = "1" } })
+    -- Bars, then damageMeterEnabled, are written; the next setting refuses.
+    UI.after["SetActionBarToggles"] = function() UI.cvarInfo.damageMeterResetOnNewInstance = { secure = true } end
+    P.Open("ui")
+    W.uiApply:Click()
+    previewFrame().confirm:Click()
+    local _, op = A.Backups.List()
+    check("reload: partial apply stopped, pin kept", op ~= nil and UI.bars[1] == true)
+    check("reload: asked after a partial apply", R.prompt:IsShown() and R.button:IsShown())
+    R.prompt.later:Click()
+    UI.after = {}
+    UI.cvarInfo.damageMeterResetOnNewInstance = nil
+    -- Its restore puts the bars back, then stops on damageMeterEnabled: still asked.
+    UI.after["SetActionBarToggles"] = function() UI.cvarInfo.damageMeterEnabled = { secure = true } end
+    WoW.chatLines = {}
+    A.Commands.restore("op")
+    previewFrame().confirm:Click()
+    check("reload: the restore stopped", table.concat(WoW.chat(), " "):find("Stopped", 1, true) ~= nil)
+    check("reload: asked after a partial restore", R.prompt:IsShown() and not UI.bars[1])
+    UI.after = {}
+
     -- An apply that doesn't touch the bars doesn't ask.
     boot()
     R = A.Reload._test
