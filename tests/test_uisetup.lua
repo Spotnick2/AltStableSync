@@ -333,6 +333,20 @@ do
     local names = {}
     for _, t in ipairs(saved) do names[t.name] = true end
     check("save: empty tab dropped", not names.GABProbe and names.Whispers)
+
+    -- Beta: the empty tab was already closed on the saving character; the
+    -- entry still drops it, and Save has something to do.
+    boot(templateUI())
+    AltStableSyncDB.presets[e.id] = A.Catalog.Copy(e)
+    AltStableSyncChar.loaded = { ui = { id = e.id, version = e.version, baseline = A.Catalog.Copy(e.modules),
+                                        complete = true, skipped = {} } }
+    A.Commands.ui("save")
+    check("save, tab closed here: says it goes", lines():find('Tab "GABProbe": removed', 1, true) ~= nil)
+    eq("save, tab closed here: Save offered", A._shown.confirm, "Save")
+    A._shown.onConfirm()
+    names = {}
+    for _, t in ipairs(A.Catalog.Get(e.id).modules.chat.tabs) do names[t.name] = true end
+    check("save, tab closed here: dropped", not names.GABProbe)
 end
 
 -- Mouseover casting is protected on Forever (measured 2026-10-22): an
