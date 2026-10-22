@@ -1041,6 +1041,15 @@ local function FindUI(arg)
     return nil, lines
 end
 
+-- Bars written and read back only appear after a reload (#91 review),
+-- whether the operation completed or stopped after writing them; the
+-- prompt opens only out of combat, the line is always printed.
+local function AskReload(result)
+    if not result.reload then return end
+    Print("Your action bars change after a reload.")
+    if ASS.Reload then ASS.Reload.Ask("Your action bars change after a reload. Reload now, or later with /reload.") end
+end
+
 local function UIReport(kind, result, err, name)
     local apply = kind == "apply"
     if not result then
@@ -1054,6 +1063,7 @@ local function UIReport(kind, result, err, name)
             Plural(result.changed, "change"), apply
                 and "Use /altsync restore op to undo, or apply again to abandon it."
                 or "What was there before this restore is backup 1 in /altsync backups."))
+        AskReload(result)
         return
     end
     local skipped = #(result.skips or {}) + #(result.unavailable or {})
@@ -1075,11 +1085,7 @@ local function UIReport(kind, result, err, name)
     if apply then msg = msg .. " Undo it from Backups." end
     if result.partial then msg = msg .. " Not everything was restored; the backup is kept." end
     Print(msg .. kept)
-    -- Bars written and read back only appear after a reload (#91 review).
-    if result.reload then
-        Print("Your action bars change after a reload.")
-        if ASS.Reload then ASS.Reload.Ask("Your action bars change after a reload. Reload now, or later with /reload.") end
-    end
+    AskReload(result)
 end
 Commands.UIReport = UIReport
 
