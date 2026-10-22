@@ -985,7 +985,11 @@ function UISetup.PlanSave()
         for _, t in ipairs(old.chat.tabs or {}) do
             local slot = w and FindTab(w, t.name)
             local now = slot and KeepUnknown(w[slot].groups, t.groups)
-            if not slot then
+            if #t.groups == 0 then
+                -- An empty tab is never kept, whether or not this character
+                -- still has it (Apply wouldn't create it).
+                p.changes[#p.changes + 1] = ('Tab "%s": removed (it receives no message types)'):format(t.name)
+            elseif not slot then
                 p.notes[#p.notes + 1] = ('Chat: no single tab named "%s" here; kept as saved.'):format(t.name)
                 tabs[#tabs + 1] = t
             elseif #now == 0 then
