@@ -49,53 +49,125 @@ do
     check("ready: offered", o ~= nil)
     check("one setup: named", o and table.concat(o.lines, " "):find("saved UI preferences: Base.", 1, true) ~= nil)
     eq("one setup: Preview and apply", o and o.confirm, "Preview and apply")
-    eq("Not now label", frame().cancel:GetText(), "Not now")
+    eq("Skip label", frame().cancel:GetText(), "Skip...")
     eq("offer: no game writes", #UI.calls, 0)
     check("offer: no catalog writes", A.UISetup.Serialize(AltStableSyncDB.presets) == A.UISetup.Serialize(db.presets))
     check("offer: not answered yet", AltStableSyncChar.onboarding == nil)
 end
 
--- Not now: answered, never offered again on this character.
+local function title() local x = A.Preview.Shown(); return x and x.title end
+local function answered() return AltStableSyncChar.onboarding ~= nil and AltStableSyncChar.onboarding.handled == true end
+
+-- Owner, 2026-10-22: Escape asks for confirmation, and a confirmed skip or a
+-- completed apply are the only answers.
+-- Escape on the Welcome -> the confirmation; Skip setup answers for good.
 do
     boot{ setups = { { name = "Base" } } }
     settle()
-    frame().cancel:Click()
-    check("not now: handled", AltStableSyncChar.onboarding and AltStableSyncChar.onboarding.handled == true)
-    eq("not now: no game writes", #UI.calls, 0)
+    frame():Hide()
+    check("escape: not answered", not answered())
+    O._Flush()
+    eq("escape: the confirmation", title(), "Skip setting up?")
+    eq("confirmation: Skip setup", frame().confirm:GetText(), "Skip setup")
+    eq("confirmation: Back", frame().cancel:GetText(), "Back")
+    frame().confirm:Click()
+    O._Flush()
+    check("skip setup: answered", answered())
+    check("skip setup: nothing more shown", A.Preview.Shown() == nil)
+    eq("skip setup: no game writes", #UI.calls, 0)
     local char = AltStableSyncChar
     boot{ setups = { { name = "Base" } }, char = char }
     settle(); tick(5)
     check("next login: no offer", not offer())
 end
 
--- Escape is no answer: the offer comes back next login.
+-- Skip... is the same as Escape; Back returns to the Welcome; Escape on the
+-- confirmation closes it unanswered, and the offer returns next login.
 do
     boot{ setups = { { name = "Base" } } }
     settle()
-    frame():Hide()
-    check("escape: not handled", AltStableSyncChar.onboarding == nil)
-    local char = AltStableSyncChar
+    frame().cancel:Click()
+    O._Flush()
+    eq("skip button: the confirmation", title(), "Skip setting up?")
+    frame().cancel:Click()
+    O._Flush()
+    eq("back: the Welcome again", title(), "Welcome")
+    frame():Hide(); O._Flush()
+    frame():Hide(); O._Flush()
+    check("escape twice: closed", A.Preview.Shown() == nil)
+    check("escape twice: not answered", not answered())
     tick(5)
-    check("escape: not again this session", not offer())
+    check("escape twice: not again this session", not offer())
+    local char = AltStableSyncChar
     boot{ setups = { { name = "Base" } }, char = char }
     settle()
-    check("escape: offered at the next login", offer() ~= nil)
+    check("escape twice: offered at the next login", offer() ~= nil)
 end
 
--- Preview and apply: the apply preview opens (answered); its confirm writes.
+-- Preview and apply: nothing recorded until the apply completes; Cancel or
+-- Escape on the apply preview returns to the Welcome.
 do
     boot{ setups = { { name = "Base" } } }
     settle()
     frame().confirm:Click()
-    local s = A.Preview.Shown()
-    check("preview: the apply preview is open", s and s.title == "Apply Base?")
-    check("preview: handled once it opened", AltStableSyncChar.onboarding and AltStableSyncChar.onboarding.handled)
+    eq("preview: the apply preview is open", title(), "Apply Base?")
+    check("preview: not answered by opening it", not answered())
+    frame().cancel:Click()
+    O._Flush()
+    eq("preview cancelled: the Welcome again", title(), "Welcome")
+    frame().confirm:Click()
+    frame():Hide()
+    O._Flush()
+    eq("preview escaped: the Welcome again", title(), "Welcome")
+    frame().confirm:Click()
     eq("preview: nothing written yet", #UI.calls, 0)
     frame().confirm:Click()
-    check("preview: applied on its confirm", UI.bars[1] == true)
+    O._Flush()
+    check("apply: written on its confirm", UI.bars[1] == true)
+    check("apply: answered", answered())
+    check("apply: the Welcome doesn't come back", title() ~= "Welcome")
 end
 
--- Several setups: Choose opens the UI setup tab.
+-- An apply that stops doesn't answer; one that completed stays answered
+-- through a later stopped apply, a restore and a deleted setup. Save As
+-- alone never answers.
+do
+    boot{ setups = { { name = "Base" } } }
+    settle()
+    -- The bars don't read back as written: the apply stops there.
+    UI.after["SetActionBarToggles"] = function() UI.bars[1] = false end
+    frame().confirm:Click()
+    frame().confirm:Click()
+    UI.after = {}
+    check("stopped apply: stopped", table.concat(WoW.chat(), " "):find("Stopped", 1, true) ~= nil)
+    check("stopped apply: not answered", not answered())
+
+    boot{ setups = { { name = "Base" } } }
+    settle()
+    frame().confirm:Click()
+    frame().confirm:Click()
+    check("completed: answered", answered())
+    local base = A.Catalog.ListAll("ui")[1]
+    A.Catalog.Create("ui", { name = "Other" }, { cvars = { damageMeterEnabled = "1" } })
+    UI.after["SetCVar:damageMeterEnabled"] = function() G.combat = true end
+    A.Commands.ui("apply Other")
+    frame().confirm:Click()
+    G.combat = false
+    UI.after = {}
+    check("later stopped apply: still answered", answered())
+    A.Commands.restore("op")
+    frame().confirm:Click()
+    check("restore: still answered", answered())
+    A.Catalog.Delete(base.id, base.version)
+    check("deleted setup: still answered", answered())
+
+    boot{ setups = { { name = "Base" } } }
+    A.Commands.ui("saveas Mine")
+    frame().confirm:Click()
+    check("save as: not answered", not answered())
+end
+
+-- Choose opens the tab and answers nothing.
 do
     boot{ setups = { { name = "Base" }, { name = "Healer" } } }
     settle()
@@ -103,7 +175,24 @@ do
     eq("several: Choose", o and o.confirm, "Choose")
     frame().confirm:Click()
     check("choose: the tab is open", A.Panel._Frame() and A.Panel._Frame():IsShown() and A.Panel.view == "ui")
-    check("choose: handled", AltStableSyncChar.onboarding and AltStableSyncChar.onboarding.handled)
+    check("choose: not answered", not answered())
+end
+
+-- A pending step is dropped in combat, or when another preview took the frame.
+do
+    boot{ setups = { { name = "Base" } } }
+    settle()
+    frame():Hide()
+    G.combat = true
+    O._Flush()
+    check("step in combat: dropped", A.Preview.Shown() == nil)
+    G.combat = false
+    boot{ setups = { { name = "Base" } } }
+    settle()
+    frame():Hide()
+    A.Preview.Show({ title = "Something else", lines = {} })
+    O._Flush()
+    eq("step: never over another preview", title(), "Something else")
 end
 
 -- Never offered: no setup, only this character's own, a conflict copy,
@@ -153,9 +242,18 @@ do
     check("forced: not offered by itself", not offer())
     A.Commands.ui("offer")
     check("forced: shown", offer() ~= nil)
-    AltStableSyncChar.onboarding = nil
+    -- The character stays answered; a marker shows the record is never rewritten.
+    AltStableSyncChar.onboarding.marker = "kept"
     frame().cancel:Click()
-    check("forced: Not now records nothing", AltStableSyncChar.onboarding == nil)
+    O._Flush()
+    eq("forced: the confirmation", title(), "Skip setting up?")
+    frame().cancel:Click()
+    O._Flush()
+    eq("forced: Back works on an answered character", title(), "Welcome")
+    frame().cancel:Click()
+    O._Flush()
+    frame().confirm:Click()
+    check("forced: Skip setup records nothing", AltStableSyncChar.onboarding.marker == "kept")
     A.Preview.Show({ title = "Something else", lines = {} })
     A.Commands.ui("offer")
     eq("forced: never over another preview", A.Preview.Shown().title, "Something else")

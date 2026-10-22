@@ -731,6 +731,11 @@ local function Record(entry, complete, plan, result)
                            complete = complete or false, skipped = plan and Skipped(plan) or {}, result = result }
 end
 
+-- A confirmed apply that completed (or a no-op Done) answers the first-login
+-- offer for good (#92): `onboarding.handled` is never cleared afterwards, by
+-- a later stopped apply, a restore or a deleted setup. Save As doesn't set it.
+local function Answered() ASS.char.onboarding = { handled = true } end
+
 -- Apply the plan the player confirmed. `shown` is that plan; `abandon` is the
 -- player's answer to "Abandon the incomplete load of X?".
 function UISetup.Apply(entry, shown, abandon)
@@ -748,6 +753,7 @@ function UISetup.Apply(entry, shown, abandon)
         abandonPinned()
         local result = { noop = true, changed = 0, created = {}, skips = plan.skips }
         Record(live, true, plan, result)
+    Answered()
         return result
     end
     local snap = Snapshot(plan, "UI setup " .. tostring(live.name))
@@ -768,6 +774,7 @@ function UISetup.Apply(entry, shown, abandon)
     ASS.char.interrupted = nil
     ASS.Backups.Release()
     Record(live, true, plan, result)
+    Answered()
     return result
 end
 

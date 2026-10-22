@@ -1089,9 +1089,10 @@ local function UIReport(kind, result, err, name)
 end
 Commands.UIReport = UIReport
 
--- The apply preview for one UI setup. Returns true when the preview opened
--- (the first-login offer counts that as an answer).
-function Commands.ApplyUI(id)
+-- The apply preview for one UI setup. Returns true when the preview opened.
+-- `onCancel` (the first-login offer only, #92): runs when the preview closes
+-- without its confirm (Cancel or Escape).
+function Commands.ApplyUI(id, onCancel)
     local e = Commands.OwnUI(id)
     if not e then Print(Copy("unknown-id")) return false end
     local plan = U().Plan(e)
@@ -1110,6 +1111,7 @@ function Commands.ApplyUI(id)
         title = "Apply " .. tostring(name) .. "?",
         lines = lines,
         confirm = confirm,
+        onCancel = onCancel,
         onConfirm = function()
             local r, err = U().Apply(e, plan, pinned ~= nil)
             UIReport("apply", r, err, name)

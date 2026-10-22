@@ -211,7 +211,7 @@ AltStableSyncChar = {               -- per character
                                     -- even when every key matches (cleared by a successful SaveBindings)
   bindingSwitch = { before = { [command] = { key, ... } }, at, when } | nil,
                                     -- #7: a switch to character keybindings that stopped (schema 6)
-  onboarding = { handled = true },  -- set by Not now, by opening the offer's preview, or by applying
+  onboarding = { handled = true },  -- the offer's answer, for good: a confirmed skip, or a completed apply (#92)
   interrupted = { id, version, why, at },          -- resuming = a NEW preview + click;
                                                     -- its backup is backups[guid].operation
 }
@@ -649,14 +649,22 @@ not take a save of them.
 - **First-login offer** (#10), after readiness and out of combat, only when at least one UI setup
   exists: "Make yourself at home. Start with your saved UI preferences." When exactly one exists it
   is named; when several exist the offer says "Choose a saved UI setup" and opens the UI setup tab.
-  Buttons: Not now, and Preview and apply (or Choose). Not now, opening the preview, opening the
-  tab through Choose, and applying all set `onboarding.handled`, so the offer never repeats on that
-  character. Built in `Offer.lua`: one ticker per session from the first `PLAYER_ENTERING_WORLD`; it
-  waits while a UI setup write would be blocked (readiness, combat, Edit Mode, chat settings) or any
-  preview is open, and offers setups that are live, not conflict copies and not saved from this
-  character. Not now is the preview's own `onCancelButton`; **Escape is no answer**, so the offer
-  returns at the next login. A setup that arrives by sync later in the session is offered then.
-  `/altsync ui offer` shows it again for testing without recording an answer.
+  Buttons: Preview and apply (or Choose), and Skip…. **Only a confirmed skip or a completed apply
+  answer it** (owner, 2026-10-22; Codex two rounds to consensus): `onboarding.handled` is set by the
+  confirmation's **Skip setup**, and by `UISetup.Apply` on a completed apply or a no-op Done,
+  whatever opened its preview; Save As never sets it, and nothing clears it (a later stopped apply,
+  a restore, a deleted setup). Escape or Skip… on the Welcome opens the confirmation ("Skip setting
+  up?": Skip setup / Back); Back returns to the Welcome; Escape on the confirmation closes it
+  unanswered, so the offer returns at the next login. Cancel or Escape on an apply preview opened
+  from the Welcome returns to the Welcome (`Commands.ApplyUI(id, onCancel)`); confirming it never
+  does. Choose opens the tab and answers nothing. Each step after a close runs on the next frame
+  update, never inside the shared preview frame's own OnHide, and only while the character is
+  unanswered, no preview is open and nothing blocks a UI setup write; otherwise it is dropped until
+  the next login. Built in `Offer.lua`: one ticker per session from the first
+  `PLAYER_ENTERING_WORLD`, offering setups that are live, not conflict copies and not saved from this
+  character. A setup that arrives by sync later in the session is offered then. `/altsync ui offer`
+  shows it again for testing, on an answered character too; its Skip records nothing, while a real
+  apply confirmed from it does.
 - **Edge states:**
 
   | State | Copy |
