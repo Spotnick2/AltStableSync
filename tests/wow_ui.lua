@@ -40,6 +40,7 @@ function U.setup(opts)
     U.ignoreNoDefault = opts.ignoreNoDefault  -- a client that gives a new window its defaults anyway
     U.calls = {}
     U.after = {}            -- [call name] = function() end, run after that call (e.g. combat starts)
+    DamageMeter = nil
     U.windows = {}
     for i = 1, 10 do
         U.windows[i] = { name = "", shown = false, docked = false, uninteractable = false, groups = {} }
@@ -171,3 +172,94 @@ function FCF_OpenNewWindow(name, noDefaultChannels)
     end
 end
 function FCF_Close() error("FCF_Close must never be called by AltStableSync", 2) end
+
+-- Source-shaped Mainline meter (b9be9379); unmeasured on Forever. Frame and
+-- manager selections are separate so a manager-only write cannot pass read-back.
+function U.meterSetup(opts)
+    opts = opts or {}
+    Enum = Enum or {}
+    Enum.DamageMeterType = { DamageDone = 0, Dps = 1, HealingDone = 2, Hps = 3, Absorbs = 4, Interrupts = 5, Dispels = 6, DamageTaken = 7, AvoidableDamageTaken = 8, Deaths = 9, EnemyDamageTaken = 10 }
+    UIParent = { GetEffectiveScale = function() return 1 end,
+        GetWidth = function() return 1920 end, GetHeight = function() return 1080 end }
+    local data = {}
+    U.meter = data
+    local anchor = { BOTTOMLEFT={0,0}, TOPLEFT={0,1}, CENTER={.5,.5}, TOPRIGHT={1,1} }
+    local function frame(i, d)
+        local w = { index=i, shown=d.shown ~= false, meterType=d.damageMeterType,
+            sessionType=d.sessionType, sessionID=d.sessionID, locked=d.locked,
+            x=100, y=500, width=400, height=200, userPlaced=false, point="BOTTOMLEFT", relativePoint="BOTTOMLEFT" }
+        function w:GetSessionWindowIndex() return self.index end
+        function w:IsShown() if U.meterShownFail then error("unreadable") end return self.shown end
+        function w:GetDamageMeterType() if U.meterReadFail then error("unreadable") end return self.meterType end
+        function w:GetSessionType() return self.sessionType end
+        function w:GetSessionID() return self.sessionID end
+        function w:IsLocked() return self.locked end -- nil on a fresh window
+        function w:IsMinimized() return self.minimized end
+        function w:IsResizing() return self.resizing end
+        function w:GetNumPoints() return 1 end
+        function w:GetPoint() return self.point, UIParent, self.relativePoint, 0, 0 end
+        function w:GetEffectiveScale() return 1 end
+        function w:GetRect() return self.x,self.y,self.width,self.height end
+        function w:IsUserPlaced() return self.userPlaced end
+        function w:SetSize(width,height)
+            call("MeterSize"); self.width,self.height=width,height; after("MeterSize")
+        end
+        function w:SetPoint(p, relative, rp, x, y)
+            call("MeterPoint"); assert(relative == UIParent)
+            self.point,self.relativePoint=p,rp
+            self.x=x+anchor[rp][1]*1920-anchor[p][1]*self.width
+            self.y=y+anchor[rp][2]*1080-anchor[p][2]*self.height
+            after("MeterPoint")
+        end
+        function w:SetUserPlaced(v) call("MeterPlaced"); self.userPlaced=v; after("MeterPlaced") end
+        return w
+    end
+    local function add(i, values)
+        local d=copy(values or {damageMeterType=0,sessionType=0})
+        data[i]=d; d.sessionWindow=frame(i,d)
+        return d
+    end
+    add(1,opts[1])
+    for i=2,3 do if opts[i] then add(i,opts[i]) end end
+    local m={}
+    DamageMeter=m
+    function m:GetWindowDataList() return data end
+    function m:GetSessionWindow(i) return data[i] and data[i].sessionWindow end
+    function m:GetSessionWindowDamageMeterType(w) return data[w.index].damageMeterType end
+    function m:CanShowNewSecondarySessionWindow()
+        local n=0; for _,d in pairs(data) do if d.sessionWindow and d.sessionWindow:IsShown() then n=n+1 end end
+        return n<3
+    end
+    function m:GetAvailableSecondarySessionWindowIndex()
+        for i=2,3 do if data[i] and (not data[i].sessionWindow or not data[i].sessionWindow:IsShown()) then return i end end
+    end
+    function m:GetAvailableSecondaryWindowDataIndex() for i=2,3 do if not data[i] then return i end end end
+    function m:ShowNewSecondarySessionWindow()
+        call("MeterOpen")
+        local i=self:GetAvailableSecondarySessionWindowIndex() or self:GetAvailableSecondaryWindowDataIndex()
+        local d=data[i] or add(i)
+        local w=d.sessionWindow
+        -- SetupSessionWindow resets anchors and userPlaced, even for hidden frames.
+        w.shown=true; w.point="TOPLEFT"; w.relativePoint="TOPLEFT"
+        w.x=(i-1)*40; w.y=1080-(i-1)*40-w.height; w.userPlaced=false
+        after("MeterOpen")
+    end
+    function m:SetSessionWindowDamageMeterType(w,t)
+        call("MeterType"); data[w.index].damageMeterType=t
+        if not U.meterManagerOnly then w.meterType=t end
+        after("MeterType")
+    end
+    function m:SetSessionWindowSessionID(w,t,id)
+        call("MeterSession"); data[w.index].sessionType=t; data[w.index].sessionID=id
+        w.sessionType=t; w.sessionID=id; after("MeterSession")
+    end
+    function m:SetSessionWindowLocked(w,v)
+        call("MeterLock"); data[w.index].locked=v; w.locked=v; after("MeterLock")
+    end
+    function m:HideSessionWindow(w)
+        call("MeterHide"); assert(w.index~=1); w.shown=false; after("MeterHide")
+    end
+    DamageMeterPerCharacterSettings=setmetatable({}, {__index=function() error("SV read") end,
+        __newindex=function() error("SV write") end})
+    U.meterReadFail,U.meterShownFail,U.meterManagerOnly=false,false,false
+end

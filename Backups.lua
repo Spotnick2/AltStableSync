@@ -45,6 +45,17 @@ end
 
 local function Ring(b) return type(b.ring) == "table" and b.ring or {} end
 
+local function First(b, snapshot)
+    if b.firstSeen then return end
+    b.firstSeen = ASS.Catalog.Copy(snapshot)
+    -- This tiny mutable journal is filled after Show, including when Show
+    -- throws after mutation. The first backup represents the same operation.
+    -- Both serialized copies then retain its proof; other snapshots don't share it.
+    if snapshot.damageMeter then
+        b.firstSeen.damageMeter.journal = snapshot.damageMeter.journal
+    end
+end
+
 -- Newest first; past RING the oldest goes, except `keep` (the snapshot a
 -- restore is reading from, so restoring the oldest backup can be retried).
 local function Push(b, snapshot, keep)
@@ -54,7 +65,7 @@ local function Push(b, snapshot, keep)
         if b.ring[i] == keep then i = i - 1 end
         table.remove(b.ring, i)
     end
-    if not b.firstSeen then b.firstSeen = ASS.Catalog.Copy(snapshot) end
+    First(b, snapshot)
 end
 
 function Backups.Operation()
@@ -70,7 +81,7 @@ function Backups.Pin(snapshot, op)
     if b.operation then return nil, "incomplete" end
     snapshot.at = snapshot.at or Now()
     b.operation = { snapshot = snapshot, op = op }
-    if not b.firstSeen then b.firstSeen = ASS.Catalog.Copy(snapshot) end
+    First(b, snapshot)
     return true
 end
 

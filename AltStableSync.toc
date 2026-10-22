@@ -23,6 +23,7 @@ Pet.lua
 Backups.lua
 Ready.lua
 Loadout.lua
+DamageMeter.lua
 UISetup.lua
 Share.lua
 Preview.lua

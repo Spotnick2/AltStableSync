@@ -222,6 +222,27 @@ end
 -- one rejects the entry, here or received. Unknown keys (a newer build's
 -- parts) are kept as they are: never applied, kept by Save.
 local function GoodUIModules(m)
+    local meter = m.damageMeter
+    if meter ~= nil then
+        if type(meter) ~= "table" or type(meter.windows) ~= "table" then return false end
+        local function finite(v) return type(v) == "number" and v == v and math.abs(v) < math.huge end
+        for i = 1, 2 do
+            local w = meter.windows[i]
+            if type(w) ~= "table" or not finite(w.meterType) or w.meterType < 0
+                or w.meterType ~= math.floor(w.meterType) or w.sessionType ~= 1
+                or type(w.locked) ~= "boolean" or w.sessionID ~= nil then return false end
+            local g = w.geometry
+            if g ~= nil then
+                if type(g) ~= "table" or not finite(g.x) or not finite(g.y) or g.x < 0 or g.y < 0
+                    or not finite(g.width) or g.width < 200 or g.width > 600
+                    or not finite(g.height) or g.height < 120 or g.height > 400
+                    or type(g.userPlaced) ~= "boolean" then return false end
+            end
+        end
+        for k in pairs(meter.windows) do
+            if type(k) ~= "string" and k ~= 1 and k ~= 2 then return false end
+        end
+    end
     local l = m.layout
     if l ~= nil then
         if type(l) ~= "table" then return false end
