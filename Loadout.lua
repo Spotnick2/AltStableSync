@@ -1373,7 +1373,7 @@ function Loadout.PlanBackup()
     -- "Nothing new" only against a backup that restores the same way: Content
     -- includes the binding set and any macro edits, which a load's backup can
     -- carry and a manual one never does.
-    p.matches = ring[1] ~= nil and Content(ring[1]) == Content(snap)
+    p.matches = ring[1] ~= nil and ring[1].kind == nil and Content(ring[1]) == Content(snap)
     if #ring >= ASS.Backups.RING then p.evicts = ring[#ring] end
     -- Everything the preview shows, by value: the content, what is left out,
     -- and the backup that would drop (its content and time, not a reference).
@@ -1400,6 +1400,9 @@ function Loadout.PlanRestore(which)
     local plan = { kind = "restore", which = which, actions = {}, creates = {}, edits = {}, keys = {}, skips = {},
                    unavailable = {} }
     if not snap then plan.blocked = "No such backup." return Finish(plan) end
+    -- A loadout backup has no kind; any other (a UI setup's, #10, or one a
+    -- newer build wrote) is never read as one.
+    if snap.kind ~= nil then plan.blocked = "Not a loadout backup." return Finish(plan) end
     plan.blocked = Loadout.Blocked()
     if plan.blocked then return Finish(plan) end
     local book = Game.Spellbook()

@@ -187,11 +187,98 @@ end
 -- Local changes (each one is an explicit, confirmed player action)
 ------------------------------------------------------------
 
--- Content a loadout may hold: a table, with a valid cover (#5).
+-- An array of exactly the keys 1..n (no holes, no other keys), n <= max,
+-- each value passing `ok`.
+local function ArrayOf(t, max, ok)
+    if type(t) ~= "table" then return false end
+    local n = 0
+    for k in pairs(t) do
+        if type(k) ~= "number" or k < 1 or k ~= math.floor(k) then return false end
+        n = n + 1
+    end
+    if n > max then return false end
+    for i = 1, n do
+        if t[i] == nil or not ok(t[i]) then return false end
+    end
+    return true
+end
+
+local function Text(s, max) return type(s) == "string" and s ~= "" and #s <= max end
+
+-- A chat message group token (ChatTypeGroup keys: "SAY", "BN_WHISPER", ...).
+local function Group(s) return type(s) == "string" and #s <= 64 and s:match("^%u[%u%d_]*$") ~= nil end
+
+local function Groups(t)
+    if not ArrayOf(t, 80, Group) then return false end
+    local seen = {}
+    for _, g in ipairs(t) do
+        if seen[g] then return false end
+        seen[g] = true
+    end
+    return true
+end
+
+-- A UI setup's parts (#10). Every known part is optional, and a malformed
+-- one rejects the entry, here or received. Unknown keys (a newer build's
+-- parts) are kept as they are: never applied, kept by Save.
+local function GoodUIModules(m)
+    local l = m.layout
+    if l ~= nil then
+        if type(l) ~= "table" then return false end
+        if l.type == 1 then
+            if not Text(l.name, 64) then return false end
+        elseif l.type == 0 then
+            if type(l.index) ~= "number" or l.index < 1 or l.index > 3 or l.index ~= math.floor(l.index) then
+                return false
+            end
+            if l.name ~= nil and not Text(l.name, 64) then return false end
+        else
+            return false
+        end
+    end
+    local b = m.bars
+    if b ~= nil then
+        if type(b) ~= "table" then return false end
+        for k, v in pairs(b) do
+            if type(k) ~= "number" or k < 2 or k > 8 or k ~= math.floor(k) or type(v) ~= "boolean" then return false end
+        end
+        for i = 2, 8 do if b[i] == nil then return false end end
+    end
+    local c = m.cvars
+    if c ~= nil then
+        if type(c) ~= "table" then return false end
+        for k, v in pairs(c) do
+            if type(k) ~= "string" or #k > 64 or not k:match("^%a[%w_]*$") then return false end
+            if type(v) ~= "string" or #v > 64 then return false end
+        end
+    end
+    local ch = m.chat
+    if ch ~= nil then
+        if type(ch) ~= "table" then return false end
+        if ch.primary ~= nil and not Groups(ch.primary) then return false end
+        if ch.tabs ~= nil then
+            local names = {}
+            local function tab(t)
+                if type(t) ~= "table" or not Text(t.name, 32) or names[t.name] or not Groups(t.groups) then
+                    return false
+                end
+                names[t.name] = true
+                return true
+            end
+            if not ArrayOf(ch.tabs, 9, tab) then return false end
+        end
+    end
+    return true
+end
+
+-- Content an entry may hold: a table; a loadout's with a valid cover (#5),
+-- a UI setup's with well-formed parts (#10).
 local function GoodModules(kind, modules)
     if type(modules) ~= "table" then return false end
+    if kind == "ui" then return GoodUIModules(modules) end
     return kind ~= "loadout" or ASS.Cover.Ok(modules)
 end
+Catalog.GoodUIModules = GoodUIModules
 
 -- A new entry. `keepKeys` is for keeping an entry that arrived from the other
 -- account: its class/category stay as they are, even keys this build doesn't

@@ -17,7 +17,7 @@ client). It keeps an **account-wide catalog** of two kinds of saved entry:
 |---|---|---|
 | Example | My UI; My UI - Druid | Priest / Discipline / Everyday |
 | Purpose | Initialise how the interface looks, plus supported preferences | Reuse the controls for a chosen build |
-| Contains | Edit Mode layout (#15) and a small allowlist of measured UI settings (#16). Supported addon appearance later (#22, #23). | Action bars, keybindings, and the character macros the bars need |
+| Contains | The Edit Mode layout to select (#15), action bars 2-8 shown or hidden, a small allowlist of settings (#16), and chat tabs (#10). Supported addon appearance later (#22, #23). | Action bars, keybindings, and the character macros the bars need |
 | Main action | Apply | Load |
 | Update | Save | Save |
 | Independent copy | Save As | Save As |
@@ -75,8 +75,9 @@ Measured on the live client unless marked otherwise. Details and sources:
   keys stay identical, `UPDATE_BINDINGS` fires inside `LoadBindings`, and it survives a full exit.
 - **Readiness:** the first `UPDATE_MACROS` holds account macros only. Everything read correctly by
   `PLAYER_LOGIN`; `SPELLS_CHANGED` fires after `PLAYER_ENTERING_WORLD`.
-- **Edit Mode:** the layout string round-trips the systems but **drops name and type**. Creating,
-  activating, persisting and restoring a layout is **not yet measured** (#29).
+- **Edit Mode:** the layout string round-trips the systems but **drops name and type**. Selecting a
+  layout with `SetActiveLayout`, by an index that counts the 3 presets first, is measured (#29, 70338);
+  a UI setup only ever selects one (#10).
 - **`C_EncodingUtil`** CBOR→Deflate→Base64 round-trips. A worst-case loadout is 2.7 KB.
 - **`WOW_PROJECT_ID` changed 1→18 between beta builds**: never a flavour or migration trigger.
 - **LibAccountSync** reaches the owner's other WoW accounts on the same Battle.net account (same game
@@ -141,7 +142,7 @@ bus.
 
 ```lua
 AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
-  schema = 9,                       -- #27 1 -> 2, #28 2 -> 3, #5 3 -> 4, #46 4 -> 5, #7 5 -> 6, #47 6 -> 7, #6 7 -> 8, #62 8 -> 9 (a stamp); an unknown or newer schema is refused untouched
+  schema = 10,                      -- #27 1 -> 2, #28 2 -> 3, #5 3 -> 4, #46 4 -> 5, #7 5 -> 6, #47 6 -> 7, #6 7 -> 8, #62 8 -> 9, #10 9 -> 10 (stamps); an unknown or newer schema is refused untouched
   presets = {
     [id] = {
       id = "loadout-a1b2c3d4e5f6-12",          -- kind-writer-seq: never collides across accounts or copies
@@ -159,7 +160,11 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
                   -- a spell action from a class spellbook tab carries class = true (#46, schema 5)
                   -- pet = { [familyId] = { family, locale, slots = { [1..10] = { kind = "token", token }
                   --         | { kind = "spell", id, name } | false } } }: a pet bar per pet family (#47, schema 7)
-             or { editmode = {...}, cvars = {...} },                    -- UI setup
+             or { layout = { type = 1, name } | { type = 0, index, name },  -- UI setup (#10); every part optional
+                  bars = { [2..8] = bool },
+                  cvars = { [name] = "value" },
+                  chat = { primary = { groups }, tabs = { { name, groups } } } },
+                  -- unknown keys (a newer build's parts) are kept, never applied
       previous = { of = version, modules, updated },  -- LOCAL "undo my last Save": the content before the Save
                                                -- that produced version `of`; never sent, untouched by sync
       deleted = true,                          -- a versioned tombstone: no modules, kept indefinitely
@@ -169,7 +174,11 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
   backups = { [guid] = {                       -- exact runtime snapshots; each snapshot carries
                                                -- createdMacros = { {index, name, body}, ... }: the
                                                -- character macros the operation it preceded created
-      ring = { <up to 10, oldest evicted> },  -- a snapshot of a pet bar write also holds
+      ring = { <up to 10, oldest evicted> },  -- a UI setup's snapshot has kind = "ui" (#10, schema 10):
+                                               -- { layout, bars, cvars, chat = { primary, tabs = { { slot,
+                                               --   name, groups } }, creating = { names } } }, only the parts
+                                               -- its plan touched; no kind = a loadout snapshot
+                                               -- a snapshot of a pet bar write also holds
                                                -- pet = { family, familyName, guid, name, slots } (#47);
                                                -- one that updates character macros holds
                                                -- editedMacros = { {name, before = {body, icon},
@@ -186,7 +195,10 @@ AltStableSyncChar = {               -- per character
   schema = 9,                       -- same number as the DB; an unknown or newer one is refused untouched
   lastSelected = { ui = id, loadout = { category = "discipline", id = id } },
   loaded = {                        -- ONE baseline per kind: the last Load/Apply, or a Save/Save As (#28)
-    ui = { id, version, baseline = <modules as loaded>, result = {...} },
+    ui = { id, version, baseline = <modules as applied>, result = {...},
+           complete = bool,                 -- false from the first write until the apply completes
+           skipped = { layout = why, bars = why, cvars = { [name] = why } },  -- kept by Save
+           restored = true | nil },         -- a UI backup was restored since: Save refused
     loadout = { id, version, baseline = <modules as loaded or saved>,
                 after = <a capture right after a COMPLETED load, or as of the last Save> | nil,
                         -- after.bindings only when taken under Character bindings
@@ -620,8 +632,11 @@ not take a save of them.
 - **Backups…:** the incomplete operation, the ring newest first, then the first backup. Selection follows
   the snapshot itself; **Restore…** finds its current slot at the click. An incomplete operation also
   shows in the footer with **Undo it…**.
-- **UI setup:** "Saved UI setups (Edit Mode layout and settings) aren't available yet." Planned: a
-  saved-setup picker; a Layout / Preferences / Addons summary; Apply, Save, Save As.
+- **UI setup** (#10): a saved-setup picker (starting on the setup this character applied), the saved
+  contents one line per part (unknown parts "not supported on this build"), and **Apply…** (primary),
+  **Save…**, **Save As…** (the name dialog, name only). With none saved: "Save this character's layout,
+  action bars, settings and chat tabs as a UI setup". `/altsync ui [apply|save|saveas|rename|delete]`
+  open the same previews.
 - **Footer:** the last command's message (refusals included), else the state, else the Link
   availability ("Other account online": availability only, never "in sync").
 - **Buttons:** primary, secondary and disabled look different; a disabled button says why on hover
@@ -652,22 +667,70 @@ not take a save of them.
 The storyboard (`docs/storyboard/`) and mockup (`docs/mockups/`) are design concepts, not a running
 addon. This document wins where they simplify.
 
-## UI setups: providers (#15, #16)
+## UI setups: parts (#10, #15, #16)
 
-A provider defines capture, validation, diff, apply, verify and exact restore. It also states whether
-it needs a reload and which scope it changes (character or account). Providers are plain module
-functions, not a plugin framework.
+`UISetup.lua`: four plain parts, each with read, plan, write and read-back, applied in a fixed order
+(layout, bars, settings, chat). Apply follows the loadout's transaction: preview, fingerprint
+(stale refused), a snapshot of the touched parts pinned before the first write, a guard (combat, Edit
+Mode open) before every write, read-back, and a stop that keeps the pin. `loaded.ui` names the
+attempted entry with `complete = false` from the first write, so Save can't write a partial state into
+it. Restore is exact; `Commands.restore` sends a `kind = "ui"` backup to it, and the loadout restore
+refuses any backup with a kind.
 
-- **Edit Mode** (#15): import into an **addon-owned Character layout**, never edit a shared layout in
-  place. Store the layout's name and type beside the systems string. Restore the prior active layout
-  by identity, not list position. It ships only if probe #29 proves create, activate, persist and
-  restore after a full exit.
-- **CVars** (#16): the smallest measured allowlist. Account scope is disclosed in the preview.
+- **Layout** (#15, owner 2026-10-21): **select an existing layout**, never create, import, edit or delete
+  one (no `SaveLayouts`). An Account layout is found by type and name, a preset by its index; none or
+  two of that name is a visible skip. Catalog capture leaves out an active Character layout (only that
+  character has it); a backup keeps it, so Restore can select it again. Restore promises the previous
+  selection, never the shared layout's contents. Importing a layout to an account that lacks it is
+  deferred.
+- **Action bars 2-8:** `SetActionBarToggles` with all seven values (measured), so
+  `enableMultiActionBars` has one owner. The values read back at once, but the bars only appear
+  after a reload (measured on the beta, 2026-10-22). So the preview says so, and an apply or restore
+  that wrote them opens **"Reload to finish"** (`Reload.lua`): **Later**, or **Reload now**, a
+  `SecureActionButtonTemplate` whose macro is `/reload` (`ReloadUI()` is protected). The button is
+  built at load, parented to UIParent and placed by coordinates (never anchored to the prompt, which
+  would make the prompt protected), kept at a higher frame level than the prompt (on the beta a click
+  on it did nothing, most likely landing on the prompt), its secure template listed last, registered
+  for both mouse edges, hidden at
+  `PLAYER_REGEN_DISABLED`, and never shown in combat. Nothing reloads without the click.
+- **Settings** (#16): the allowlist `damageMeterEnabled`, `damageMeterResetOnNewInstance`,
+  `raidFramesDisplayClassColor`, `raidFramesDisplayPowerBars` ("0"/"1") and
+  `raidFramesHealthBarColorBG` (8 hex digits). `enableMouseoverCast` is not on it: `GetCVarInfo`
+  reports it protected (measured on the beta, 2026-10-22), so it stays a manual setting. At plan time each is checked with `GetCVarInfo`:
+  secure, read-only or locked is skipped; account-stored says "affects this WoW account". A name
+  outside this build's list, or a value outside its domain, stays in the entry and is skipped.
+- **Chat** (#10): window 1 by role (its name is the player's), custom tabs by a unique name among the
+  active, unreserved windows (never the Combat Log). **Apply is additive:** an existing window only
+  gains the saved groups `ChatTypeGroup` knows; a missing tab is created with
+  `FCF_OpenNewWindow(name, true)` (no default groups or channels) and given exactly the saved groups,
+  when a free window exists for every tab planned. Creation is skipped when a docked tab is
+  click-through (docking would change that for the whole dock). Apply never removes a group from an
+  existing window, closes, renames, moves or re-docks one, or touches channels, colours or position.
+  **Restore** sets each snapshotted window's groups back exactly (window identified by slot and name;
+  every group it would add **or remove** must be known to the client, else the window is left alone;
+  a type outside `ChatTypeGroup` that stays as it is never blocks it: General holds seven on Forever,
+  `SYSTEM_NOMENU`, `BN_WHISPER_INFORM` and others, measured on the beta, 2026-10-22),
+  adding before removing, each read back. Every chat write (#91 review) first re-reads the window: a
+  failed read stops before any write, and the window must still hold what the preview saw. After its
+  writes the whole window is read again and must be exactly the target (a restore, a new tab) or hold
+  everything it held plus the additions (an apply); otherwise the operation stops and keeps its
+  backup pinned. **Tabs an apply created are kept** and listed, as a load's
+  created macros are (safety rule 9): closing a tab loses its channels and position.
+- **Save** replaces the entry this character applied, at that version, only after a complete apply and
+  no restore since. It updates only the parts the entry has; a part or setting the apply skipped keeps
+  the entry's value, as do unknown keys and groups this client doesn't know. Chat saves the windows as
+  they are now, so groups a window had before an additive apply join the entry; the preview lists each
+  group added or removed. **Save As** captures all four parts;
+  a tab that receives no message types (channels only, or an addon's console tab) is left out and
+  said so; Save drops such a tab from an entry that has one, and Apply never creates one (an entry
+  saved before this rule still held one, beta 2026-10-22).
 - **Addon settings** (#22, #23): later, provider by provider. Never assign arbitrary SavedVariables
   or another addon's profile keys. A field never has two owners (UI setup vs loadout).
 
-If a provider isn't ready, the UI setup shows the supported subset honestly. Nothing unsupported gets
-a success tick.
+If a part can't be applied, the preview says so ("Skipped: …"); "Already matches the selected
+settings." only when nothing was skipped. **Release condition:** chat and each setting ship in a merged
+build only after the in-game check passes for them (the PR lists it); a part that fails is turned off
+first.
 
 ## Catalog sync between the owner's WoW accounts (#18)
 
@@ -992,3 +1055,21 @@ schema refusal, readiness and combat gates, macro ownership, read-back, or catal
   - **Keeping an edit of a deleted entry:** it takes the caller's name, or the first free
     "(kept)"/"(kept N)" name, and preserves the received class/category keys.
   - **Consensus reached.
+- **2026-10-21, UI setups and the first-login offer (#10):** four plan rounds with gpt-6-astra (high),
+  ending in **consensus**. Accepted:
+  - chat on Apply additive, and Restore keeping created tabs (closing one loses its channels and
+    position, which no backup holds), instead of tracking tab ownership to close them;
+  - the primary chat window by role, custom tabs by a unique name, capacity planned up front;
+  - a new tab created without default groups, then given exactly the saved ones; creation skipped
+    when the dock is click-through;
+  - Restore checks both the wanted and the current groups before touching a window, and adds before
+    it removes;
+  - layouts by type and name; a preset by index; Character layouts never in the catalog;
+  - `loaded.ui` set before the first write; Save refused after a failed apply or a restore, and
+    keeping what the apply skipped;
+  - CVar value domains, and applicability checked at plan time while unknown data stays in the entry;
+  - restore and report dispatch by backup kind, with schema 10 so an older build refuses a UI backup;
+  - the offer's own "Not now" callback, apart from Escape;
+  - a release condition: chat and each setting merge only after the in-game check passes.
+
+  Rejected: nothing material.

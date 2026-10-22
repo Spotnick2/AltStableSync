@@ -158,8 +158,17 @@ function NewWidget(kind, name, parent)
     return f
 end
 
-function CreateFrame(kind, name, parent)
+function Widget:SetFrameLevel(n) self.level = n end
+function Widget:GetFrameLevel() return self.level or 1 end
+function Widget:SetAttribute(k, v) self.attributes = self.attributes or {}; self.attributes[k] = v end
+function Widget:GetAttribute(k) return self.attributes and self.attributes[k] end
+function Widget:RegisterForClicks(...) self.clicks = { ... } end
+function Widget:SetPoint(...) self.points = self.points or {}; self.points[#self.points + 1] = { ... } end
+function Widget:ClearAllPoints() self.points = {} end
+
+function CreateFrame(kind, name, parent, template)
     local f = NewWidget(kind or "Frame", name, parent)
+    f.template = template
     table.insert(WoW.frames, f)
     if name then _G[name] = f end
     return f

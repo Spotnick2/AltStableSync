@@ -36,9 +36,12 @@ local ADDON_NAME = "AltStableSync"
 -- (#6), a stamp too: 8 adds backups' optional `editedMacros` (the character
 -- macros a load updated, as they were and as it left them); and 8 -> 9
 -- (#62), a stamp too: 9 adds the optional account-wide `minimap` settings
--- ({ angle, hide }), created only when the minimap button first writes one.
+-- ({ angle, hide }), created only when the minimap button first writes one;
+-- and 9 -> 10 (#10), a stamp too: 10 adds UI setup backups (`kind = "ui"`)
+-- and the loaded record `loaded.ui`, so a schema-9 build refuses a file
+-- holding a UI backup instead of restoring it as an empty loadout.
 -- There is no migration framework.
-local SCHEMA = 9
+local SCHEMA = 10
 ASS.SCHEMA = SCHEMA
 
 ------------------------------------------------------------
@@ -190,7 +193,7 @@ local function Validate(db, char)
         end
         dbAction = "upgrade1"
     elseif db.schema ~= SCHEMA and db.schema ~= 2 and db.schema ~= 3 and db.schema ~= 4 and db.schema ~= 5
-        and db.schema ~= 6 and db.schema ~= 7 and db.schema ~= 8 then
+        and db.schema ~= 6 and db.schema ~= 7 and db.schema ~= 8 and db.schema ~= 9 then
         return WrongSchema("saved data", db.schema)
     else
         for _, field in ipairs(DB_TABLES) do
@@ -220,7 +223,7 @@ local function Validate(db, char)
     elseif char.schema == nil then
         return "AltStableSyncChar has data but no schema"
     elseif char.schema ~= SCHEMA and char.schema ~= 2 and char.schema ~= 3 and char.schema ~= 4 and char.schema ~= 5
-        and char.schema ~= 6 and char.schema ~= 7 and char.schema ~= 8 then
+        and char.schema ~= 6 and char.schema ~= 7 and char.schema ~= 8 and char.schema ~= 9 then
         return WrongSchema("character data", char.schema)
     elseif char.loaded ~= nil and type(char.loaded) ~= "table" then
         return "AltStableSyncChar.loaded is a " .. type(char.loaded) .. ", not a table"
@@ -347,7 +350,7 @@ local function SlashHandler(msg)
     elseif ASS.Commands and type(ASS.Commands[cmd]) == "function" then
         ASS.Commands[cmd](rest)
     else
-        Print("commands: /altsync (the window) | minimap | backup | import | status | saveas <name> | save [drop] | list | load <id or name> | backups | restore [n or op]" .. " | rename <id or name> <new name> | delete <id or name> | conflicts | resolve <id or name> theirs or mine | link")
+        Print("commands: /altsync (the window) | minimap | backup | import | status | saveas <name> | save [drop] | list | load <id or name> | backups | restore [n or op]" .. " | rename <id or name> <new name> | delete <id or name> | conflicts | resolve <id or name> theirs or mine | link | ui")
     end
 end
 ASS.SlashHandler = SlashHandler

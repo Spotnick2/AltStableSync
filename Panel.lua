@@ -607,12 +607,17 @@ local function Dialog()
         local trimmed, err
         if ASS.disabled or not ASS.db then trimmed, err = nil, "unavailable"
         else
-            trimmed, err = ASS.Catalog.ValidateName("loadout", PlayerClass(), d.category, d.name:GetText(), d.exceptId)
+            local ui = d.mode == "uisaveas"
+            trimmed, err = ASS.Catalog.ValidateName(ui and "ui" or "loadout", not ui and PlayerClass() or nil,
+                not ui and d.category or nil, d.name:GetText(), d.exceptId)
         end
         local show = not trimmed and (err ~= "name-empty" or showEmpty) and err ~= "unavailable"
-        d.hint:SetText(show and (NAME_COPY[err] or tostring(err)) or "")
-        Set(d.review, trimmed ~= nil and (not d.needsWrite or Panel.CanWrite()),
-            not trimmed and (NAME_COPY[err] or "Not available now.") or Panel.WhyNot())
+        local copy = (d.mode == "uisaveas" and err == "name-duplicate") and "A UI setup already has that name."
+            or NAME_COPY[err]
+        local whyNot = d.mode == "uisaveas" and Panel.WhyNotUI() or Panel.WhyNot()
+        d.hint:SetText(show and (copy or tostring(err)) or "")
+        Set(d.review, trimmed ~= nil and (not d.needsWrite or whyNot == nil),
+            not trimmed and (copy or "Not available now.") or whyNot)
         return trimmed ~= nil
     end
     d.name:SetScript("OnTextChanged", function() d.Check(false) end)
@@ -627,6 +632,7 @@ local function Dialog()
         local name, category, exceptId, mode = d.name:GetText(), d.category, d.exceptId, d.mode
         d:Hide()
         if mode == "saveas" then Cmd().SaveAsEntry(name, category)
+        elseif mode == "uisaveas" then Cmd().SaveAsUI(name)
         elseif exceptId then Cmd().RenameEntry(exceptId, name) end
     end)
     d:Hide()
@@ -659,6 +665,15 @@ local function ShowNameDialog(mode, entry)
             d.cat.label:SetText(ASS.Categories.Label(class, key))
             d.Check(false)
         end
+    elseif mode == "uisaveas" then
+        d.needsWrite = true
+        d.exceptId, d.category = nil, nil
+        d.title:SetText("Save As")
+        d.intro:SetText("Creates a new UI setup from this character. You'll review it before it's saved.")
+        d.catLabel:Hide(); d.cat:Hide()
+        d.nameLabel:SetPoint("TOPLEFT", PAD, -62)
+        d.name:SetPoint("TOPLEFT", PAD + 6, -78)
+        d.name:SetText("")
     else
         d.needsWrite = false
         d.exceptId = entry.id
@@ -960,6 +975,13 @@ end
 
 function Panel.CanWrite() return Panel.WhyNot() == nil end
 
+-- UI setups have their own gate (no cursor; Edit Mode and chat settings closed).
+function Panel.WhyNotUI()
+    local ok, why = pcall(function() return ASS.UISetup.Blocked() end)
+    if not ok then return "Not available now." end
+    return why
+end
+
 local function ShowView(view)
     Panel.view = view
     CloseMenu()
@@ -1169,10 +1191,69 @@ local function BuildBackups(v)
     end)
 end
 
+-- The UI setup tab (#10): a saved setup, what it holds, Apply / Save / Save As.
+-- Every button opens the same preview as /altsync ui; only its confirm writes.
 local function BuildUI(v)
-    local t = Text(v, "GameFontHighlight", WIDTH - 2 * PAD, BODY)
-    t:SetPoint("TOPLEFT", 0, -4)
-    t:SetText("Saved UI setups (Edit Mode layout and settings) aren't available yet.")
+    local w = WIDTH - 2 * PAD
+    local label = Text(v, "GameFontNormal", w)
+    label:SetPoint("TOPLEFT", 0, 0)
+    label:SetText("Saved UI setup")
+    W.uiEntry = Picker(v, w)
+    W.uiEntry:SetPoint("TOPLEFT", 0, -16)
+    W.uiEntry.onPick = function(id)
+        Panel.sel.ui = id
+        Panel.Refresh()
+    end
+    W.uiContents = Text(v, "GameFontHighlight", w, BODY)
+    W.uiContents:SetPoint("TOPLEFT", 0, -54)
+    W.uiFoot = Text(v, "GameFontHighlightSmall", w, MUTED)
+    W.uiFoot:SetPoint("TOPLEFT", W.uiContents, "BOTTOMLEFT", 0, -6)
+    W.uiApply = GButton(v, "Apply...", 120, "primary")
+    W.uiApply:SetPoint("TOPLEFT", W.uiFoot, "BOTTOMLEFT", 0, -10)
+    W.uiApply:SetScript("OnClick", function()
+        if Panel.sel.ui then CloseMenu(); Cmd().ApplyUI(Panel.sel.ui) end
+    end)
+    W.uiSave = GButton(v, "Save...", 100, "secondary")
+    W.uiSave:SetPoint("LEFT", W.uiApply, "RIGHT", 8, 0)
+    W.uiSave:SetScript("OnClick", function() CloseMenu(); Cmd().SaveUI() end)
+    W.uiSaveAs = GButton(v, "Save As...", 100, "secondary")
+    W.uiSaveAs:SetPoint("LEFT", W.uiSave, "RIGHT", 8, 0)
+    W.uiSaveAs:SetScript("OnClick", function() ShowNameDialog("uisaveas") end)
+end
+
+-- The UI tab's widgets from the catalog: the picker starts on the setup this
+-- character applied, else the first.
+local function RefreshUI()
+    local all = ASS.Catalog.ListAll("ui")
+    local rec = ASS.char and ASS.char.loaded and ASS.char.loaded.ui
+    local live = {}
+    for _, e in ipairs(all) do live[e.id] = e end
+    if not (Panel.sel.ui and live[Panel.sel.ui]) then
+        Panel.sel.ui = (rec and live[rec.id] and rec.id) or (all[1] and all[1].id) or nil
+    end
+    local e = Panel.sel.ui and live[Panel.sel.ui]
+    local items = {}
+    for _, x in ipairs(all) do
+        items[#items + 1] = { text = ASS.Literal(x.name) .. (rec and rec.id == x.id and "  (applied here)" or ""),
+                              value = x.id }
+    end
+    W.uiEntry.items, W.uiEntry.value = items, Panel.sel.ui
+    W.uiEntry.label:SetText(e and ASS.Literal(e.name) or "No saved UI setups")
+    if e then
+        W.uiContents:SetText(table.concat(ASS.UISetup.Contents(e.modules), "\n"))
+        local from = type(e.provenance) == "table" and e.provenance.sourceChar
+        W.uiFoot:SetText(("Saved %s%s"):format(When(e.updated), from and (" by " .. ASS.Literal(from)) or ""))
+    else
+        W.uiContents:SetText("Save this character's layout, action bars, settings and chat tabs as a UI setup:"
+            .. " other characters can then apply it.")
+        W.uiFoot:SetText("")
+    end
+    local whyNot = Panel.WhyNotUI()
+    Set(W.uiApply, e ~= nil and whyNot == nil, e == nil and "No saved UI setup." or whyNot)
+    local saveable = rec and live[rec.id] and live[rec.id].version == rec.version and rec.complete and not rec.restored
+    Set(W.uiSave, saveable and whyNot == nil,
+        not saveable and "Save updates the UI setup this character applied; apply one first, or use Save As." or whyNot)
+    Set(W.uiSaveAs, whyNot == nil, whyNot)
 end
 
 local function Build()
@@ -1325,6 +1406,7 @@ function Panel.Refresh()
     W.backupsLink:SetText(Panel.view == "backups" and "< Loadouts" or "Backups...")
     local whyNot = Panel.WhyNot()
     local canWrite = whyNot == nil
+    if Panel.view == "ui" then RefreshUI() end
 
     -- What is browsed: kept for the session.
     if m.selectionGone then Panel.sel.id, Panel.sel.noDefault = nil, true end
