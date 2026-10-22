@@ -317,4 +317,10 @@ r=apply(e)
 check("size readback required",r.failed and B.Operation())
 eq("failed size stops before position",U.count("MeterPoint"),0)
 
+boot()
+B.Pin({kind="ui",meter={windows={}}},{kind="ui",name="Earlier draft"})
+r=restore("op")
+check("draft backup remains unavailable and pinned",r.partial and B.Operation())
+eq("draft backup never writes",#U.calls,0)
+
 finish("damage meter")

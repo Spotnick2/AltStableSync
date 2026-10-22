@@ -85,7 +85,7 @@ persistence are NOT measured on Forever. Runtime capability checks fail closed w
    a frame off-screen to copy another resolution. Snapshot restore restores physical
    position/size and userPlaced, not the spelling of equivalent anchor points. Source XML
    secondary limits are 200–600 wide, 120–400 high; check runtime bounds if available.
-9. Bump schema 10 to 11: an older build would ignore a damage-meter field in a UI backup,
+9. Bump schema 10/11 to 12: an older build would ignore a damage-meter field in a UI backup,
    call it fully restored and release the operation. The migration is a stamp only; old
    entries/backups are unchanged. Add explicit schema upgrade/refusal tests.
 
@@ -116,6 +116,13 @@ ephemeral/read-only, bounded to 420 seconds per round.
   propagate the opened journal to firstSeen; bound ephemeral encounter restoration.
 - Round 2: **CONSENSUS** on the revised plan, including conservative encounter skipping.
   The reviewer explicitly left implementation testing and Forever validation outstanding.
+- Publishing discovered two earlier Claude WIP commits on the remote branch, using schema
+  11 and a different `meter` field. Preserve that branch ancestry; this implementation uses
+  schema 12 so the draft refuses its files. Upgrade 11 by stamp, retain draft catalog data
+  as an unknown part, and mark draft `meter` backups unavailable/partial without releasing
+  their pin. No automatic migration of the incompatible draft representation.
+- Round 3: **CONSENSUS** on this narrow handoff/schema adjustment. Explicit abandonment
+  still follows the existing rule; a partial restore cannot automatically release the pin.
 - Implemented in the existing transaction. Primary hidden means a visible skip (never
   mistake it for permission to allocate another secondary). A configuration-only backup
   excludes untouched geometry. Hiding also requires readable geometry for undo-of-restore.

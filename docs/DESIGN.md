@@ -753,8 +753,8 @@ refuses any backup with a kind.
   **Unmeasured on Forever:** method availability, addon-call taint safety, placement and
   persistence through full client exit. Evidence is Mainline UI source at
   [b9be9379](https://github.com/Gethe/wow-ui-source/tree/b9be9379719047977fca4dba1bb1d9988e8840b3/Interface/AddOns/Blizzard_DamageMeter),
-  not client verification. The owner must check these before merging. Schema 11 is a stamp
-  upgrade that prevents schema-10 code from ignoring this backup part and releasing its pin.
+  not client verification. The owner must check these before merging. Schema 12 is a stamp
+  upgrade that prevents schema-10/11 code from ignoring this backup part and releasing its pin.
 - **Save** replaces the entry this character applied, at that version, only after a complete apply and
   no restore since. It updates only the parts the entry has; a part or setting the apply skipped keeps
   the entry's value, as do unknown keys and groups this client doesn't know. Chat saves the windows as

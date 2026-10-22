@@ -820,6 +820,9 @@ function UISetup.PlanRestore(which)
     plan.blocked = UISetup.Blocked()
     if plan.blocked then return Finish(plan) end
     local function cant(what, reason) plan.unavailable[#plan.unavailable + 1] = { what = what, reason = reason } end
+    if snap.meter ~= nil then
+        cant("Damage meter", "backup from an earlier draft; not supported on this build, left unchanged")
+    end
     if snap.damageMeter then
         local why
         if ASS.DamageMeter then plan.damageMeter, why = ASS.DamageMeter.Plan(snap.damageMeter, true)

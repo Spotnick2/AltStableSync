@@ -41,9 +41,10 @@ local ADDON_NAME = "AltStableSync"
 -- and the loaded record `loaded.ui`, so a schema-9 build refuses a file
 -- holding a UI backup instead of restoring it as an empty loadout.
 -- There is no migration framework.
--- 10 -> 11 is a stamp: damage-meter backups must not be silently treated as
--- completely restored by an older UI setup engine that ignores this part.
-local SCHEMA = 11
+-- 10/11 -> 12 is a stamp: damage-meter backups must not be silently treated
+-- as restored by older engines. An unpublished draft used 11 with `meter`;
+-- UISetup refuses to claim that draft's meter snapshots were restored.
+local SCHEMA = 12
 ASS.SCHEMA = SCHEMA
 
 ------------------------------------------------------------
@@ -195,7 +196,7 @@ local function Validate(db, char)
         end
         dbAction = "upgrade1"
     elseif db.schema ~= SCHEMA and db.schema ~= 2 and db.schema ~= 3 and db.schema ~= 4 and db.schema ~= 5
-        and db.schema ~= 6 and db.schema ~= 7 and db.schema ~= 8 and db.schema ~= 9 and db.schema ~= 10 then
+        and db.schema ~= 6 and db.schema ~= 7 and db.schema ~= 8 and db.schema ~= 9 and db.schema ~= 10 and db.schema ~= 11 then
         return WrongSchema("saved data", db.schema)
     else
         for _, field in ipairs(DB_TABLES) do
@@ -225,7 +226,7 @@ local function Validate(db, char)
     elseif char.schema == nil then
         return "AltStableSyncChar has data but no schema"
     elseif char.schema ~= SCHEMA and char.schema ~= 2 and char.schema ~= 3 and char.schema ~= 4 and char.schema ~= 5
-        and char.schema ~= 6 and char.schema ~= 7 and char.schema ~= 8 and char.schema ~= 9 and char.schema ~= 10 then
+        and char.schema ~= 6 and char.schema ~= 7 and char.schema ~= 8 and char.schema ~= 9 and char.schema ~= 10 and char.schema ~= 11 then
         return WrongSchema("character data", char.schema)
     elseif char.loaded ~= nil and type(char.loaded) ~= "table" then
         return "AltStableSyncChar.loaded is a " .. type(char.loaded) .. ", not a table"
