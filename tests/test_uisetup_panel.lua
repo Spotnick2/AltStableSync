@@ -82,6 +82,8 @@ do
     eq("reload: runs /reload", b:GetAttribute("macrotext"), "/reload")
     check("reload: both mouse edges", b.clicks and b.clicks[1] == "AnyUp" and b.clicks[2] == "AnyDown")
     check("reload: parented to UIParent, not to the prompt", b.parent == UIParent)
+    check("reload: the secure template last", tostring(b.template):match("SecureActionButtonTemplate$") ~= nil)
+    check("reload: above the prompt", b:GetFrameLevel() > R.prompt:GetFrameLevel())
     for _, p in ipairs(b.points or {}) do
         check("reload: placed against UIParent only", p[2] == UIParent)
     end

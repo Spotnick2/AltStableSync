@@ -51,11 +51,16 @@ local function Build()
     later:SetScript("OnClick", function() f:Hide() end)
     f.later = later
 
+    -- The secure template last, so its click handler is the one that stays
+    -- (a later template's scripts replace an earlier one's).
     local b = CreateFrame("Button", "AltStableSyncReloadButton", UIParent,
-                          "SecureActionButtonTemplate,UIPanelButtonTemplate")
+                          "UIPanelButtonTemplate,SecureActionButtonTemplate")
     b:SetSize(120, 24)
     b:SetPoint("CENTER", UIParent, "CENTER", BUTTON_X, BUTTON_Y)
     b:SetFrameStrata("DIALOG")
+    -- Above the prompt, which takes the mouse: on the beta (2026-10-22) a
+    -- click on the button did nothing, most likely landing on the prompt.
+    b:SetFrameLevel(f:GetFrameLevel() + 10)
     b:SetText("Reload now")
     b:RegisterForClicks("AnyUp", "AnyDown")
     b:SetAttribute("type", "macro")
@@ -82,6 +87,7 @@ function Reload.Ask(text)
     if InCombatLockdown() then return false end
     prompt.body:SetText(text)
     prompt:Show()
+    button:SetFrameLevel(prompt:GetFrameLevel() + 10)
     button:Show()
     return true
 end

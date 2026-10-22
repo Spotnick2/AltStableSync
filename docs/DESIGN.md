@@ -689,7 +689,9 @@ refuses any backup with a kind.
   that wrote them opens **"Reload to finish"** (`Reload.lua`): **Later**, or **Reload now**, a
   `SecureActionButtonTemplate` whose macro is `/reload` (`ReloadUI()` is protected). The button is
   built at load, parented to UIParent and placed by coordinates (never anchored to the prompt, which
-  would make the prompt protected), registered for both mouse edges, hidden at
+  would make the prompt protected), kept at a higher frame level than the prompt (on the beta a click
+  on it did nothing, most likely landing on the prompt), its secure template listed last, registered
+  for both mouse edges, hidden at
   `PLAYER_REGEN_DISABLED`, and never shown in combat. Nothing reloads without the click.
 - **Settings** (#16): the allowlist `damageMeterEnabled`, `damageMeterResetOnNewInstance`,
   `raidFramesDisplayClassColor`, `raidFramesDisplayPowerBars` ("0"/"1") and
