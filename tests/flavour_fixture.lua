@@ -872,7 +872,7 @@ function FlavourFixture()
                 version = "a45904317cf0:5",
             },
         },
-        schema = 9,
+        schema = 10,
     }
     local CHAR = {
         interrupted = {
@@ -1088,7 +1088,7 @@ function FlavourFixture()
                 version = "a45904317cf0:2",
             },
         },
-        schema = 9,
+        schema = 10,
     }
     return DB, CHAR
 end

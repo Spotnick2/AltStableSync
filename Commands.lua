@@ -843,6 +843,10 @@ end
 function Commands.restore(arg)
     local which = tostring(arg or ""):lower():match("^%s*(.-)%s*$")
     if which == "" then which = "1" end
+    -- One Restore and one Backups list for both kinds (#10): a UI setup's
+    -- backup goes to its own plan, description and report.
+    local snap = ASS.Backups.Get(which)
+    if type(snap) == "table" and snap.kind == "ui" then return Commands.RestoreUI(which) end
     local plan = ASS.Loadout.PlanRestore(which)
     -- A fully matching restore of the pinned operation still gets "Done", so
     -- its completion can release the pin; any other no-op has nothing to do.
@@ -889,7 +893,7 @@ end
 -- The entry keeps its category, even one this build doesn't know (received
 -- by sync): no category check here.
 function Commands.RenameEntry(id, name)
-    local e = Commands.Own(id)
+    local e = Commands.Own(id) or Commands.OwnUI(id)
     if not e then Print(Copy("unknown-id")) return end
     if e.conflict then Print(Copy("conflict-copy")) return end
     local trimmed, nerr = ASS.Catalog.ValidateName(e.kind, e.class, e.category, name, e.id)
@@ -915,7 +919,7 @@ function Commands.delete(arg)
 end
 
 function Commands.DeleteEntry(id)
-    local e = Commands.Own(id)
+    local e = Commands.Own(id) or Commands.OwnUI(id)
     if not e then Print(Copy("unknown-id")) return end
     if e.conflict then Print(Copy("conflict-copy")) return end
     local id, version = e.id, e.version
@@ -1006,3 +1010,201 @@ function Commands.ResolveCopy(copyId, choice)
 end
 
 Commands.Report = Report
+
+------------------------------------------------------------
+-- UI setups (#10): /altsync ui [apply|save|saveas|rename|delete|offer]
+------------------------------------------------------------
+
+local function U() return ASS.UISetup end
+
+-- A live UI setup with this id, or nil (rename and delete take it too).
+function Commands.OwnUI(id)
+    local e = ASS.Catalog.Get(id)
+    if type(e) ~= "table" or e.deleted or e.kind ~= "ui" then return nil end
+    return e
+end
+
+-- The live UI setup with id `arg`, or the one named `arg`; else nil plus
+-- the lines to print.
+local function FindUI(arg)
+    arg = Trim(arg)
+    local all = ASS.Catalog.ListAll("ui")
+    for _, e in ipairs(all) do if e.id == arg then return e end end
+    local want, found = arg:lower(), {}
+    for _, e in ipairs(all) do
+        if tostring(e.name):lower() == want then found[#found + 1] = e end
+    end
+    if #found == 1 then return found[1] end
+    if #found == 0 then return nil, { ("No UI setup named %q. /altsync ui"):format(arg) } end
+    local lines = { ("%d UI setups are named %q; use the id:"):format(#found, arg) }
+    for _, e in ipairs(found) do lines[#lines + 1] = "  " .. e.id end
+    return nil, lines
+end
+
+local function UIReport(kind, result, err, name)
+    local apply = kind == "apply"
+    if not result then
+        Print((apply and "Not applied: " or "Not restored: ") .. Copy(err))
+        return
+    end
+    local kept = #(result.kept or {}) > 0
+        and (" Kept " .. Plural(#result.kept, "chat tab") .. " that apply created.") or ""
+    if result.failed then
+        Print(("Stopped (%s at %s): %s done. %s"):format(tostring(result.failed), tostring(result.at),
+            Plural(result.changed, "change"), apply
+                and "Use /altsync restore op to undo, or apply again to abandon it."
+                or "What was there before this restore is backup 1 in /altsync backups."))
+        return
+    end
+    local skipped = #(result.skips or {}) + #(result.unavailable or {})
+    if result.noop then
+        if apply then
+            Print(skipped > 0 and ("Nothing applied: %s (see the preview's list)."):format(Plural(skipped, "skip"))
+                or "Already matches the selected settings.")
+        elseif result.partial then
+            Print("Nothing could be restored: see the preview's list. The backup is kept." .. kept)
+        else
+            Print("Already matches the backup." .. kept)
+        end
+        return
+    end
+    local msg = ("%s: %s"):format(apply and ("Applied " .. tostring(name)) or "Restored", Plural(result.changed, "change"))
+    if skipped > 0 then msg = msg .. (", %d skipped (see the preview's list)"):format(skipped) end
+    msg = msg .. "."
+    if #(result.created or {}) > 0 then msg = msg .. " New chat tab: " .. table.concat(result.created, ", ") .. "." end
+    if apply then msg = msg .. " Undo it from Backups." end
+    if result.partial then msg = msg .. " Not everything was restored; the backup is kept." end
+    Print(msg .. kept)
+end
+Commands.UIReport = UIReport
+
+-- The apply preview for one UI setup. Returns true when the preview opened
+-- (the first-login offer counts that as an answer).
+function Commands.ApplyUI(id)
+    local e = Commands.OwnUI(id)
+    if not e then Print(Copy("unknown-id")) return false end
+    local plan = U().Plan(e)
+    local lines = U().Describe(plan)
+    -- A no-op still gets "Done": it records the setup as this character's
+    -- save target without writing game state.
+    local confirm = "Apply"
+    if plan.blocked then confirm = false elseif plan.noop then confirm = "Done" end
+    local pinned = ASS.Backups.Operation()
+    if pinned and not plan.blocked then
+        table.insert(lines, 1, ("Abandon the incomplete load of %s? Its backup stays in your backups."):format(
+            tostring(pinned.op and pinned.op.name)))
+    end
+    local name = e.name
+    ASS.Preview.Show({
+        title = "Apply " .. tostring(name) .. "?",
+        lines = lines,
+        confirm = confirm,
+        onConfirm = function()
+            local r, err = U().Apply(e, plan, pinned ~= nil)
+            UIReport("apply", r, err, name)
+        end,
+    })
+    return true
+end
+
+function Commands.RestoreUI(which)
+    local plan = U().PlanRestore(which)
+    local complete = #plan.unavailable == 0
+    local confirm = "Restore"
+    if plan.blocked then confirm = false
+    elseif plan.noop then confirm = (which == "op" and complete) and "Done" or false end
+    ASS.Preview.Show({
+        title = "Restore UI backup " .. tostring(which) .. "?",
+        lines = U().Describe(plan),
+        confirm = confirm,
+        onConfirm = function() UIReport("restore", U().Restore(which, plan)) end,
+    })
+end
+
+function Commands.SaveUI()
+    local p = U().PlanSave()
+    local lines = {}
+    if p.blocked then
+        lines[1] = p.blocked
+    else
+        lines[#lines + 1] = ("Update %q with this character's UI. Other characters keep theirs until they apply it.")
+            :format(tostring(p.name))
+        if p.noop then lines[#lines + 1] = "No changes to save." end
+        for _, c in ipairs(p.changes) do lines[#lines + 1] = "  " .. c end
+        for _, n in ipairs(p.notes) do lines[#lines + 1] = n end
+    end
+    ASS.Preview.Show({
+        title = "Save " .. tostring(p.name or "UI setup") .. "?",
+        lines = lines,
+        confirm = (not p.blocked and not p.noop) and "Save" or false,
+        onConfirm = function()
+            local r, err = U().Save(p)
+            if not r then Print("Not saved: " .. Copy(err))
+            elseif r.noop then Print("No changes to save.")
+            else Changed(("Saved %q: %s."):format(tostring(r.entry.name), Plural(r.changes, "change"))) end
+        end,
+    })
+end
+
+function Commands.SaveAsUI(name)
+    local trimmed, nerr = ASS.Catalog.ValidateName("ui", nil, nil, name)
+    if not trimmed then Print("Not saved: " .. Copy(nerr)) return end
+    local p = U().PlanSaveAs()
+    local lines = {}
+    if p.blocked then
+        lines[1] = p.blocked
+    else
+        lines[#lines + 1] = ("A new UI setup %q with this character's:"):format(trimmed)
+        for _, l in ipairs(U().Contents(p.modules)) do lines[#lines + 1] = "  " .. l end
+        for _, n in ipairs(p.notes) do lines[#lines + 1] = n end
+    end
+    ASS.Preview.Show({
+        title = "Save As " .. trimmed .. "?",
+        lines = lines,
+        confirm = not p.blocked and "Save" or false,
+        onConfirm = function()
+            local e, err = U().SaveAs(p, trimmed)
+            if e then Changed(("Saved %q."):format(tostring(e.name))) else Print("Not saved: " .. Copy(err)) end
+        end,
+    })
+end
+
+local function Each(why) for _, l in ipairs(why) do Print(l) end end
+
+function Commands.ui(arg)
+    local sub, rest = tostring(arg or ""):match("^%s*(%S*)%s*(.-)%s*$")
+    sub = (sub or ""):lower()
+    if sub == "" then
+        local all = ASS.Catalog.ListAll("ui")
+        if #all == 0 then Print("No saved UI setups. Save this character's: /altsync ui saveas <name>") return end
+        local rec = ASS.char.loaded and ASS.char.loaded.ui
+        for _, e in ipairs(all) do
+            local from = type(e.provenance) == "table" and e.provenance.sourceChar
+            Print(("  %s: %s%s%s%s"):format(e.id, tostring(e.name), from and (" (from " .. tostring(from) .. ")") or "",
+                e.conflict and " [conflict]" or "", rec and rec.id == e.id and " [applied here]" or ""))
+        end
+        return
+    end
+    if sub == "apply" then
+        local e, why = FindUI(rest)
+        if not e then return Each(why) end
+        return Commands.ApplyUI(e.id)
+    elseif sub == "save" then
+        return Commands.SaveUI()
+    elseif sub == "saveas" then
+        return Commands.SaveAsUI(rest)
+    elseif sub == "rename" then
+        local key, name = rest:match("^(%S+)%s+(.-)$")
+        local e, why = FindUI(key or "")
+        if not e then return Each(why) end
+        return Commands.RenameEntry(e.id, name)
+    elseif sub == "delete" then
+        local e, why = FindUI(rest)
+        if not e then return Each(why) end
+        return Commands.DeleteEntry(e.id)
+    elseif sub == "offer" and ASS.Offer then
+        return ASS.Offer.Show(true)
+    end
+    Print("UI setups: /altsync ui | ui apply <id or name> | ui save | ui saveas <name>"
+        .. " | ui rename <id or name> <new name> | ui delete <id or name>")
+end
