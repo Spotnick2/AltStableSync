@@ -1075,6 +1075,11 @@ local function UIReport(kind, result, err, name)
     if apply then msg = msg .. " Undo it from Backups." end
     if result.partial then msg = msg .. " Not everything was restored; the backup is kept." end
     Print(msg .. kept)
+    -- Bars written and read back only appear after a reload (#91 review).
+    if result.reload then
+        Print("Your action bars change after a reload.")
+        if ASS.Reload then ASS.Reload.Ask("Your action bars change after a reload. Reload now, or later with /reload.") end
+    end
 end
 Commands.UIReport = UIReport
 

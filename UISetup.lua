@@ -675,6 +675,9 @@ local function Execute(plan)
         local ok, why = WriteBars(plan.bars.to)
         if not ok then return stop(why, "action bars") end
         result.changed = result.changed + 1
+        -- Written and read back, but shown only after a reload (measured on
+        -- the beta, 2026-10-22): the report asks for one.
+        result.reload = true
     end
     for _, op in ipairs(plan.cvars) do
         g = Guard()
@@ -1067,6 +1070,7 @@ function UISetup.Describe(plan)
                 lines[#lines + 1] = ("%s: %s"):format(BAR_LABEL[i], plan.bars.to[i] and "show" or "hide")
             end
         end
+        lines[#lines + 1] = "  Action bars change after a reload: you'll be asked to reload."
     end
     for _, op in ipairs(plan.cvars) do
         local d = CVARS[op.name]

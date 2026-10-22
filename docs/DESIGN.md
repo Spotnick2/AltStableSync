@@ -689,7 +689,13 @@ refuses any backup with a kind.
   selection, never the shared layout's contents. Importing a layout to an account that lacks it is
   deferred.
 - **Action bars 2-8:** `SetActionBarToggles` with all seven values (measured), so
-  `enableMultiActionBars` has one owner.
+  `enableMultiActionBars` has one owner. The values read back at once, but the bars only appear
+  after a reload (measured on the beta, 2026-10-22). So the preview says so, and an apply or restore
+  that wrote them opens **"Reload to finish"** (`Reload.lua`): **Later**, or **Reload now**, a
+  `SecureActionButtonTemplate` whose macro is `/reload` (`ReloadUI()` is protected). The button is
+  built at load, parented to UIParent and placed by coordinates (never anchored to the prompt, which
+  would make the prompt protected), registered for both mouse edges, hidden at
+  `PLAYER_REGEN_DISABLED`, and never shown in combat. Nothing reloads without the click.
 - **Settings** (#16): the allowlist `damageMeterEnabled`, `damageMeterResetOnNewInstance`,
   `raidFramesDisplayClassColor`, `raidFramesDisplayPowerBars` ("0"/"1") and
   `raidFramesHealthBarColorBG` (8 hex digits). `enableMouseoverCast` is not on it: `GetCVarInfo`

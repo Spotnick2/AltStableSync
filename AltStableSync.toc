@@ -26,6 +26,7 @@ Loadout.lua
 UISetup.lua
 Share.lua
 Preview.lua
+Reload.lua
 Commands.lua
 Panel.lua
 Minimap.lua
