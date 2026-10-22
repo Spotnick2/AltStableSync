@@ -143,3 +143,28 @@ ephemeral/read-only, bounded to 420 seconds per round.
 
 The constants source is also pinned:
 [DamageMeterConstantsDocumentation.lua](https://github.com/Gethe/wow-ui-source/blob/b9be9379719047977fca4dba1bb1d9988e8840b3/Interface/AddOns/Blizzard_APIDocumentationGenerated/DamageMeterConstantsDocumentation.lua).
+
+### Forever placement follow-up (2026-10-22)
+
+The owner measured readable rectangles, matching scales and a single UIParent anchor,
+but missing IsMinimized/IsResizing/IsUserPlaced getters. Rectangle setters and
+IsMouseButtonDown exist. The narrow adjustment received **CONSENSUS** from the same
+requested Astra high plan reviewer:
+
+- Check optional minimized/resizing getters when present; failed getters still reject.
+  Without IsResizing require a successful false left-mouse-button read before geometry
+  capture and each placement mutation. Retain full-size bounds, anchor, scale and readback.
+- Make geometry.userPlaced optional; never invent a false value or write an absent flag.
+  Capture/apply/restore rectangles while leaving an unreadable flag untouched.
+- An explicit saved flag remains intent and cannot be applied where unreadable. Save
+  preserves it. On a client with the getter, rectangle-only writes still leave it alone.
+- Skip reopening a hidden existing frame when its flag cannot be backed up, because
+  Blizzard opening resets it. Likewise refuse hiding without a flag snapshot for undo.
+  New allocation has no prior flag to restore. Partial restores retain their pin.
+- Source probe transcripts are in docs/forever-api-notes.md. Full-exit persistence and
+  taint safety of rectangle writes remain in-game checks, not stub-backed claims.
+- Validation: 156 focused assertions and the full Lua 5.1 suite pass. Nine follow-up
+  mutations were caught: requiring missing getters, accepting unsafe mouse reads,
+  inventing a flag, opening/hiding with an unreadable flag, dropping explicit flag intent,
+  omitting the immediate mouse guard, releasing a partial restore's pin, and allowing
+  collapsed geometry. Every mutation was removed before the final suite run.

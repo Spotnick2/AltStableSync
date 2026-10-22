@@ -177,6 +177,8 @@ function FCF_Close() error("FCF_Close must never be called by AltStableSync", 2)
 -- manager selections are separate so a manager-only write cannot pass read-back.
 function U.meterSetup(opts)
     opts = opts or {}
+    U.mouseDown = false
+    IsMouseButtonDown = function() return U.mouseDown end
     Enum = Enum or {}
     Enum.DamageMeterType = { DamageDone = 0, Dps = 1, HealingDone = 2, Hps = 3, Absorbs = 4, Interrupts = 5, Dispels = 6, DamageTaken = 7, AvoidableDamageTaken = 8, Deaths = 9, EnemyDamageTaken = 10 }
     UIParent = { GetEffectiveScale = function() return 1 end,
@@ -207,11 +209,14 @@ function U.meterSetup(opts)
         function w:SetPoint(p, relative, rp, x, y)
             call("MeterPoint"); assert(relative == UIParent)
             self.point,self.relativePoint=p,rp
-            self.x=x+anchor[rp][1]*1920-anchor[p][1]*self.width
-            self.y=y+anchor[rp][2]*1080-anchor[p][2]*self.height
+            self.x=x+anchor[rp][1]*UIParent:GetWidth()-anchor[p][1]*self.width
+            self.y=y+anchor[rp][2]*UIParent:GetHeight()-anchor[p][2]*self.height
             after("MeterPoint")
         end
         function w:SetUserPlaced(v) call("MeterPlaced"); self.userPlaced=v; after("MeterPlaced") end
+        if opts.forever then
+            w.IsMinimized, w.IsResizing, w.IsUserPlaced = nil, nil, nil
+        end
         return w
     end
     local function add(i, values)
@@ -241,7 +246,7 @@ function U.meterSetup(opts)
         local w=d.sessionWindow
         -- SetupSessionWindow resets anchors and userPlaced, even for hidden frames.
         w.shown=true; w.point="TOPLEFT"; w.relativePoint="TOPLEFT"
-        w.x=(i-1)*40; w.y=1080-(i-1)*40-w.height; w.userPlaced=false
+        w.x=(i-1)*40; w.y=UIParent:GetHeight()-(i-1)*40-w.height; w.userPlaced=false
         after("MeterOpen")
     end
     function m:SetSessionWindowDamageMeterType(w,t)

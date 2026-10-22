@@ -737,8 +737,12 @@ refuses any backup with a kind.
   character. An existing shown window captures its actual type. Window 3 is never changed.
   `DamageMeter.lua` uses Blizzard's manager setters, never `DamageMeterPerCharacterSettings`.
   Primary position/size follow the existing Edit Mode layout. Secondary position/size and
-  userPlaced are captured only with a readable, finite, in-bounds rectangle, one UIParent
-  anchor, matching effective scale, and no minimized/resizing state. Unsafe geometry is
+  userPlaced (when readable) are captured only with a readable, finite, in-bounds full-size
+  rectangle, one UIParent anchor and matching effective scale. Minimized/resizing getters
+  are checked when present; present getters that fail still block capture. Forever lacks
+  those getters and IsUserPlaced (owner probe 2026-10-22). Without IsResizing, a successful
+  false IsMouseButtonDown("LeftButton") is required at capture and before rectangle writes.
+  An absent userPlaced remains omitted and never authorizes a flag write. Unsafe geometry is
   visibly omitted/skipped and saved intent retained. Existing hidden window geometry must
   be readable before opening, because Blizzard resets its placement when opening it.
   Every meter write has a combat/Edit Mode guard and independent frame/manager read-back.
@@ -746,6 +750,11 @@ refuses any backup with a kind.
   Exact restore returns touched windows to Current/Overall, type, lock and safe placement;
   it hides window 2 only when that backup proves the operation opened it (including an
   exception after Show). The permanent first backup receives the same ownership journal;
+  if the client cannot read userPlaced, an existing hidden frame is not reopened (opening
+  resets that flag), and restore leaves an opened window shown with a partial result when
+  its flag cannot be backed up for undo-of-restore. Rectangle-only changes to visible
+  windows can be restored without changing the flag. Explicit saved flags require a
+  readable target flag; otherwise their geometry is skipped and its saved intent retained.
   unreadable ownership remains unavailable/partial. Restore takes its own backup and can
   itself be undone. A specific past encounter is skipped: its ephemeral ID cannot promise
   exact restore after restart/reset. Select Current or Overall first. Missing APIs show

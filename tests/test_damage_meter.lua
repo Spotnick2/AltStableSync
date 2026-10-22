@@ -323,4 +323,127 @@ r=restore("op")
 check("draft backup remains unavailable and pinned",r.partial and B.Operation())
 eq("draft backup never writes",#U.calls,0)
 
+-- Forever's measured placement surface lacks the three getters, while
+-- retaining rectangle setters. Do not invent or write a userPlaced flag.
+boot({forever=true,[2]={damageMeterType=2,sessionType=1}})
+local w=window(2)
+w.point,w.relativePoint="TOPLEFT","TOPLEFT"
+w.x,w.y,w.width,w.height=40,960,400,199.99995422363
+w.GetEffectiveScale=function() return 0.63999998569489 end
+UIParent.GetEffectiveScale=w.GetEffectiveScale
+UIParent.GetWidth=function() return 2133.3334960938 end
+UIParent.GetHeight=function() return 1200 end
+local capturedPart,note=M.Capture()
+check("Forever rectangle captured",capturedPart.windows[2].geometry ~= nil)
+eq("Forever height preserved",capturedPart.windows[2].geometry.height,199.99995422363)
+eq("Forever unknown flag omitted",capturedPart.windows[2].geometry.userPlaced,nil)
+check("Forever rectangle catalog accepted",A.Catalog.GoodUIModules({damageMeter=capturedPart}))
+capturedPart.windows[2].geometry.x=1400
+capturedPart.windows[2].geometry.y=300
+e=entry(capturedPart)
+w.userPlaced=true -- internal to the stub, intentionally unreadable to addon
+r=apply(e)
+check("Forever rectangle applied",r and not r.failed)
+eq("Forever x applied",w.x,1400)
+eq("Forever y applied",w.y,300)
+eq("Forever flag never written",U.count("MeterPlaced"),0)
+check("Forever existing flag untouched",w.userPlaced)
+r=restore(1)
+check("Forever rectangle restored",r and not r.partial)
+eq("Forever x restored",w.x,40)
+check("Forever y restored",math.abs(w.y-960)<.05)
+eq("Forever restore flag never written",U.count("MeterPlaced"),0)
+
+boot({forever=true})
+target=part(); target.windows[2].geometry={x=400,y=300,width=400,height=200}
+e=entry(target); r=apply(e)
+check("Forever new window positioned",r and not r.failed and window(2).x==400)
+eq("Forever new window flag never written",U.count("MeterPlaced"),0)
+r=restore(1)
+check("Forever unknown flag prevents undoable hide",r.partial and window(2).shown)
+eq("Forever unknown flag no hide write",U.count("MeterHide"),0)
+
+boot({forever=true,[2]={damageMeterType=2,sessionType=0,shown=false}})
+e=entry(); p=S.Plan(e)
+check("Forever hidden existing window skips reset",p.noop and #p.skips==1)
+apply(e)
+eq("Forever hidden existing never reopened",U.count("MeterOpen"),0)
+
+boot({forever=true,[2]={damageMeterType=2,sessionType=1}})
+target=part(); target.windows[2].geometry={x=400,y=300,width=400,height=200,userPlaced=true}
+e=entry(target); p=S.Plan(e)
+check("explicit unreadable flag intent skipped",#p.skips==1)
+apply(e)
+eq("explicit unreadable flag never written",U.count("MeterPlaced"),0)
+saved=S.PlanSave()
+eq("explicit flag intent kept on Save",saved.modules.damageMeter.windows[2].geometry.userPlaced,true)
+
+for _,mouse in ipairs({"down","throw","nil","malformed","absent"}) do
+    boot({forever=true,[2]={damageMeterType=2,sessionType=1}})
+    if mouse=="down" then U.mouseDown=true
+    elseif mouse=="throw" then IsMouseButtonDown=function() error("unreadable") end
+    elseif mouse=="nil" then IsMouseButtonDown=function() return nil end
+    elseif mouse=="malformed" then IsMouseButtonDown=function() return 0 end
+    else IsMouseButtonDown=nil end
+    capturedPart=M.Capture()
+    check("mouse fallback fails closed: "..mouse,not capturedPart.windows[2].geometry)
+end
+
+boot({forever=true,[2]={damageMeterType=2,sessionType=1}})
+target=part(); target.windows[2].geometry={x=400,y=300,width=450,height=200}
+e=entry(target)
+U.after.MeterSize=function() U.mouseDown=true end
+r=apply(e)
+check("mouse starts during writes stops",r.failed and B.Operation())
+eq("mouse stops before point write",U.count("MeterPoint"),0)
+
+for _,getter in ipairs({"IsMinimized","IsResizing","IsUserPlaced"}) do
+    boot({forever=true,[2]={damageMeterType=2,sessionType=1}})
+    window(2)[getter]=function() error("failed read") end
+    capturedPart=M.Capture()
+    check("present getter failure still rejected: "..getter,not capturedPart.windows[2].geometry)
+end
+
+boot({forever=true,[2]={damageMeterType=2,sessionType=1}})
+window(2).height=25
+capturedPart=M.Capture()
+check("collapsed rectangle rejected without minimized getter",not capturedPart.windows[2].geometry)
+
+-- A rectangle-only entry does not acquire a flag write on a fuller client.
+boot({[2]={damageMeterType=2,sessionType=1}})
+window(2).userPlaced=true
+target=part(); target.windows[2].geometry={x=400,y=300,width=450,height=200}
+e=entry(target); r=apply(e)
+check("rectangle-only entry on full client",not r.failed)
+eq("rectangle-only backup omits untouched flag",B.Get(1).damageMeter.windows[2].geometry.userPlaced,nil)
+eq("rectangle-only apply no flag write",U.count("MeterPlaced"),0)
+r=restore(1)
+check("rectangle-only restore on full client",not r.partial)
+eq("rectangle-only restore no flag write",U.count("MeterPlaced"),0)
+check("rectangle-only flag retained",window(2).userPlaced)
+
+boot({forever=true,[2]={damageMeterType=2,sessionType=1}})
+target=part(); target.windows[2].geometry={x=400,y=300,width=450,height=200}
+e=entry(target)
+local originalPoint=window(2).GetPoint
+local readsAfterSize=0
+window(2).GetPoint=function(self)
+    if U.count("MeterSize")>0 then
+        readsAfterSize=readsAfterSize+1
+        if readsAfterSize==2 then U.mouseDown=true end
+    end
+    return originalPoint(self)
+end
+r=apply(e)
+check("mouse rechecked immediately before point write",r.failed and B.Operation())
+eq("mouse down after geometry read prevents point write",U.count("MeterPoint"),0)
+
+boot({forever=true}); e=entry()
+U.after.MeterOpen=function() error("opened then stopped") end
+r=apply(e)
+check("Forever opening failure pinned",r.failed and B.Operation())
+U.after.MeterOpen=nil
+r=restore("op")
+check("Forever partial visibility restore retains pin",r.partial and B.Operation() and window(2).shown)
+
 finish("damage meter")

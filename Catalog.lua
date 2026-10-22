@@ -236,7 +236,7 @@ local function GoodUIModules(m)
                 if type(g) ~= "table" or not finite(g.x) or not finite(g.y) or g.x < 0 or g.y < 0
                     or not finite(g.width) or g.width < 200 or g.width > 600
                     or not finite(g.height) or g.height < 120 or g.height > 400
-                    or type(g.userPlaced) ~= "boolean" then return false end
+                    or (g.userPlaced ~= nil and type(g.userPlaced) ~= "boolean") then return false end
             end
         end
         for k in pairs(meter.windows) do

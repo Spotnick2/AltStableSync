@@ -416,6 +416,35 @@ Measured by hand with `/run` lines from the chat box.
 - **`SetMaxLetters` counts `||` as one letter** and keeps it escaped. A 12-letter limit kept `B||cffff0000y`, 13 bytes.
 - **One unexplained screenshot:** the first time, the Import name box drew a crafted name in red. Three later runs, after a `/reload`, with focus moved between the boxes, drew it plain and held the escaped text. It wasn't reproduced.
 
+## Damage meter placement probe (2026-10-22, build not included in probe output)
+
+Owner's in-game output for `DamageMeterSessionWindow2` on Forever:
+
+- `DamageMeter:GetSessionWindow(2) == DamageMeterSessionWindow2`: true.
+- `GetNumPoints()` = 1; `GetPoint()` = TOPLEFT, UIParent, TOPLEFT.
+- Frame and UIParent effective scales both `0.63999998569489`.
+- `GetRect()` = `40, 960, 400, 199.99995422363`.
+- UIParent size = `2133.3334960938, 1200`.
+- `IsMinimized`, `IsResizing`, `IsUserPlaced`: absent (each protected call
+  failed with "attempt to call a nil value"). These are missing methods,
+  not successful reads returning false.
+- `SetPoint`, `SetSize`, `SetUserPlaced`, `IsLocked`, and global
+  `IsMouseButtonDown`: functions. Their presence alone does not establish
+  persistence or taint safety.
+
+This explains why the first PR #93 implementation omitted secondary geometry:
+it required all three getters based on newer Mainline source. Owner confirmed
+second-window creation and Current Segment selection work; placement copying,
+full-exit persistence and the wider taint checks remain to be verified.
+
+Read-only probes used:
+
+```lua
+/run local w=DamageMeterSessionWindow2; local p,r,rp=w:GetPoint(); print(w:GetNumPoints(),p,r and r:GetName(),rp,w:GetEffectiveScale(),UIParent:GetEffectiveScale()); print(w:GetRect())
+/run local w=DamageMeterSessionWindow2; for _,k in ipairs({"IsMinimized","IsResizing","IsUserPlaced"}) do local ok,v=pcall(function() return w[k](w) end); print(k,ok,v) end; print("UIParent",UIParent:GetSize())
+/run local w=DamageMeterSessionWindow2; print("same window",DamageMeter:GetSessionWindow(2)==w); for _,k in ipairs({"SetPoint","SetSize","SetUserPlaced","IsLocked"}) do print(k,type(w[k])) end; print("mouse check",type(IsMouseButtonDown))
+```
+
 ## Still open
 
 - Does any taint appear after `/reload` following `place`? (Nothing was reported during the run.)

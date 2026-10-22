@@ -53,8 +53,20 @@ end
 local ANCHOR = { BOTTOMLEFT = {0,0}, BOTTOM = {.5,0}, BOTTOMRIGHT = {1,0},
     LEFT = {0,.5}, CENTER = {.5,.5}, RIGHT = {1,.5},
     TOPLEFT = {0,1}, TOP = {.5,1}, TOPRIGHT = {1,1} }
+local function GeometryIdle(w)
+    -- Forever lacks these newer mixin getters (owner probe, 2026-10-22).
+    -- A present getter throwing is still a failure, never an absent feature.
+    if w.IsMinimized ~= nil and Flag(Call(w, "IsMinimized")) then error("meter is minimized") end
+    if w.IsResizing ~= nil then
+        if Flag(Call(w, "IsResizing")) then error("meter is resizing") end
+    else
+        if type(IsMouseButtonDown) ~= "function" or Boolean(IsMouseButtonDown("LeftButton")) then
+            error("finish dragging or resizing the meter first")
+        end
+    end
+end
 local function Geometry(w)
-    if Flag(Call(w, "IsMinimized")) or Flag(Call(w, "IsResizing")) then error("meter is minimized or resizing") end
+    GeometryIdle(w)
     if Number(Call(w, "GetNumPoints")) ~= 1 then error("meter has multiple anchors") end
     local p, relative, rp = Call(w, "GetPoint", 1)
     Plain(p); Plain(relative); Plain(rp)
@@ -69,10 +81,15 @@ local function Geometry(w)
     local sw, sh = Number(Call(UIParent, "GetWidth")), Number(Call(UIParent, "GetHeight"))
     if width < 200 or width > 600 or height < 120 or height > 400 or x < 0 or y < 0
         or x + width > sw or y + height > sh then error("meter rectangle out of bounds") end
-    for _, name in ipairs({"SetPoint", "SetSize", "SetUserPlaced"}) do
+    for _, name in ipairs({"SetPoint", "SetSize"}) do
         if type(w[name]) ~= "function" then error(UNSUPPORTED) end
     end
-    return { x = x, y = y, width = width, height = height, userPlaced = Boolean(Call(w, "IsUserPlaced")) }
+    local g = { x = x, y = y, width = width, height = height }
+    if w.IsUserPlaced ~= nil then
+        if type(w.SetUserPlaced) ~= "function" then error(UNSUPPORTED) end
+        g.userPlaced = Boolean(Call(w, "IsUserPlaced"))
+    end
+    return g
 end
 local function Window(m, i)
     local data = Call(m, "GetWindowDataList")
@@ -141,6 +158,9 @@ function M.Capture()
     end
     local note = "Both windows use Current Segment; a hidden/missing second window becomes Healing Done. Primary position/size follow Edit Mode."
     if not out.windows[2].geometry then note = note .. " Secondary position/size couldn't be captured safely; not saved." end
+    if out.windows[2].geometry and out.windows[2].geometry.userPlaced == nil then
+        note = note .. " Secondary position/size saved; this build's unreadable placement flag is left alone."
+    end
     return out, note
 end
 local function Fit(g)
@@ -149,6 +169,14 @@ local function Fit(g)
             and g.y + g.height <= Number(Call(UIParent, "GetHeight"))
     end)
     return ok and fits
+end
+local function PlacementFlagAPI()
+    -- IsUserPlaced is a Frame API, not a secondary-window mixin. Before a
+    -- new frame exists, inspect the existing primary of the same frame type.
+    local ok, available = pcall(function()
+        return type(Call(Manager(), "GetSessionWindow", 1).IsUserPlaced) == "function"
+    end)
+    return ok and available
 end
 -- Plans contain plain copied values only; never retain Blizzard frames/tables.
 function M.Plan(part, restoring)
@@ -173,6 +201,9 @@ function M.Plan(part, restoring)
             if i == 2 and not cur.shown and to.shown then
                 if from.allocator ~= 2 then return nil, "opening would affect another window; open window 2 manually first" end
                 if cur.exists and not cur.geometry then return nil, "hidden window placement cannot be backed up safely" end
+                if cur.exists and cur.geometry.userPlaced == nil then
+                    return nil, "hidden window placement flag cannot be backed up; show window 2 manually first"
+                end
             end
             if i == 2 and not to.shown and cur.shown and not (part.journal and part.journal.opened) then
                 return nil, "backup does not prove this operation opened window 2; left shown"
@@ -180,10 +211,16 @@ function M.Plan(part, restoring)
             if i == 2 and not to.shown and cur.shown and not cur.geometry then
                 return nil, "current window placement cannot be backed up before hiding"
             end
+            if i == 2 and not to.shown and cur.shown and cur.geometry.userPlaced == nil then
+                return nil, "window placement flag cannot be backed up for undo; window 2 is left shown"
+            end
             if restoring and part.journal and part.journal.uncertain then
                 return nil, "window opening could not be verified; left unchanged"
             end
-            if to.geometry and (not Fit(to.geometry) or (cur.exists and not cur.geometry)) then
+            local flagUnreadable = to.geometry and to.geometry.userPlaced ~= nil
+                and ((cur.exists and (not cur.geometry or cur.geometry.userPlaced == nil))
+                    or (not cur.exists and not PlacementFlagAPI()))
+            if to.geometry and (not Fit(to.geometry) or (cur.exists and not cur.geometry) or flagUnreadable) then
                 if restoring then return nil, "saved placement cannot be restored safely" end
                 to.geometry = nil
                 p.geometrySkipped = true
@@ -191,6 +228,7 @@ function M.Plan(part, restoring)
             -- No geometry requested means leave the existing placement alone.
             local compare = Copy(cur)
             if not to.geometry then compare.geometry = nil end
+            if compare.geometry and to.geometry and to.geometry.userPlaced == nil then compare.geometry.userPlaced = nil end
             if not to.exists then
                 if cur.shown then p.to[i] = to end
             elseif not Same(compare, to) then p.to[i] = to end
@@ -206,12 +244,14 @@ function M.Snapshot(p)
     for i, to in pairs(p.to) do
         s.windows[i] = Copy(now.windows[i])
         if not to.geometry and to.shown == now.windows[i].shown then s.windows[i].geometry = nil end
+        if s.windows[i].geometry and to.geometry and to.geometry.userPlaced == nil
+            and to.shown == now.windows[i].shown then s.windows[i].geometry.userPlaced = nil end
     end
     return s
 end
 local function Near(a, b) return math.abs(a - b) < .05 end
 local function SameGeometry(a, b)
-    return a and b and a.userPlaced == b.userPlaced and Near(a.x,b.x) and Near(a.y,b.y)
+    return a and b and (b.userPlaced == nil or a.userPlaced == b.userPlaced) and Near(a.x,b.x) and Near(a.y,b.y)
         and Near(a.width,b.width) and Near(a.height,b.height)
 end
 local function Execute(p, snap, guard)
@@ -221,6 +261,10 @@ local function Execute(p, snap, guard)
     local function write(o, method, ...)
         local why = guard()
         if why then return nil, why end
+        if method == "SetSize" or method == "SetPoint" or method == "SetUserPlaced" then
+            local idle = pcall(GeometryIdle, o)
+            if not idle then return nil, "meter interaction changed; finish dragging or resizing first" end
+        end
         local ok = pcall(Call, o, method, ...)
         if not ok then return nil, method .. " failed" end
         return true
@@ -278,8 +322,10 @@ local function Execute(p, snap, guard)
                     if not ok then return nil, why end
                     okR, rect = pcall(Geometry, w)
                     if not okR or not Near(rect.x,g.x) or not Near(rect.y,g.y) then return nil, "meter position read-back" end
-                    ok, why = write(w, "SetUserPlaced", g.userPlaced)
-                    if not ok then return nil, why end
+                    if g.userPlaced ~= nil then
+                        ok, why = write(w, "SetUserPlaced", g.userPlaced)
+                        if not ok then return nil, why end
+                    end
                     okR, rect = pcall(Geometry, w)
                     if not okR or not SameGeometry(rect,g) then return nil, "meter placement read-back" end
                 end
