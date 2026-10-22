@@ -18,8 +18,8 @@
 --   Choose opens the tab; the offer returns next login unless answered.
 -- Each step after a close runs on the next frame update (never inside the
 -- shared preview frame's own OnHide), and only if the character is still
--- unanswered, no preview is open and nothing blocks a UI setup write;
--- otherwise it is dropped until the next login.
+-- unanswered, no preview is open and the player isn't in combat; otherwise
+-- it is dropped until the next login.
 ------------------------------------------------------------
 
 AltStableSync = AltStableSync or {}
@@ -80,12 +80,15 @@ end
 Offer._Flush = function() local f = step:GetScript("OnUpdate"); if f then f(step, 0) end end
 
 -- Whether a step may show now. `force` (/altsync ui offer) shows it on a
--- character that already answered.
+-- character that already answered. A step only shows our own window, so it
+-- doesn't wait for readiness: on a new character an addon rewriting its
+-- macro (RestedXP) kept the gate closed and dropped the confirmation (beta,
+-- 2026-10-22). The apply preview it may open still checks everything.
 local function CanShow(force)
     if ASS.disabled or not ASS.db or not ASS.char then return false end
     if not force and Handled() then return false end
     if ASS.Preview.Shown() then return false end
-    if ASS.UISetup.Blocked() then return false end
+    if InCombatLockdown() then return false end
     return true
 end
 

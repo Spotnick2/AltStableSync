@@ -178,6 +178,18 @@ do
     check("choose: not answered", not answered())
 end
 
+-- Beta, 2026-10-22: on a new character an addon rewriting its macro kept the
+-- readiness gate closed, and the confirmation never came. A step only shows
+-- our own window: it doesn't wait for readiness.
+do
+    boot{ setups = { { name = "Base" } } }
+    settle()
+    frame():Hide()
+    WoW.fire("UPDATE_MACROS")               -- RestedXP updating its targeting macro
+    O._Flush()
+    eq("step while macros update: the confirmation", title(), "Skip setting up?")
+end
+
 -- A pending step is dropped in combat, or when another preview took the frame.
 do
     boot{ setups = { { name = "Base" } } }

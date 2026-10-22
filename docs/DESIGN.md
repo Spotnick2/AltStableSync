@@ -659,8 +659,10 @@ not take a save of them.
   from the Welcome returns to the Welcome (`Commands.ApplyUI(id, onCancel)`); confirming it never
   does. Choose opens the tab and answers nothing. Each step after a close runs on the next frame
   update, never inside the shared preview frame's own OnHide, and only while the character is
-  unanswered, no preview is open and nothing blocks a UI setup write; otherwise it is dropped until
-  the next login. Built in `Offer.lua`: one ticker per session from the first
+  unanswered, no preview is open and the player isn't in combat; otherwise it is dropped until the
+  next login. A step doesn't wait for readiness: on a new character an addon rewriting its macro
+  kept that gate closed and dropped the confirmation (beta, 2026-10-22); the apply preview a step may
+  open still checks everything. Built in `Offer.lua`: one ticker per session from the first
   `PLAYER_ENTERING_WORLD`, offering setups that are live, not conflict copies and not saved from this
   character. A setup that arrives by sync later in the session is offered then. `/altsync ui offer`
   shows it again for testing, on an answered character too; its Skip records nothing, while a real
