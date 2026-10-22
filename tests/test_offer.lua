@@ -17,7 +17,7 @@ local function boot(opts)
     opts = opts or {}
     WoW.reset()
     for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Game.lua", "Pet.lua", "Backups.lua",
-                         "Ready.lua", "Loadout.lua", "UISetup.lua", "Preview.lua", "Commands.lua", "Panel.lua",
+                         "Ready.lua", "Loadout.lua", "UISetup.lua", "Preview.lua", "Reload.lua", "Commands.lua", "Panel.lua",
                          "Offer.lua" }) do
         assert(loadfile(f))("AltStableSync", {})
     end
