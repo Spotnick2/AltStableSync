@@ -469,7 +469,13 @@ function UISetup.Plan(entry)
                         if Known(g) then groups[#groups + 1] = g
                         else Skip(plan, "chat", ('Tab "%s": %s'):format(t.name, g), "not a chat type on this client") end
                     end
-                    creates[#creates + 1] = { name = t.name, groups = groups }
+                    if #groups == 0 then
+                        -- A setup saved before Save As left such tabs out
+                        -- (beta, 2026-10-22): an empty tab is never created.
+                        Skip(plan, "chat", ('Tab "%s"'):format(t.name), "receives no message types; not created")
+                    else
+                        creates[#creates + 1] = { name = t.name, groups = groups }
+                    end
                 end
             end
             if #creates > 0 then
@@ -975,16 +981,22 @@ function UISetup.PlanSave()
             new.chat.primary = now
         end
         local w = ReadChat()
-        for i, t in ipairs(old.chat.tabs or {}) do
+        local tabs = {}
+        for _, t in ipairs(old.chat.tabs or {}) do
             local slot = w and FindTab(w, t.name)
-            if slot then
-                local now = KeepUnknown(w[slot].groups, t.groups)
-                diff(('Tab "%s"'):format(t.name), t.groups, now)
-                new.chat.tabs[i].groups = now
-            else
+            local now = slot and KeepUnknown(w[slot].groups, t.groups)
+            if not slot then
                 p.notes[#p.notes + 1] = ('Chat: no single tab named "%s" here; kept as saved.'):format(t.name)
+                tabs[#tabs + 1] = t
+            elseif #now == 0 then
+                -- Save As leaves such tabs out; Save drops one the entry has.
+                p.changes[#p.changes + 1] = ('Tab "%s": removed (it receives no message types)'):format(t.name)
+            else
+                diff(('Tab "%s"'):format(t.name), t.groups, now)
+                tabs[#tabs + 1] = { name = t.name, groups = now }
             end
         end
+        new.chat.tabs = #tabs > 0 and tabs or nil
     end
     p.modules = new
     p.noop = Serialize(new) == Serialize(old) or nil
@@ -1044,7 +1056,8 @@ function UISetup.Contents(modules)
         lines[#lines + 1] = "Action bars shown: " .. (#shown > 0 and table.concat(shown, ", ") or "none beyond bar 1")
     end
     for _, name in ipairs(Sorted(modules.cvars)) do
-        lines[#lines + 1] = ("%s: %s"):format(CVAR_LABEL[name] or name, OnOff(modules.cvars[name], CVARS[name]))
+        lines[#lines + 1] = CVARS[name] and ("%s: %s"):format(CVAR_LABEL[name], OnOff(modules.cvars[name], CVARS[name]))
+            or ("%s: %s (not supported on this build)"):format(name, tostring(modules.cvars[name]))
     end
     if modules.chat then
         if modules.chat.primary then

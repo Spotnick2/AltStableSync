@@ -733,7 +733,8 @@ refuses any backup with a kind.
   they are now, so groups a window had before an additive apply join the entry; the preview lists each
   group added or removed. **Save As** captures all four parts;
   a tab that receives no message types (channels only, or an addon's console tab) is left out and
-  said so.
+  said so; Save drops such a tab from an entry that has one, and Apply never creates one (an entry
+  saved before this rule still held one, beta 2026-10-22).
 - **Addon settings** (#22, #23): later, provider by provider. Never assign arbitrary SavedVariables
   or another addon's profile keys. A field never has two owners (UI setup vs loadout).
 
