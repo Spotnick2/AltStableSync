@@ -445,6 +445,11 @@ requirements and restores physical geometry through an equivalent UIParent ancho
 The earlier nil-global error was from running the probe on a different character
 without window 2, not evidence that the source window was missing.
 
+After deploying the screen-anchor correction, the owner completed the five-step
+Save/Apply check and confirmed Healing Done appeared at the intended position,
+locked and on Current Segment on the target character. Full-client-exit persistence
+and the wider taint checks remain unverified.
+
 Read-only probes used:
 
 ```lua

@@ -360,7 +360,7 @@ local function Tip(owner, text)
     GameTooltip:Show()
 end
 
--- kind: "primary" (one per section) or "secondary".
+-- kind: "primary" (main actions) or "secondary".
 local function GButton(parent, text, width, kind)
     local b = CreateFrame("Button", nil, parent, "BackdropTemplate")
     b:SetSize(width, 26)
@@ -1213,12 +1213,20 @@ local function BuildUI(v)
     W.uiApply:SetScript("OnClick", function()
         if Panel.sel.ui then CloseMenu(); Cmd().ApplyUI(Panel.sel.ui) end
     end)
-    W.uiSave = GButton(v, "Save...", 100, "secondary")
+    W.uiSave = GButton(v, "Save...", 100, "primary")
     W.uiSave:SetPoint("LEFT", W.uiApply, "RIGHT", 8, 0)
     W.uiSave:SetScript("OnClick", function() CloseMenu(); Cmd().SaveUI() end)
-    W.uiSaveAs = GButton(v, "Save As...", 100, "secondary")
+    W.uiSaveAs = GButton(v, "Save As...", 100, "primary")
     W.uiSaveAs:SetPoint("LEFT", W.uiSave, "RIGHT", 8, 0)
     W.uiSaveAs:SetScript("OnClick", function() ShowNameDialog("uisaveas") end)
+    W.uiSaveHint = Text(v, "GameFontHighlightSmall", w, MUTED)
+    W.uiSaveHint:SetPoint("TOPLEFT", W.uiApply, "BOTTOMLEFT", 0, -6)
+    W.uiDelete = GButton(v, "Delete...", 100, "secondary")
+    W.uiDelete:SetPoint("TOPLEFT", W.uiSaveHint, "BOTTOMLEFT", 0, -8)
+    W.uiDelete.tip = "Delete the selected UI setup from the saved list. You'll review this first."
+    W.uiDelete:SetScript("OnClick", function()
+        if Panel.sel.ui then CloseMenu(); Cmd().DeleteEntry(Panel.sel.ui) end
+    end)
 end
 
 -- The UI tab's widgets from the catalog: the picker starts on the setup this
@@ -1254,6 +1262,11 @@ local function RefreshUI()
     Set(W.uiSave, saveable and whyNot == nil,
         not saveable and "Save updates the UI setup this character applied; apply one first, or use Save As." or whyNot)
     Set(W.uiSaveAs, whyNot == nil, whyNot)
+    W.uiSaveHint:SetText(saveable
+        and ("Save overwrites %q. Save As creates a new setup."):format(ASS.Literal(live[rec.id].name))
+        or "To update an existing setup, apply it first, then Save. Save As creates a new setup.")
+    Set(W.uiDelete, e ~= nil and not e.conflict, e == nil and "No saved UI setup."
+        or "Resolve this setup's conflict before deleting it.")
 end
 
 local function Build()

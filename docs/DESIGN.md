@@ -684,6 +684,12 @@ addon. This document wins where they simplify.
 
 ## UI setups: parts (#10, #15, #16)
 
+The UI setup tab identifies the target of Save: it updates the setup this character
+last applied (or created with Save As), even while browsing another entry. Save As
+creates a new setup. Enabled Save actions use the blue action style. Delete acts on
+the selected setup through the existing version-checked catalog deletion preview;
+only confirmation removes it from the catalog, leaving character UI and backups alone.
+
 `UISetup.lua`: five plain parts, each with read, plan, write and read-back, applied in a fixed order
 (layout, bars, settings, chat, damage meter). Apply follows the loadout's transaction: preview, fingerprint
 (stale refused), a snapshot of the touched parts pinned before the first write, a guard (combat, Edit
