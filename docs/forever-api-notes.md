@@ -433,9 +433,8 @@ Owner's in-game output for `DamageMeterSessionWindow2` on Forever:
   persistence or taint safety.
 
 This explains why the first PR #93 implementation omitted secondary geometry:
-it required all three getters based on newer Mainline source. Owner confirmed
-second-window creation and Current Segment selection work; placement copying,
-full-exit persistence and the wider taint checks remain to be verified.
+it required all three getters based on newer Mainline source. The follow-up tests
+below cover second-window creation, Current Segment, placement and persistence.
 
 Follow-up on the correctly positioned source character (20:26:55):
 `GetPoint()` returned **BOTTOMRIGHT, nil, BOTTOMRIGHT** (the probe printed nil as
@@ -447,8 +446,18 @@ without window 2, not evidence that the source window was missing.
 
 After deploying the screen-anchor correction, the owner completed the five-step
 Save/Apply check and confirmed Healing Done appeared at the intended position,
-locked and on Current Segment on the target character. Full-client-exit persistence
-and the wider taint checks remain unverified.
+locked and on Current Segment on the target character.
+
+Further owner test on the new character **Letme Testthis**: the stock UI setup
+worked, including after a full client exit and relaunch; deleting and recreating
+the **Base** setup also worked. Other addons' settings still needed configuration.
+This is owner-reported persistence evidence for the tested setup, not a systematic
+taint audit or a claim about other client builds.
+
+Minor onboarding observation: pressing Escape during the opening cinematic also
+affected an open window while showing the cinematic skip confirmation. The exact
+addon window and event ordering were not identified; keep this as a reproduction
+note rather than a confirmed data/apply failure.
 
 Read-only probes used:
 
