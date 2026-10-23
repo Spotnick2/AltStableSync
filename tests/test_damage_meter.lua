@@ -449,9 +449,9 @@ check("Forever partial visibility restore retains pin",r.partial and B.Operation
 boot({forever=true,[2]={damageMeterType=2,sessionType=1,locked=true}})
 e=entry(); apply(e)
 local captureNote
-window(2).GetPoint=function() return "TOPLEFT",nil,"TOPLEFT" end
+window(2).GetPoint=function() return "TOPLEFT",{},"TOPLEFT" end
 capturedPart,captureNote=M.Capture()
-check("capture explains rejected anchor",captureNote:find("anchor is not relative to UIParent",1,true))
+check("capture explains rejected anchor",captureNote:find("anchor is not relative to the screen or UIParent",1,true))
 eq("failed geometry still captures lock",capturedPart.windows[2].locked,true)
 check("diagnostic not stored in window state",M.Read().windows[3]==nil)
 window(2).GetPoint=function() return "TOPLEFT",UIParent,"TOPLEFT" end
@@ -463,5 +463,44 @@ window(2).GetRect=function() error("private runtime details") end
 capturedPart,captureNote=M.Capture()
 check("capture gives safe read failure reason",captureNote:find("rectangle or screen size cannot be read",1,true))
 check("capture never exposes runtime exception text",not captureNote:find("private runtime details",1,true))
+
+boot({forever=true,[2]={damageMeterType=2,sessionType=1,locked=true}})
+e=entry(); apply(e)
+w=window(2)
+w.screenAnchor=true
+w.point,w.relativePoint="BOTTOMRIGHT","BOTTOMRIGHT"
+w.x,w.y=1400,300
+saved=S.PlanSave()
+check("screen anchor creates a Save change",not saved.noop and not saved.blocked)
+eq("screen anchor Save captures x",saved.modules.damageMeter.windows[2].geometry.x,1400)
+eq("screen anchor Save preserves lock",saved.modules.damageMeter.windows[2].locked,true)
+check("screen anchor Save succeeds",S.Save(saved)~=nil)
+e=A.Catalog.Get(e.id)
+-- Change the live rectangle after saving. Apply must put it back, and its
+-- backup must restore this screen-relative rectangle through a UIParent anchor.
+w.x,w.y=900,200
+local previousCalls=#U.calls
+r=apply(e)
+check("screen anchor applies saved rectangle",not r.failed)
+eq("screen anchor applied x",w.x,1400)
+eq("screen anchor applied y",w.y,300)
+check("screen anchor rewritten through UIParent",not w.screenAnchor)
+eq("screen anchor never changes unknown flag",U.count("MeterPlaced"),0)
+r=restore(1)
+check("screen anchor rectangle restored",not r.partial)
+eq("screen anchor restored x",w.x,900)
+eq("screen anchor restored y",w.y,200)
+check("screen anchor performed guarded writes",#U.calls>previousCalls)
+
+-- Accepting a screen anchor must not bypass the existing scale/bounds checks.
+boot({forever=true,[2]={damageMeterType=2,sessionType=1}})
+w=window(2); w.screenAnchor=true
+w.GetEffectiveScale=function() return 2 end
+capturedPart=M.Capture()
+check("screen anchor with different scale rejected",not capturedPart.windows[2].geometry)
+w.GetEffectiveScale=function() return 1 end
+w.x=-10
+capturedPart=M.Capture()
+check("screen anchor offscreen rejected",not capturedPart.windows[2].geometry)
 
 finish("damage meter")

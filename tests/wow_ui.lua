@@ -185,7 +185,7 @@ function U.meterSetup(opts)
         GetWidth = function() return 1920 end, GetHeight = function() return 1080 end }
     local data = {}
     U.meter = data
-    local anchor = { BOTTOMLEFT={0,0}, TOPLEFT={0,1}, CENTER={.5,.5}, TOPRIGHT={1,1} }
+    local anchor = { BOTTOMLEFT={0,0}, BOTTOMRIGHT={1,0}, TOPLEFT={0,1}, CENTER={.5,.5}, TOPRIGHT={1,1} }
     local function frame(i, d)
         local w = { index=i, shown=d.shown ~= false, meterType=d.damageMeterType,
             sessionType=d.sessionType, sessionID=d.sessionID, locked=d.locked,
@@ -199,7 +199,11 @@ function U.meterSetup(opts)
         function w:IsMinimized() return self.minimized end
         function w:IsResizing() return self.resizing end
         function w:GetNumPoints() return 1 end
-        function w:GetPoint() return self.point, UIParent, self.relativePoint, 0, 0 end
+        function w:GetPoint()
+            local relative = UIParent
+            if self.screenAnchor then relative = nil end
+            return self.point, relative, self.relativePoint, 0, 0
+        end
         function w:GetEffectiveScale() return 1 end
         function w:GetRect() return self.x,self.y,self.width,self.height end
         function w:IsUserPlaced() return self.userPlaced end
@@ -209,6 +213,7 @@ function U.meterSetup(opts)
         function w:SetPoint(p, relative, rp, x, y)
             call("MeterPoint"); assert(relative == UIParent)
             self.point,self.relativePoint=p,rp
+            self.screenAnchor=false
             self.x=x+anchor[rp][1]*UIParent:GetWidth()-anchor[p][1]*self.width
             self.y=y+anchor[rp][2]*UIParent:GetHeight()-anchor[p][2]*self.height
             after("MeterPoint")

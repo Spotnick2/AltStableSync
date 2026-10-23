@@ -168,3 +168,17 @@ requested Astra high plan reviewer:
   inventing a flag, opening/hiding with an unreadable flag, dropping explicit flag intent,
   omitting the immediate mouse guard, releasing a partial restore's pin, and allowing
   collapsed geometry. Every mutation was removed before the final suite run.
+
+### Screen-relative placement follow-up
+
+The capture diagnostic exposed the anchor restriction as the next rejection. Accept
+a single screen-relative anchor (nil relative frame) as well as UIParent. Continue to
+require matching effective scales, a finite in-bounds rectangle and all existing guards.
+Apply updates the same anchor point through UIParent; restore recovers the snapshotted
+physical rectangle, as already specified, without promising the original anchor spelling.
+Anchors to other frames remain unsupported. Regression coverage exercises adding the
+missing rectangle through Save, retaining locked=true, applying it and restoring its
+backup, plus rejection of different scales and out-of-bounds screen-relative rectangles.
+Owner then confirmed `BOTTOMRIGHT, nil, BOTTOMRIGHT` on the source character; the
+regression uses that exact anchor pair. All 177 meter assertions and the full suite pass;
+reinstating the UIParent-only restriction makes the regression fail.

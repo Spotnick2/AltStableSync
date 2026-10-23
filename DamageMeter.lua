@@ -76,8 +76,15 @@ local function Geometry(w, mark)
     if Number(Call(w, "GetNumPoints")) ~= 1 then error("meter has multiple anchors") end
     local p, relative, rp = Call(w, "GetPoint", 1)
     Plain(p); Plain(relative); Plain(rp)
-    mark("anchor is not relative to UIParent")
-    if relative ~= UIParent or not ANCHOR[p] or not ANCHOR[rp] then error("meter anchor isn't UIParent") end
+    mark("anchor is not relative to the screen or UIParent")
+    -- A screen-relative anchor has no relative frame. GetRect still gives
+    -- the absolute rectangle; with equal effective scales it uses the same
+    -- coordinates we write through UIParent. Restore promises that rectangle,
+    -- not the original spelling of an equivalent anchor. Other frames remain
+    -- unsupported: their movement would introduce another dependency.
+    if (relative ~= nil and relative ~= UIParent) or not ANCHOR[p] or not ANCHOR[rp] then
+        error("meter anchor isn't screen-relative")
+    end
     -- Different effective scales are left alone, rather than guessing at a
     -- coordinate conversion or changing the player's scale.
     mark("window and UIParent scales differ or cannot be read")

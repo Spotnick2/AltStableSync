@@ -437,6 +437,14 @@ it required all three getters based on newer Mainline source. Owner confirmed
 second-window creation and Current Segment selection work; placement copying,
 full-exit persistence and the wider taint checks remain to be verified.
 
+Follow-up on the correctly positioned source character (20:26:55):
+`GetPoint()` returned **BOTTOMRIGHT, nil, BOTTOMRIGHT** (the probe printed nil as
+"screen"). The UIParent-only capture check rejected this screen-relative anchor.
+The correction accepts nil relative frames with the same scale/bounds/read-back
+requirements and restores physical geometry through an equivalent UIParent anchor.
+The earlier nil-global error was from running the probe on a different character
+without window 2, not evidence that the source window was missing.
+
 Read-only probes used:
 
 ```lua

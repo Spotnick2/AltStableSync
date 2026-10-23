@@ -738,7 +738,7 @@ refuses any backup with a kind.
   `DamageMeter.lua` uses Blizzard's manager setters, never `DamageMeterPerCharacterSettings`.
   Primary position/size follow the existing Edit Mode layout. Secondary position/size and
   userPlaced (when readable) are captured only with a readable, finite, in-bounds full-size
-  rectangle, one UIParent anchor and matching effective scale. Minimized/resizing getters
+  rectangle, one screen-relative (nil relative frame) or UIParent anchor and matching effective scale. Minimized/resizing getters
   are checked when present; present getters that fail still block capture. Forever lacks
   those getters and IsUserPlaced (owner probe 2026-10-22). Without IsResizing, a successful
   false IsMouseButtonDown("LeftButton") is required at capture and before rectangle writes.
