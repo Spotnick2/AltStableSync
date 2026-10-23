@@ -684,8 +684,14 @@ addon. This document wins where they simplify.
 
 ## UI setups: parts (#10, #15, #16)
 
-`UISetup.lua`: four plain parts, each with read, plan, write and read-back, applied in a fixed order
-(layout, bars, settings, chat). Apply follows the loadout's transaction: preview, fingerprint
+The UI setup tab identifies the target of Save: it updates the setup this character
+last applied (or created with Save As), even while browsing another entry. Save As
+creates a new setup. Enabled Save actions use the blue action style. Delete acts on
+the selected setup through the existing version-checked catalog deletion preview;
+only confirmation removes it from the catalog, leaving character UI and backups alone.
+
+`UISetup.lua`: five plain parts, each with read, plan, write and read-back, applied in a fixed order
+(layout, bars, settings, chat, damage meter). Apply follows the loadout's transaction: preview, fingerprint
 (stale refused), a snapshot of the touched parts pinned before the first write, a guard (combat, Edit
 Mode open) before every write, read-back, and a stop that keeps the pin. `loaded.ui` names the
 attempted entry with `complete = false` from the first write, so Save can't write a partial state into
@@ -731,11 +737,44 @@ refuses any backup with a kind.
   everything it held plus the additions (an apply); otherwise the operation stops and keeps its
   backup pinned. **Tabs an apply created are kept** and listed, as a load's
   created macros are (safety rule 9): closing a tab loses its channels and position.
+- **Damage meter** (Part of #10): records window 1 and window 2's meter type and lock; both
+  portable selections are **Current Segment** (1). A missing/hidden second window captures a
+  previewed Healing Done/Current/unlocked default, so Apply opens a second window on each
+  character. An existing shown window captures its actual type. Window 3 is never changed.
+  `DamageMeter.lua` uses Blizzard's manager setters, never `DamageMeterPerCharacterSettings`.
+  Primary position/size follow the existing Edit Mode layout. Secondary position/size and
+  userPlaced (when readable) are captured only with a readable, finite, in-bounds full-size
+  rectangle, one screen-relative (nil relative frame) or UIParent anchor and matching effective scale. Minimized/resizing getters
+  are checked when present; present getters that fail still block capture. Forever lacks
+  those getters and IsUserPlaced (owner probe 2026-10-22). Without IsResizing, a successful
+  false IsMouseButtonDown("LeftButton") is required at capture and before rectangle writes.
+  An absent userPlaced remains omitted and never authorizes a flag write. Unsafe geometry is
+  visibly omitted/skipped and saved intent retained. Existing hidden window geometry must
+  be readable before opening, because Blizzard resets its placement when opening it.
+  Every meter write has a combat/Edit Mode guard and independent frame/manager read-back.
+  A changed state after an earlier UI part stops the operation with its backup pinned.
+  Exact restore returns touched windows to Current/Overall, type, lock and safe placement;
+  it hides window 2 only when that backup proves the operation opened it (including an
+  exception after Show). The permanent first backup receives the same ownership journal;
+  if the client cannot read userPlaced, an existing hidden frame is not reopened (opening
+  resets that flag), and restore leaves an opened window shown with a partial result when
+  its flag cannot be backed up for undo-of-restore. Rectangle-only changes to visible
+  windows can be restored without changing the flag. Explicit saved flags require a
+  readable target flag; otherwise their geometry is skipped and its saved intent retained.
+  unreadable ownership remains unavailable/partial. Restore takes its own backup and can
+  itself be undone. A specific past encounter is skipped: its ephemeral ID cannot promise
+  exact restore after restart/reset. Select Current or Overall first. Missing APIs show
+  **"not supported on this build"**. A hidden primary is also skipped; show it first.
+  **Unmeasured on Forever:** method availability, addon-call taint safety, placement and
+  persistence through full client exit. Evidence is Mainline UI source at
+  [b9be9379](https://github.com/Gethe/wow-ui-source/tree/b9be9379719047977fca4dba1bb1d9988e8840b3/Interface/AddOns/Blizzard_DamageMeter),
+  not client verification. The owner must check these before merging. Schema 12 is a stamp
+  upgrade that prevents schema-10/11 code from ignoring this backup part and releasing its pin.
 - **Save** replaces the entry this character applied, at that version, only after a complete apply and
   no restore since. It updates only the parts the entry has; a part or setting the apply skipped keeps
   the entry's value, as do unknown keys and groups this client doesn't know. Chat saves the windows as
   they are now, so groups a window had before an additive apply join the entry; the preview lists each
-  group added or removed. **Save As** captures all four parts;
+  group added or removed. **Save As** captures all five parts;
   a tab that receives no message types (channels only, or an addon's console tab) is left out and
   said so; Save drops such a tab from an entry that has one, and Apply never creates one (an entry
   saved before this rule still held one, beta 2026-10-22).

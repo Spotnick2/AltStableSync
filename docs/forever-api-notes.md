@@ -416,6 +416,57 @@ Measured by hand with `/run` lines from the chat box.
 - **`SetMaxLetters` counts `||` as one letter** and keeps it escaped. A 12-letter limit kept `B||cffff0000y`, 13 bytes.
 - **One unexplained screenshot:** the first time, the Import name box drew a crafted name in red. Three later runs, after a `/reload`, with focus moved between the boxes, drew it plain and held the escaped text. It wasn't reproduced.
 
+## Damage meter placement probe (2026-10-22, build not included in probe output)
+
+Owner's in-game output for `DamageMeterSessionWindow2` on Forever:
+
+- `DamageMeter:GetSessionWindow(2) == DamageMeterSessionWindow2`: true.
+- `GetNumPoints()` = 1; `GetPoint()` = TOPLEFT, UIParent, TOPLEFT.
+- Frame and UIParent effective scales both `0.63999998569489`.
+- `GetRect()` = `40, 960, 400, 199.99995422363`.
+- UIParent size = `2133.3334960938, 1200`.
+- `IsMinimized`, `IsResizing`, `IsUserPlaced`: absent (each protected call
+  failed with "attempt to call a nil value"). These are missing methods,
+  not successful reads returning false.
+- `SetPoint`, `SetSize`, `SetUserPlaced`, `IsLocked`, and global
+  `IsMouseButtonDown`: functions. Their presence alone does not establish
+  persistence or taint safety.
+
+This explains why the first PR #93 implementation omitted secondary geometry:
+it required all three getters based on newer Mainline source. The follow-up tests
+below cover second-window creation, Current Segment, placement and persistence.
+
+Follow-up on the correctly positioned source character (20:26:55):
+`GetPoint()` returned **BOTTOMRIGHT, nil, BOTTOMRIGHT** (the probe printed nil as
+"screen"). The UIParent-only capture check rejected this screen-relative anchor.
+The correction accepts nil relative frames with the same scale/bounds/read-back
+requirements and restores physical geometry through an equivalent UIParent anchor.
+The earlier nil-global error was from running the probe on a different character
+without window 2, not evidence that the source window was missing.
+
+After deploying the screen-anchor correction, the owner completed the five-step
+Save/Apply check and confirmed Healing Done appeared at the intended position,
+locked and on Current Segment on the target character.
+
+Further owner test on the new character **Letme Testthis**: the stock UI setup
+worked, including after a full client exit and relaunch; deleting and recreating
+the **Base** setup also worked. Other addons' settings still needed configuration.
+This is owner-reported persistence evidence for the tested setup, not a systematic
+taint audit or a claim about other client builds.
+
+Minor onboarding observation: pressing Escape during the opening cinematic also
+affected an open window while showing the cinematic skip confirmation. The exact
+addon window and event ordering were not identified; keep this as a reproduction
+note rather than a confirmed data/apply failure.
+
+Read-only probes used:
+
+```lua
+/run local w=DamageMeterSessionWindow2; local p,r,rp=w:GetPoint(); print(w:GetNumPoints(),p,r and r:GetName(),rp,w:GetEffectiveScale(),UIParent:GetEffectiveScale()); print(w:GetRect())
+/run local w=DamageMeterSessionWindow2; for _,k in ipairs({"IsMinimized","IsResizing","IsUserPlaced"}) do local ok,v=pcall(function() return w[k](w) end); print(k,ok,v) end; print("UIParent",UIParent:GetSize())
+/run local w=DamageMeterSessionWindow2; print("same window",DamageMeter:GetSessionWindow(2)==w); for _,k in ipairs({"SetPoint","SetSize","SetUserPlaced","IsLocked"}) do print(k,type(w[k])) end; print("mouse check",type(IsMouseButtonDown))
+```
+
 ## Still open
 
 - Does any taint appear after `/reload` following `place`? (Nothing was reported during the run.)

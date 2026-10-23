@@ -145,4 +145,27 @@ do
     eq("reload: no bars, no prompt", R.prompt:IsShown(), false)
 end
 
+-- Browsing another entry must not change the Save target. Delete targets the
+-- selected entry, and only the existing confirmation removes it.
+do
+    boot()
+    A.Commands.SaveAsUI("Applied")
+    previewFrame().confirm:Click()
+    local applied = A.Catalog.ListAll("ui")[1]
+    local other = A.Catalog.Create("ui", { name = "Other" }, { cvars = { damageMeterEnabled = "1" } })
+    P.Open("ui")
+    W.uiEntry.onPick(other.id)
+    check("save hint names applied target", W.uiSaveHint:GetText():find('Save overwrites "Applied"', 1, true) ~= nil)
+    W.uiSave:Click()
+    check("save preview keeps applied target", A.Preview.Shown().title:find("Applied", 1, true) ~= nil)
+    A.Preview.Hide()
+    W.uiDelete:Click()
+    check("delete preview names selection", A.Preview.Shown().title:find("Other", 1, true) ~= nil)
+    eq("delete waits for confirmation", #A.Catalog.ListAll("ui"), 2)
+    previewFrame().confirm:Click()
+    eq("delete removes only selected entry", #A.Catalog.ListAll("ui"), 1)
+    eq("delete preserves applied entry", A.Catalog.ListAll("ui")[1].id, applied.id)
+    eq("catalog delete never writes game state", #UI.calls, 0)
+end
+
 finish("test_uisetup_panel")

@@ -1,7 +1,7 @@
 ------------------------------------------------------------
 -- UISetup.lua - UI setups: capture, plan, apply and exact restore (#10)
 --
--- A UI setup is a catalog entry of kind "ui" with up to four parts, each
+-- A UI setup is a catalog entry of kind "ui" with up to five parts, each
 -- optional (docs/DESIGN.md "UI setups: parts"):
 --   layout = { type = 1, name } | { type = 0, index, name }   -- select an existing
 --            Edit Mode layout (Account by name, preset by index); never
@@ -28,8 +28,7 @@ local ASS = AltStableSync
 local UISetup = {}
 ASS.UISetup = UISetup
 
-local PARTS = { "layout", "bars", "cvars", "chat" }
-local KNOWN = { layout = true, bars = true, cvars = true, chat = true }
+local KNOWN = { layout = true, bars = true, cvars = true, chat = true, damageMeter = true }
 
 -- Enum.EditModeLayoutType.
 local PRESET, ACCOUNT, CHARACTER = 0, 1, 2
@@ -350,6 +349,11 @@ function UISetup.Capture()
     else
         notes[#notes + 1] = "Chat: couldn't read the chat windows; not saved."
     end
+    if ASS.DamageMeter then
+        local note
+        m.damageMeter, note = ASS.DamageMeter.Capture()
+        if note then notes[#notes + 1] = "Damage meter: " .. note end
+    end
     return m, notes
 end
 
@@ -376,7 +380,7 @@ local function Skip(plan, part, what, reason, key)
 end
 
 local function Empty(plan)
-    return not plan.layout and not plan.bars and #plan.cvars == 0 and #plan.chat.add == 0 and #plan.chat.create == 0
+    return not plan.damageMeter and not plan.layout and not plan.bars and #plan.cvars == 0 and #plan.chat.add == 0 and #plan.chat.create == 0
 end
 
 function UISetup.Plan(entry)
@@ -389,6 +393,14 @@ function UISetup.Plan(entry)
     plan.blocked = UISetup.Blocked()
     if plan.blocked then return Finish(plan) end
     local m = entry.modules
+    if m.damageMeter then
+        local why, geometrySkipped
+        if ASS.DamageMeter then
+            plan.damageMeter, why, geometrySkipped = ASS.DamageMeter.Plan(m.damageMeter)
+        else why = "not supported on this build" end
+        if why then Skip(plan, "damageMeter", "Damage meter", why) end
+        if geometrySkipped then Skip(plan, "damageMeter", "Damage meter placement", "cannot copy placement safely; kept as saved") end
+    end
     for _, k in ipairs(Sorted(m)) do
         if not KNOWN[k] then plan.unsupported[#plan.unsupported + 1] = tostring(k) end
     end
@@ -626,6 +638,10 @@ end
 
 local function Snapshot(plan, reason)
     local snap = { kind = "ui", reason = reason }
+    if plan.damageMeter then
+        snap.damageMeter = ASS.DamageMeter.Snapshot(plan.damageMeter)
+        if not snap.damageMeter then return nil end
+    end
     if plan.layout then
         local ls = Layouts()
         local a = ls and ActiveLayout(ls)
@@ -662,7 +678,7 @@ end
 -- cvars, chat. result = { changed, failed, at, created = { names } }.
 ------------------------------------------------------------
 
-local function Execute(plan)
+local function Execute(plan, snap)
     local result = { changed = 0, created = {} }
     local function stop(why, at)
         result.failed, result.at = why, at
@@ -708,6 +724,11 @@ local function Execute(plan)
         result.created[#result.created + 1] = c.name
         result.changed = result.changed + 1
     end
+    if plan.damageMeter then
+        local ok, why = ASS.DamageMeter.Execute(plan.damageMeter, snap.damageMeter, Guard)
+        if not ok then return stop(why, "damage meter") end
+        result.changed = result.changed + 1
+    end
     return result
 end
 
@@ -721,7 +742,7 @@ local function Provenance() return ASS.Loadout.Provenance() end
 local function Skipped(plan)
     local s = {}
     for _, k in ipairs(plan.skips) do
-        if k.part == "layout" or k.part == "bars" then
+        if k.part == "layout" or k.part == "bars" or k.part == "damageMeter" then
             s[k.part] = k.reason
         elseif k.part == "cvars" and k.key then
             s.cvars = s.cvars or {}
@@ -771,7 +792,7 @@ function UISetup.Apply(entry, shown, abandon)
     local ok, err = ASS.Backups.Pin(snap, { kind = "ui", id = live.id, version = live.version,
                                             name = "UI setup " .. tostring(live.name) })
     if not ok then return nil, err end
-    local result = Execute(plan)
+    local result = Execute(plan, snap)
     result.skips = plan.skips
     if result.failed then
         ASS.char.interrupted = { id = live.id, version = live.version, why = result.failed, at = result.at }
@@ -799,6 +820,15 @@ function UISetup.PlanRestore(which)
     plan.blocked = UISetup.Blocked()
     if plan.blocked then return Finish(plan) end
     local function cant(what, reason) plan.unavailable[#plan.unavailable + 1] = { what = what, reason = reason } end
+    if snap.meter ~= nil then
+        cant("Damage meter", "backup from an earlier draft; not supported on this build, left unchanged")
+    end
+    if snap.damageMeter then
+        local why
+        if ASS.DamageMeter then plan.damageMeter, why = ASS.DamageMeter.Plan(snap.damageMeter, true)
+        else why = "not supported on this build" end
+        if why then cant("Damage meter", why) end
+    end
 
     if type(snap.layout) == "table" then
         local ls, why = Layouts()
@@ -895,8 +925,9 @@ function UISetup.Restore(which, shown)
     else
         local snap = Snapshot(plan, "restore")
         if not snap then return nil, "Couldn't read the current setup for the backup; nothing was changed." end
-        ASS.Backups.PushRing(snap, ASS.Backups.Get(which))
-        result = Execute(plan)
+        local ok, why = ASS.Backups.PushRing(snap, ASS.Backups.Get(which))
+        if not ok then return nil, why end
+        result = Execute(plan, snap)
         -- The UI no longer holds what the last apply left: Save must not
         -- write the restored state into that entry (apply it again first).
         local rec = ASS.char.loaded and ASS.char.loaded.ui
@@ -947,6 +978,12 @@ function UISetup.PlanSave()
     for _, n in ipairs(notes) do p.notes[#p.notes + 1] = n end
     local old, new = e.modules, Copy(e.modules)
     local skipped = rec.skipped or {}
+    if old.damageMeter and cur.damageMeter and not skipped.damageMeter then
+        new.damageMeter = ASS.DamageMeter.Merge(cur.damageMeter, old.damageMeter)
+        if Serialize(new.damageMeter) ~= Serialize(old.damageMeter) then
+            p.changes[#p.changes + 1] = "Damage meter: update the two windows (Current Segment)."
+        end
+    end
     if old.layout and cur.layout and not skipped.layout and not SameLayout(cur.layout, old.layout) then
         new.layout = cur.layout
         p.changes[#p.changes + 1] = ("Layout: %s -> %s"):format(LayoutText(old.layout), LayoutText(cur.layout))
@@ -1019,7 +1056,7 @@ function UISetup.Save(shown)
     return { entry = e, changes = #p.changes }
 end
 
--- Save As: a fresh capture of all four parts. p = { modules, notes, fingerprint }.
+-- Save As: a fresh capture of all five parts. p = { modules, notes, fingerprint }.
 function UISetup.PlanSaveAs()
     local p = { notes = {} }
     p.blocked = UISetup.Blocked()
@@ -1053,6 +1090,9 @@ end
 function UISetup.Contents(modules)
     local lines = {}
     if type(modules) ~= "table" then return lines end
+    if modules.damageMeter and ASS.DamageMeter then
+        for _, line in ipairs(ASS.DamageMeter.Describe(modules.damageMeter)) do lines[#lines + 1] = line end
+    end
     if modules.layout then lines[#lines + 1] = "Layout: " .. LayoutText(modules.layout) end
     if modules.bars then
         local shown = {}
@@ -1082,6 +1122,14 @@ function UISetup.Describe(plan)
     local lines = {}
     if plan.blocked then return { plan.blocked } end
     local restore = plan.kind == "restore"
+    if plan.damageMeter then
+        for _, line in ipairs(ASS.DamageMeter.Describe({ windows = plan.damageMeter.to })) do lines[#lines + 1] = line end
+        if plan.damageMeter.to[2] then
+            lines[#lines + 1] = plan.damageMeter.to[2].shown and "  Show/configure window 2; window 3 is left alone."
+                or "  Hide window 2 (opened by the operation this backup records)."
+        end
+        lines[#lines + 1] = "  Primary placement follows Edit Mode. Meter APIs are not yet measured on Forever."
+    end
     if plan.layout then
         lines[#lines + 1] = ("Layout: %s -> %s"):format(LayoutText(plan.layout.from), LayoutText(plan.layout.want))
         if not restore and plan.layout.want.type == ACCOUNT then
