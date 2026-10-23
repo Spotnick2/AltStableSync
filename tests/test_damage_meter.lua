@@ -446,4 +446,22 @@ U.after.MeterOpen=nil
 r=restore("op")
 check("Forever partial visibility restore retains pin",r.partial and B.Operation() and window(2).shown)
 
+boot({forever=true,[2]={damageMeterType=2,sessionType=1,locked=true}})
+e=entry(); apply(e)
+local captureNote
+window(2).GetPoint=function() return "TOPLEFT",nil,"TOPLEFT" end
+capturedPart,captureNote=M.Capture()
+check("capture explains rejected anchor",captureNote:find("anchor is not relative to UIParent",1,true))
+eq("failed geometry still captures lock",capturedPart.windows[2].locked,true)
+check("diagnostic not stored in window state",M.Read().windows[3]==nil)
+window(2).GetPoint=function() return "TOPLEFT",UIParent,"TOPLEFT" end
+U.mouseDown=true
+capturedPart,captureNote=M.Capture()
+check("capture explains mouse guard",captureNote:find("left button is held",1,true))
+U.mouseDown=false
+window(2).GetRect=function() error("private runtime details") end
+capturedPart,captureNote=M.Capture()
+check("capture gives safe read failure reason",captureNote:find("rectangle or screen size cannot be read",1,true))
+check("capture never exposes runtime exception text",not captureNote:find("private runtime details",1,true))
+
 finish("damage meter")

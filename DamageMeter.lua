@@ -53,38 +53,50 @@ end
 local ANCHOR = { BOTTOMLEFT = {0,0}, BOTTOM = {.5,0}, BOTTOMRIGHT = {1,0},
     LEFT = {0,.5}, CENTER = {.5,.5}, RIGHT = {1,.5},
     TOPLEFT = {0,1}, TOP = {.5,1}, TOPRIGHT = {1,1} }
-local function GeometryIdle(w)
+local function GeometryIdle(w, mark)
+    mark = mark or function() end
     -- Forever lacks these newer mixin getters (owner probe, 2026-10-22).
     -- A present getter throwing is still a failure, never an absent feature.
+    mark("minimized-state read failed or window minimized")
     if w.IsMinimized ~= nil and Flag(Call(w, "IsMinimized")) then error("meter is minimized") end
+    mark("resize-state read failed or window resizing")
     if w.IsResizing ~= nil then
         if Flag(Call(w, "IsResizing")) then error("meter is resizing") end
     else
+        mark("mouse-button read failed or left button is held")
         if type(IsMouseButtonDown) ~= "function" or Boolean(IsMouseButtonDown("LeftButton")) then
             error("finish dragging or resizing the meter first")
         end
     end
 end
-local function Geometry(w)
-    GeometryIdle(w)
+local function Geometry(w, mark)
+    mark = mark or function() end
+    GeometryIdle(w, mark)
+    mark("window does not have one readable anchor")
     if Number(Call(w, "GetNumPoints")) ~= 1 then error("meter has multiple anchors") end
     local p, relative, rp = Call(w, "GetPoint", 1)
     Plain(p); Plain(relative); Plain(rp)
+    mark("anchor is not relative to UIParent")
     if relative ~= UIParent or not ANCHOR[p] or not ANCHOR[rp] then error("meter anchor isn't UIParent") end
     -- Different effective scales are left alone, rather than guessing at a
     -- coordinate conversion or changing the player's scale.
+    mark("window and UIParent scales differ or cannot be read")
     if Number(Call(w, "GetEffectiveScale")) ~= Number(Call(UIParent, "GetEffectiveScale")) then
         error("meter scale differs from UIParent")
     end
+    mark("window rectangle or screen size cannot be read")
     local x, y, width, height = Call(w, "GetRect")
     x, y, width, height = Number(x), Number(y), Number(width), Number(height)
     local sw, sh = Number(Call(UIParent, "GetWidth")), Number(Call(UIParent, "GetHeight"))
+    mark("rectangle is off-screen or outside supported size bounds")
     if width < 200 or width > 600 or height < 120 or height > 400 or x < 0 or y < 0
         or x + width > sw or y + height > sh then error("meter rectangle out of bounds") end
+    mark("position or size setter is unavailable")
     for _, name in ipairs({"SetPoint", "SetSize"}) do
         if type(w[name]) ~= "function" then error(UNSUPPORTED) end
     end
     local g = { x = x, y = y, width = width, height = height }
+    mark("placement flag cannot be read or restored")
     if w.IsUserPlaced ~= nil then
         if type(w.SetUserPlaced) ~= "function" then error(UNSUPPORTED) end
         g.userPlaced = Boolean(Call(w, "IsUserPlaced"))
@@ -113,8 +125,9 @@ local function Window(m, i)
         or Plain(data[i].sessionType) ~= st or Plain(data[i].sessionID) ~= nil
         or Flag(data[i].locked) ~= s.locked then error("meter manager and window disagree") end
     if i == 2 then
-        local ok, g = pcall(Geometry, w)
-        if ok then s.geometry = g end
+        local issue
+        local ok, g = pcall(Geometry, w, function(stage) issue = stage end)
+        if ok then s.geometry = g else return s, issue end
     end
     return s
 end
@@ -126,11 +139,13 @@ local function Allocator(m)
     return i or false
 end
 function M.Read()
-    local ok, state = pcall(function()
+    local ok, state, geometryIssue = pcall(function()
         local m = Manager()
-        local s = { windows = { Window(m, 1), Window(m, 2) } }
+        local first = Window(m, 1)
+        local second, issue = Window(m, 2)
+        local s = { windows = { first, second } }
         if not s.windows[2].shown then s.allocator = Allocator(m) end
-        return s
+        return s, issue
     end)
     if not ok then
         -- Do not expose secret client values or arbitrary exception text.
@@ -139,10 +154,10 @@ function M.Read()
         end
         return nil, UNSUPPORTED .. " (meter state or API unreadable)"
     end
-    return state
+    return state, nil, geometryIssue
 end
 function M.Capture()
-    local s, why = M.Read()
+    local s, why, geometryIssue = M.Read()
     if not s then return nil, why end
     local out = { windows = {} }
     for i = 1, 2 do
@@ -157,7 +172,10 @@ function M.Capture()
         end
     end
     local note = "Both windows use Current Segment; a hidden/missing second window becomes Healing Done. Primary position/size follow Edit Mode."
-    if not out.windows[2].geometry then note = note .. " Secondary position/size couldn't be captured safely; not saved." end
+    if not out.windows[2].geometry then
+        note = note .. " Secondary position/size not saved: "
+            .. (geometryIssue or "window 2 is hidden or not created") .. "."
+    end
     if out.windows[2].geometry and out.windows[2].geometry.userPlaced == nil then
         note = note .. " Secondary position/size saved; this build's unreadable placement flag is left alone."
     end
