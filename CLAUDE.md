@@ -50,3 +50,19 @@ PowerShell) we replaced with something simpler and testable.
 Fable for adversarial critique only as the Codex fallback, for post-phase diff review, and for
 large multi-file refactors. Never single-file work. Implementation use needs explicit per-turn
 owner approval.
+
+## Consulting Codex
+
+The shared `codex-consult` skill (user level) has the invocation and the gotchas. For this repo:
+
+For AltStableSync specifically, good things to hand Codex: anything that **writes game state**
+(the apply engine, action-bar placement and cursor handling, macro create/reindex, binding-set
+selection and `SaveBindings`, Edit Mode `SaveLayouts`), the backup/restore path, the catalog
+sync receive rules (`Catalog.Upsert`, the Link addon), `Tools/Transfer-Profiles.ps1`, and any change to the
+SavedVariables shape — paste the relevant code/paths and ask *what silently destroys the player's
+setup*. Feed it the safety model from `docs/DESIGN.md`. Hand it `docs/forever-api-notes.md` alongside the
+diff: those findings are measured on the live client, and a cold reviewer will otherwise argue
+from Classic-era API behaviour that no longer holds.
+
+The PR review loop in `docs/WORKFLOW.md` is this skill's main use here — that doc has the
+diff-capture and posting steps that wrap the invocation below.
