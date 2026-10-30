@@ -80,11 +80,26 @@ local COPY = {
 }
 local function Copy(err) return COPY[err] or tostring(err) end
 
-local function DescribeAction(a)
+-- A spell's rank, for a line whose two sides are one spell at different
+-- ranks: the client's subtext ("Rank 2"), else the id.
+local function Rank(id)
+    local ok, sub = pcall(function() return C_Spell.GetSpellSubtext and C_Spell.GetSpellSubtext(id) end)
+    if ok and type(sub) == "string" and sub ~= "" then return sub end
+    return "id " .. tostring(id)
+end
+
+-- `other`: the action on the other side of an arrow. A same-name spell at
+-- another rank shows its rank, so an exact-rank change doesn't read as
+-- "Flash Heal -> Flash Heal".
+local function DescribeAction(a, other)
     if type(a) ~= "table" then return "empty" end
     if a.kind == "spell" then
         local name = C_Spell.GetSpellName and C_Spell.GetSpellName(a.id)
-        return tostring(name or a.name or ("spell " .. tostring(a.id)))
+        local text = tostring(name or a.name or ("spell " .. tostring(a.id)))
+        if type(other) == "table" and other.kind == "spell" and other.id ~= a.id and DescribeAction(other) == text then
+            text = text .. " (" .. Rank(a.id) .. ")"
+        end
+        return text
     end
     if a.kind == "item" then return "item " .. tostring(a.id) end
     if a.kind == "macro" then return "macro " .. tostring(a.name) end
@@ -179,6 +194,15 @@ local function MacroLines(lines, plan)
     if ne > 0 then lines[#lines + 1] = "An updated macro changes every button that uses it, on any bar." end
 end
 
+-- The character macros the backed-up load created, kept by name (no macro
+-- is ever deleted, safety rule 5).
+local function KeptLine(kept)
+    local names = {}
+    for _, m in ipairs(kept) do names[#names + 1] = tostring(m.name) end
+    table.sort(names)
+    return ("Kept: %s that load created (not deleted): %s."):format(Plural(#kept, "macro"), table.concat(names, ", "))
+end
+
 -- The preview's lines for a plan (pure; tested).
 function Commands.Describe(plan)
     local lines = {}
@@ -198,9 +222,7 @@ function Commands.Describe(plan)
     if plan.noop and not plan.keysBlocked and #(plan.unavailable or {}) == 0 and #plan.skips == 0
         and not (pp and (pp.missing or #pp.skips > 0)) then
         local out = { "Already matches the selected settings." }
-        if plan.kind == "restore" and #(plan.kept or {}) > 0 then
-            out[#out + 1] = ("Kept: %s that load created (not deleted)."):format(Plural(#plan.kept, "macro"))
-        end
+        if plan.kind == "restore" and #(plan.kept or {}) > 0 then out[#out + 1] = KeptLine(plan.kept) end
         Waiting(out)
         if pp and (pp.note or pp.others and #pp.others > 0) then PetLines(out, pp) end
         return out
@@ -213,10 +235,18 @@ function Commands.Describe(plan)
         lines[#lines + 1] = "Bindings: not changed. " .. plan.keysBlocked
     else
         lines[#lines + 1] = ("Bindings (Destination: Character): %s change."):format(Plural(nKeys, "key"))
+        -- SaveBindings writes the whole key map as it is in memory, not just
+        -- these keys: said whenever a save will run, including a save with no
+        -- key changes that only finishes an earlier unsaved one (resave).
+        if nKeys > 0 then
+            lines[#lines + 1] = "  Then your character keybindings are saved as they are now, including any changes not saved yet."
+        elseif plan.resave then
+            lines[#lines + 1] = "  An earlier change to your keybindings wasn't saved: your character keybindings are saved as they are now, including any changes not saved yet."
+        end
     end
     local items = {}
     for _, op in ipairs(plan.actions) do
-        local text = ("%s -> %s"):format(DescribeAction(op.current), DescribeAction(op.target))
+        local text = ("%s -> %s"):format(DescribeAction(op.current, op.target), DescribeAction(op.target, op.current))
         if op.why then text = ("%s (%s: %s)"):format(text, DescribeAction(op.want), op.why) end
         items[#items + 1] = { slot = op.slot, text = text }
     end
@@ -245,9 +275,7 @@ function Commands.Describe(plan)
     end
     Waiting(lines)
     PetLines(lines, pp)
-    if plan.kind == "restore" and #(plan.kept or {}) > 0 then
-        lines[#lines + 1] = ("Kept: %s that load created (not deleted)."):format(Plural(#plan.kept, "macro"))
-    end
+    if plan.kind == "restore" and #(plan.kept or {}) > 0 then lines[#lines + 1] = KeptLine(plan.kept) end
     lines[#lines + 1] = plan.kind == "restore" and "Restore exact captured values. A backup is taken first."
         or "Backup first. Verify every write."
     return lines

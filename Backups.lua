@@ -54,6 +54,9 @@ local function First(b, snapshot)
     if snapshot.damageMeter then
         b.firstSeen.damageMeter.journal = snapshot.damageMeter.journal
     end
+    -- The macros a load creates are journaled during Execute, after this
+    -- copy: shared the same way, so the first backup lists them as kept too.
+    if snapshot.createdMacros then b.firstSeen.createdMacros = snapshot.createdMacros end
 end
 
 -- Newest first; past RING the oldest goes, except `keep` (the snapshot a

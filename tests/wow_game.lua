@@ -24,6 +24,8 @@
 --   WoW.relaunch()             -- a full exit: macro bodies gain the server newline
 --   WoW.game.macroFault = "error" | "noop" | "wrong"  -- the next EditMacro raises, does
 --                                 nothing, or writes another body (#6)
+--   WoW.game.createFault = "error" | "wrong"  -- the next CreateMacro raises, or creates the
+--                                 macro with another body (audit D10)
 --   WoW.game.onEditMacro = function(index)  -- runs before each EditMacro (e.g. combat starts)
 --
 -- The pet (#47, measured on 70338): setup{ pet = { family = 4, familyName = "Bear",
@@ -83,7 +85,7 @@ function G.setup(opts)
     end
     G.petCalls, G.petFault, G.onPetCall, G.afterPetCall, G.petReadFails, G.petBookFails = 0, nil, nil, nil, nil, nil
     -- macros: { name, icon, body, char = bool, shows = spellID }
-    G.macroFault, G.onEditMacro = nil, nil
+    G.macroFault, G.onEditMacro, G.createFault = nil, nil, nil
     G.account, G.char = {}, {}
     for _, m in ipairs(opts.macros or {}) do
         local t = { name = m.name, icon = m.icon or 134400, body = m.body, shows = m.shows }
@@ -199,6 +201,11 @@ C_Spell = {
     GetSpellName = function(id)
         local s = spellById(id)
         return (s and s.name) or (G.extra or {})[id]
+    end,
+    -- "Rank 2" for a ranked spell, "" otherwise (declared on 70532).
+    GetSpellSubtext = function(id)
+        local s = spellById(id)
+        return s and s.sub or ""
     end,
     PickupSpell = function(id)
         mutate("C_Spell.PickupSpell", true)
@@ -390,7 +397,10 @@ function CreateMacro(name, icon, body, perCharacter)
     local list = perCharacter and G.char or G.account
     local cap = perCharacter and 30 or 120
     if #list >= cap then error("too many macros", 2) end
-    local m = { name = name, icon = icon, body = body }
+    local fault = G.createFault
+    G.createFault = nil
+    if fault == "error" then error("CreateMacro failed", 2) end
+    local m = { name = name, icon = icon, body = fault == "wrong" and (body .. " -- something else") or body }
     table.insert(list, m)
     G.sortMacros()
     return G.indexOf(m)

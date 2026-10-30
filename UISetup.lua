@@ -566,7 +566,8 @@ local function SameSet(a, b)
     return true
 end
 
--- Add, then remove, one group at a time, each read back; a failed read
+-- Add, then remove, one group at a time, each guarded (combat or Edit Mode
+-- between two groups stops here, safety rule 7) and read back; a failed read
 -- stops before any write (nil is never taken as "absent"). `from`: the
 -- groups the plan saw, which the window must still hold before the first
 -- write. After the writes the whole window is read again: it must be
@@ -582,6 +583,8 @@ local function SetGroups(slot, add, remove, from, exact)
         local has = HasGroup(slot, g)
         if has == nil then return nil, "chat window unreadable" end
         if not has then
+            local stop = Guard()
+            if stop then return nil, stop end
             local ok = pcall(ChatFrame_AddMessageGroup, frame, g)
             if not ok or HasGroup(slot, g) ~= true then return nil, "chat " .. g .. " read-back" end
         end
@@ -590,6 +593,8 @@ local function SetGroups(slot, add, remove, from, exact)
         local has = HasGroup(slot, g)
         if has == nil then return nil, "chat window unreadable" end
         if has then
+            local stop = Guard()
+            if stop then return nil, stop end
             local ok = pcall(ChatFrame_RemoveMessageGroup, frame, g)
             if not ok or HasGroup(slot, g) ~= false then return nil, "chat " .. g .. " read-back" end
         end
@@ -786,12 +791,13 @@ function UISetup.Apply(entry, shown, abandon)
     local snap = Snapshot(plan, "UI setup " .. tostring(live.name))
     if not snap then return nil, "Couldn't read the current setup for the backup; nothing was changed." end
     abandonPinned()
-    -- The attempted entry is the save target from here on, with no usable
-    -- comparison until the apply completes (docs/DESIGN.md "Preserve intent").
-    Record(live, false, plan)
     local ok, err = ASS.Backups.Pin(snap, { kind = "ui", id = live.id, version = live.version,
                                             name = "UI setup " .. tostring(live.name) })
     if not ok then return nil, err end
+    -- The attempted entry is the save target from here on, with no usable
+    -- comparison until the apply completes (docs/DESIGN.md "Preserve intent").
+    -- After the pin, so a refused pin leaves the previous record as it was.
+    Record(live, false, plan)
     local result = Execute(plan, snap)
     result.skips = plan.skips
     if result.failed then
@@ -1127,6 +1133,9 @@ function UISetup.Describe(plan)
         if plan.damageMeter.to[2] then
             lines[#lines + 1] = plan.damageMeter.to[2].shown and "  Show/configure window 2; window 3 is left alone."
                 or "  Hide window 2 (opened by the operation this backup records)."
+        end
+        if plan.damageMeter.undoLeavesShown then
+            lines[#lines + 1] = "  On this build a restore leaves the damage meter as this apply sets it: the opened window can't be hidden again."
         end
         lines[#lines + 1] = "  Primary placement follows Edit Mode. Meter APIs are not yet measured on Forever."
     end
