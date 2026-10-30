@@ -33,6 +33,13 @@ the whole point of this addon on day one.
 2. In game: `/console scriptErrors 1` once (errors are off by default), BugSack recommended.
 3. `/reload`, then `/altsync` — it prints version, schema and counts.
 
+## The audit procedure (#95)
+
+`pwsh Tools/deploy-probe.ps1`, `/reload`, then `/fp steps sync audit`: a UI setup and a loadout
+applied, a full exit, both restored by name from Backups…, a second full exit, and the short checks.
+The panel says what to do at each step; what each check proves and the expected residual differences
+are in `docs/AUDIT.md` section 5. The results are read from the SavedVariables files afterwards.
+
 ## Verifying persistence
 
 `/reload` proves nothing about persistence — the process and its Lua state survive it. To prove a

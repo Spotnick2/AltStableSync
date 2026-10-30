@@ -127,10 +127,33 @@ autocast change.
 
 ## 5. In game (build 70532)
 
-`/fp steps sync audit` (`Tools/AltStableSyncProbe`): both kinds applied before the first full exit,
-restored by snapshot identity after the relaunch, a second full exit, and the short checks (keys per
-command, the 10 s toggle window and a layout's Visible setting, an executed restore under Account
-bindings, the meter's existing-shown and existing-hidden cases). Expected residual differences at the
-end: created macros kept; the created tab kept and selected; the whole meter part as the apply set
-it; the two "other addon" keys now saved; U's bars needing a reload. _(Pending the owner's session;
-results go here and to `docs/forever-api-notes.md`.)_
+`/fp steps sync audit` (`Tools/AltStableSyncProbe`, deployed with `pwsh Tools/deploy-probe.ps1`; tested
+end to end in `tests/test_probe_audit.lua`): one character, both kinds applied before the first full
+exit, both restored by their backup's name after the relaunch, a second full exit, then the short
+checks. The probe's independent record now holds the UI parts (active layout, bar toggles, the five
+CVars, chat windows and the selected tab, meter windows 1-3) and the backups by reason and time
+(`/fp sync backups`); its comparison takes the declared exceptions as allowances and names them as
+`info`, never as `DIFF`. Each mechanical check is a step's `check`; the owner's yes/no answers gate
+them (a No or a Skip makes a check unverified, never a pass).
+
+| Step | What it proves |
+|---|---|
+| before → afterUI | the UI setup changed UI parts and nothing else (bars, macros, keys untouched) |
+| afterUI → afterLoad | the loadout changed game state and no UI part |
+| afterLoad → exit1 | everything applied persisted a full exit, bar toggles included (H6, persistence) |
+| CTRL-F11 after exit1 | the key another addon set without saving was saved by our load, as the preview said (D3) |
+| ask: bars on screen as the setup says | the toggles and the layout's Visible setting agree (H6, visibility) |
+| afterUI → afterRestoreL | the loadout's restore is exact except the kept macros, named; UI untouched |
+| before → afterRestoreU | the UI setup's restore is exact except the kept tab and, when the apply opened window 2, the meter part (D6) |
+| afterRestoreU → exit2 | both restores persisted |
+| a third key on button 1 | a Forever command holds three keys (H4), so a restore that rebinds before it unbinds drops nothing |
+| accountBefore → accountAfter | an executed restore under Account bindings moved actions and touched no key |
+
+Expected residual differences at exit2 against before: the created macros (named as kept), the
+created tab (kept, selected), the whole meter part when window 2 was opened (D6), CTRL-F11 saved
+(D3). Anything else is a finding.
+
+Not in the procedure (a second character, optional): the meter's existing-shown and existing-hidden
+window-2 cases; the 10 s toggle cache window (apply, restore within 10 s, `/reload`, full exit).
+
+_Results: pending the owner's session; they go here and to `docs/forever-api-notes.md` "Build 70532"._
