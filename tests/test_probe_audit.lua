@@ -193,6 +193,20 @@ do
     local c = NS.Compare(good, NS.Record(), nil, STRICT)
     check("meter unreadable on one side later: unverified", not c.equal and c.unverified[1] == "meter windows unreadable on one side", c.unverified[1])
     meter.windows[1].GetSessionType = function(self) return self.session end
+    -- Codex, round 3: window 2 exists but its rectangle can't be read, or
+    -- isn't four numbers: the meter part is left out, not recorded blank.
+    meterWindow(2, true, 2, 1, true)
+    meter.windows[2].GetRect = function() error("no rect") end
+    local b = NS.Record()
+    eq("a throwing GetRect on window 2: the meter part is left out", b.ui.meter, nil)
+    check("and said", tostring(b.ui.why[1]):find("GetRect 2:", 1, true) ~= nil, b.ui.why[1])
+    meter.windows[2].GetRect = function() return nil end
+    b = NS.Record()
+    eq("a malformed rectangle: the meter part is left out", b.ui.meter, nil)
+    eq("and said", b.ui.why[1], "GetRect 2: not four numbers")
+    meter.windows[2].GetRect = function() return 300, 400, 400, 200 end
+    eq("a readable window 2 is recorded with its rectangle", NS.Record().ui.meter[2], "shown type 2 session 1 locked 300,400 400x200")
+    meter.windows[2] = nil
 end
 
 ------------------------------------------------------------

@@ -228,11 +228,17 @@ local function readUI(rec)
                 local session, okN = get("GetSessionType", "number")
                 local locked, okL2 = get("IsLocked", "flag")
                 if not (okS and okT and okN and okL2) then complete = false; break end
+                -- The rectangle is part of what the audit compares (window
+                -- 2's position and size): unreadable or malformed, the part
+                -- is left out like any other field (Codex, PR #96 round 3).
                 local okR, x, y, wd, h = try("GetRect " .. i, w.GetRect, w)
-                local rect = okR and type(x) == "number" and type(y) == "number" and type(wd) == "number" and type(h) == "number"
-                    and (" %d,%d %dx%d"):format(x, y, wd, h) or ""
-                windows[i] = ("%s type %d session %d %s%s"):format(shown and "shown" or "hidden", mtype, session,
-                    locked and "locked" or "unlocked", rect)
+                if not (okR and type(x) == "number" and type(y) == "number" and type(wd) == "number" and type(h) == "number") then
+                    if okR then ui.why[#ui.why + 1] = ("GetRect %d: not four numbers"):format(i) end
+                    complete = false
+                    break
+                end
+                windows[i] = ("%s type %d session %d %s %d,%d %dx%d"):format(shown and "shown" or "hidden", mtype, session,
+                    locked and "locked" or "unlocked", x, y, wd, h)
             elseif i == 1 then
                 ui.why[#ui.why + 1] = "meter window 1 missing"
                 complete = false

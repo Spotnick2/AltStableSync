@@ -136,9 +136,9 @@ CVars, chat windows and the selected tab, meter windows 1-3) and the backups by 
 (`/fp sync backups`); its comparison takes the declared exceptions as allowances and names them as
 `info`, never as `DIFF`. Each mechanical check is a step's `check`; the owner's yes/no answers gate
 them (a No or a Skip makes a check unverified, never a pass). A UI part the client doesn't expose on
-either side (no meter manager, say), or whose primary meter window or one of its fields can't be
-read, makes the comparison **unverified**, never silently equal: the audit requires every part it
-claims to verify, read whole (Codex on PR #96, two rounds).
+either side (no meter manager, say), or whose primary meter window, one of its fields or a window's
+rectangle can't be read, makes the comparison **unverified**, never silently equal: the audit
+requires every part it claims to verify, read whole (Codex on PR #96, three rounds).
 
 | Step | What it proves |
 |---|---|
