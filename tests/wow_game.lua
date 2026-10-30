@@ -24,6 +24,8 @@
 --   WoW.relaunch()             -- a full exit: macro bodies gain the server newline
 --   WoW.game.macroFault = "error" | "noop" | "wrong"  -- the next EditMacro raises, does
 --                                 nothing, or writes another body (#6)
+--   WoW.game.createFault = "error" | "wrong"  -- the next CreateMacro raises, or creates the
+--                                 macro with another body (audit D10)
 --   WoW.game.onEditMacro = function(index)  -- runs before each EditMacro (e.g. combat starts)
 --
 -- The pet (#47, measured on 70338): setup{ pet = { family = 4, familyName = "Bear",
@@ -36,6 +38,8 @@
 --     for the n-th pet call (PickupPetAction / PickupSpellBookItem)
 --   WoW.game.onPetCall = function(name, n)  -- e.g. a resummon between calls
 --   WoW.game.afterPetCall = function(n)       -- after the n-th call acted (a client that misplaces)
+-- An ability taken off the bar keeps its autocast in the pet's spellbook and
+-- gets it back when placed again (measured 2026-10-11): G.pet.autocastMemory.
 ------------------------------------------------------------
 
 local G = {}
@@ -83,7 +87,7 @@ function G.setup(opts)
     end
     G.petCalls, G.petFault, G.onPetCall, G.afterPetCall, G.petReadFails, G.petBookFails = 0, nil, nil, nil, nil, nil
     -- macros: { name, icon, body, char = bool, shows = spellID }
-    G.macroFault, G.onEditMacro = nil, nil
+    G.macroFault, G.onEditMacro, G.createFault = nil, nil, nil
     G.account, G.char = {}, {}
     for _, m in ipairs(opts.macros or {}) do
         local t = { name = m.name, icon = m.icon or 134400, body = m.body, shows = m.shows }
@@ -200,6 +204,11 @@ C_Spell = {
         local s = spellById(id)
         return (s and s.name) or (G.extra or {})[id]
     end,
+    -- "Rank 2" for a ranked spell, "" otherwise (declared on 70532).
+    GetSpellSubtext = function(id)
+        local s = spellById(id)
+        return s and s.sub or ""
+    end,
     PickupSpell = function(id)
         mutate("C_Spell.PickupSpell", true)
         local s, i = spellById(id)
@@ -239,7 +248,9 @@ C_SpellBook = {
     PickupSpellBookItem = function(i, bank)
         if G.petCallFault("PickupSpellBookItem") then return end
         local b = bank == Enum.SpellBookSpellBank.Pet and G.pet and G.pet.book[i]
-        if b and b.id then G.cursor = { kind = "petaction", item = { spell = b.id } } end
+        if b and b.id then
+            G.cursor = { kind = "petaction", item = { spell = b.id, autocast = (G.pet.autocastMemory or {})[b.id] } }
+        end
         G.petCallAfter()
     end,
 }
@@ -369,6 +380,10 @@ function PickupPetAction(i)
     elseif not G.cursor and a then
         bar[i] = nil
         G.cursor = { kind = "petaction", item = a }
+        if a.spell then
+            G.pet.autocastMemory = G.pet.autocastMemory or {}
+            G.pet.autocastMemory[a.spell] = a.autocast
+        end
     end
     G.petCallAfter()
 end
@@ -390,7 +405,10 @@ function CreateMacro(name, icon, body, perCharacter)
     local list = perCharacter and G.char or G.account
     local cap = perCharacter and 30 or 120
     if #list >= cap then error("too many macros", 2) end
-    local m = { name = name, icon = icon, body = body }
+    local fault = G.createFault
+    G.createFault = nil
+    if fault == "error" then error("CreateMacro failed", 2) end
+    local m = { name = name, icon = icon, body = fault == "wrong" and (body .. " -- something else") or body }
     table.insert(list, m)
     G.sortMacros()
     return G.indexOf(m)

@@ -21,7 +21,7 @@ local A, L
 
 -- Spells: Flash Heal r1/r2, Lesser Heal r1/r2, Greater Heal (top), a future spell.
 local MAIN_SPELLS = {
-    { id = 2061, name = "Flash Heal", low = true }, { id = 9472, name = "Flash Heal" },
+    { id = 2061, name = "Flash Heal", low = true, sub = "Rank 1" }, { id = 9472, name = "Flash Heal", sub = "Rank 2" },
     { id = 2050, name = "Lesser Heal", low = true }, { id = 2052, name = "Lesser Heal" },
     { id = 2060, name = "Greater Heal" },
 }
@@ -474,17 +474,22 @@ do
     check("set switched: backup pinned", A.Backups.Operation() ~= nil)
 end
 
--- CreateMacro "succeeds" but the macro reads back wrong: stop before placing it.
+-- CreateMacro "succeeds" but the macro reads back wrong: stop before placing
+-- it. The macro exists now, so it is journaled and a restore lists it as kept
+-- (audit D10: it used to be left out of the journal).
 do
     boot(); ready(); save(); alt()
     local plan = L.Plan(entry)
-    local realCreate = CreateMacro
-    CreateMacro = function(name, icon, body, perChar) return realCreate(name, icon, body:sub(1, 5), perChar) end
+    G.createFault = "wrong"
     local r = L.Load(entry, plan)
-    CreateMacro = realCreate
-    eq("bad create: stopped", r and r.failed, "macro not created")
+    eq("bad create: stopped", r and r.failed, "macro created with other text")
     check("bad create: nothing placed", G.actions[4] == nil)
     check("bad create: backup pinned", A.Backups.Operation() ~= nil)
+    eq("D10: the created macro is journaled", A.Backups.Operation().snapshot.createdMacros[1].name, "Shield")
+    A.Commands.restore("op")
+    check("D10: the restore preview lists it as kept",
+          table.concat(A._shown.lines, "\n"):find("Kept: 1 macro that load created (not deleted): Shield.", 1, true) ~= nil,
+          table.concat(A._shown.lines, " / "))
 end
 
 -- A stale extra key on one of the commands is unbound, and restore brings it back.
@@ -2241,23 +2246,26 @@ do
     eq("#46 interrupted: restored exactly", state(), before)
 end
 
--- /code-review on #48.
+-- /code-review on #48, revised by the audit (#95 D12, owner 2026-10-30).
 do
-    -- A loadout-empty slot holding what the backup can't restore is not this
-    -- load's business: not listed, not unavailable, and a later edit there
-    -- is saved.
+    -- A loadout-empty slot holding what the backup can't restore is left as
+    -- it is AND listed. It is not a kept gap (the loadout has no action
+    -- there), so a later edit there is saved.
     boot(); ready()
     local e = custom({ actions = { [3] = GH } })
     alt({ actions = { [30] = { flyout = 7 } } })
     local plan = L.Plan(e)
-    eq("#48: blank slot with a flyout: not listed", byReason(plan.skips)[30], nil)
+    eq("#48/D12: blank slot with a flyout: listed", byReason(plan.skips)[30],
+       "holds something this build can't put back, so it isn't emptied")
+    check("#48/D12: in the preview", table.concat(A.Commands.Describe(plan), "\n")
+          :find("left unchanged: holds something this build can't put back", 1, true) ~= nil)
     L.Load(e, plan)
     eq("#48: not unavailable", rec().unavailable[30], nil)
     WoW.chatLines = {}
     local again = L.Plan(e)
     A.Commands.Report("load", L.Load(e, again), nil, again)
     local said = table.concat(WoW.chat(), "\n")
-    check("#48: still 'already matches'", said:find("Already matches the loadout", 1, true) ~= nil, said)
+    check("#48/D12: nothing applied, one left unchanged", said:find("Nothing applied: 1 left unchanged", 1, true) ~= nil, said)
     G.actions[30] = { kind = "spell", id = 2061 }
     local m = L.PlanSave()
     eq("#48: the edit there is saved", m and m.modules.actions[30] and m.modules.actions[30].id, 2061)
@@ -2837,6 +2845,135 @@ do
     A._shown.onConfirm()
     eq("#47 save: pet key in the entry", A.Catalog.Get(entry.id).modules.bindings[PET][1], "CTRL-1")
     G.keys["CTRL-1"] = nil
+end
+
+------------------------------------------------------------
+-- Audit #95: the preview equals the apply, the restore equals the state
+-- before (docs/AUDIT.md). D10 is with the bad-create case above, D12 with
+-- the #48 block.
+------------------------------------------------------------
+
+local function keymap(t)
+    local o = {}
+    for k, c in pairs(t) do o[#o + 1] = k .. ">" .. tostring(c) end
+    table.sort(o)
+    return table.concat(o, " ")
+end
+
+-- D1: a restore whose own backup can't be stored writes nothing; a pinned
+-- operation survives a refused "restore op".
+do
+    boot(); ready(); save(); alt()
+    L.Load(entry, L.Plan(entry))
+    local after = state()
+    local realPush = A.Backups.PushRing
+    A.Backups.PushRing = function() return nil, "no-guid" end
+    local plan = L.PlanRestore(1)
+    check("D1: the restore has changes to make", not plan.noop)
+    local r, err = L.Restore(1, plan)
+    A.Backups.PushRing = realPush
+    eq("D1: refused", r, nil)
+    eq("D1: with the store's reason", err, "no-guid")
+    eq("D1: nothing written", state(), after)
+    eq("D1: ring unchanged", #(select(1, A.Backups.List())), 1)
+
+    boot(); ready(); save(); alt()
+    G.combatAfter = 3                      -- CreateMacro, PickupSpell, PlaceAction, then combat
+    local rl = L.Load(entry, L.Plan(entry))
+    G.combat = false
+    check("D1 op: the load stopped partway", rl and rl.failed and rl.changed == 1, rl and rl.failed)
+    local pinned = A.Backups.Operation()
+    check("D1 op: pinned", pinned ~= nil)
+    local before = state()
+    A.Backups.PushRing = function() return nil, "no-guid" end
+    local plan2 = L.PlanRestore("op")
+    check("D1 op: the restore has changes to make", not plan2.noop)
+    local r2 = L.Restore("op", plan2)
+    A.Backups.PushRing = realPush
+    eq("D1 op: refused", r2, nil)
+    eq("D1 op: nothing written", state(), before)
+    check("D1 op: the pin is still there", A.Backups.Operation() == pinned)
+end
+
+-- D2: SaveBindings returning false is a refusal: the planned keys are rolled
+-- back in memory, the load stops, and the saved set is untouched.
+do
+    boot(); ready(); save(); alt()
+    local savedBefore = keymap(G.savedKeys)
+    G.bindFault = { SaveBindings2 = "false" }
+    local r = L.Load(entry, L.Plan(entry))
+    G.bindFault = nil
+    check("D2: stopped at the bindings", r and r.failed ~= nil and r.at == "bindings", r and (tostring(r.failed) .. " at " .. tostring(r.at)))
+    check("D2: says the client refused", r and tostring(r.failed):find("the client refused", 1, true) ~= nil, r and r.failed)
+    eq("D2: keys back in memory", G.keys["1"] .. "," .. G.keys["2"] .. "," .. G.keys["SHIFT-2"], "ACTIONBUTTON2,ACTIONBUTTON1,MOVEFORWARD")
+    eq("D2: nothing saved", keymap(G.savedKeys), savedBefore)
+    check("D2: backup pinned", A.Backups.Operation() ~= nil)
+end
+
+-- D3: a binding save is disclosed, including one with no key changes.
+do
+    boot(); ready(); save(); alt()
+    local text = table.concat(A.Commands.Describe(L.Plan(entry)), "\n")
+    check("D3: a key plan says the whole map is saved",
+          text:find("your character keybindings are saved as they are now, including any changes not saved yet", 1, true) ~= nil, text)
+    L.Load(entry, L.Plan(entry))
+    A.char.bindingsUnsaved = true
+    local plan = L.Plan(entry)
+    check("D3: resave alone is not a no-op", plan.resave == true and not plan.noop)
+    text = table.concat(A.Commands.Describe(plan), "\n")
+    check("D3: 0 keys change is said", text:find("0 keys change", 1, true) ~= nil, text)
+    check("D3: and the save is said", text:find("An earlier change to your keybindings wasn't saved", 1, true) ~= nil, text)
+    A.char.bindingsUnsaved = nil
+end
+
+-- D7: the first backup lists the macros the load created, also once the
+-- store has been through SavedVariables (table identity lost).
+do
+    boot(); ready(); save(); alt()
+    L.Load(entry, L.Plan(entry))
+    local first = A.Backups.Get("first")
+    eq("D7: first backup journals the created macro", first.createdMacros[1] and first.createdMacros[1].name, "Shield")
+    A.db.backups = A.Catalog.Copy(A.db.backups)
+    eq("D7: after a reload too", A.Backups.Get("first").createdMacros[1].name, "Shield")
+    eq("D7: and in the ring copy", A.Backups.Get(1).createdMacros[1].name, "Shield")
+    eq("D7: restore first lists it as kept", #L.PlanRestore("first").kept, 1)
+end
+
+-- D8: the restore fingerprint covers the kept macros: a ring that shifts
+-- between preview and confirm to a backup differing only in `kept` refuses.
+do
+    boot(); ready(); save(); alt()
+    local snapA = { reason = "a", actions = { [11] = false }, keys = {}, createdMacros = {} }
+    local snapB = { reason = "b", actions = { [11] = false }, keys = {}, createdMacros = { { index = 121, name = "Zed", body = "/z" } } }
+    G.actions[11] = { kind = "spell", id = 2061 }
+    A.Backups.PushRing(snapA)
+    local plan = L.PlanRestore(1)
+    check("D8: the restore has a change to make", not plan.noop)
+    A.Backups.PushRing(snapB)
+    local r, err = L.Restore(1, plan)
+    eq("D8: refused as stale", r, nil)
+    check("D8: says so", tostring(err):find("changed since the preview", 1, true) ~= nil, err)
+    eq("D8: nothing written", G.actions[11] and G.actions[11].id, 2061)
+end
+
+-- D13: a same-name spell at another rank shows its rank (the client's
+-- subtext), else its id.
+do
+    boot(); main(); ready()
+    local plan = { kind = "load", creates = {}, edits = {}, keys = {}, skips = {}, waiting = {}, actions = {
+        { slot = 1, current = { kind = "spell", id = 2061 }, target = { kind = "spell", id = 9472 } },
+        { slot = 2, current = { kind = "spell", id = 2050 }, target = { kind = "spell", id = 2052 } } } }
+    local text = table.concat(A.Commands.Describe(plan), "\n")
+    check("D13: rank from the subtext", text:find("Flash Heal (Rank 1) -> Flash Heal (Rank 2)", 1, true) ~= nil, text)
+    check("D13: the id when there is no subtext", text:find("Lesser Heal (id 2050) -> Lesser Heal (id 2052)", 1, true) ~= nil, text)
+end
+
+-- D14: kept macros are named.
+do
+    boot(); ready(); save(); alt()
+    L.Load(entry, L.Plan(entry))
+    local text = table.concat(A.Commands.Describe(L.PlanRestore(1)), "\n")
+    check("D14: the kept macro is named", text:find("Kept: 1 macro that load created (not deleted): Shield.", 1, true) ~= nil, text)
 end
 
 finish("test_loadout")

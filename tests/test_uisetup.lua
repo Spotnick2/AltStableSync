@@ -491,4 +491,78 @@ do
     eq("unknown kind: UI restore refuses too", S.PlanRestore("1").blocked, "Not a UI setup backup.")
 end
 
+-- Audit #95 D4/D5: every chat write is guarded, and the stub refuses a UI
+-- write in combat (WoW.game.blocked), so a missing guard can't pass.
+local function withTwoAdds()
+    local e = A.Catalog.Copy(base)
+    table.insert(e.modules.chat.primary, "LOOT")
+    return newCharacterWith(e)
+end
+do
+    -- Combat between two group additions: the second is never attempted.
+    withTwoAdds()
+    UI.after["AddMessageGroup:COMBAT_XP_GAIN"] = function() G.combat = true end
+    A.Commands.ui("apply Base")
+    A._shown.onConfirm()
+    UI.after = {}
+    check("D4 add: stopped by combat", said("Stopped (combat"))
+    eq("D4 add: second group not attempted", UI.count("AddMessageGroup:LOOT"), 0)
+    eq("D5 add: nothing attempted in combat", #G.blocked, 0)
+    local _, op = B.List()
+    check("D4 add: pin kept", op ~= nil and AltStableSyncChar.interrupted ~= nil)
+    G.combat = false
+
+    -- Combat between two removals during a restore: the second is never attempted.
+    withTwoAdds()
+    A.Commands.ui("apply Base")
+    A._shown.onConfirm()
+    check("D4 remove: both groups applied", has(UI.windows[1].groups, "LOOT") and has(UI.windows[1].groups, "COMBAT_XP_GAIN"))
+    UI.after["RemoveMessageGroup:COMBAT_XP_GAIN"] = function() G.combat = true end
+    WoW.chatLines = {}
+    A.Commands.restore("1")
+    A._shown.onConfirm()
+    UI.after = {}
+    check("D4 remove: stopped by combat", said("Stopped (combat"))
+    eq("D4 remove: second removal not attempted", UI.count("RemoveMessageGroup:LOOT"), 0)
+    eq("D5 remove: nothing attempted in combat", #G.blocked, 0)
+    check("D4 remove: XP already removed, LOOT still there", not has(UI.windows[1].groups, "COMBAT_XP_GAIN") and has(UI.windows[1].groups, "LOOT"))
+    G.combat = false
+
+    -- Combat right after the new window opens: no group is written to it,
+    -- the tab exists, and the restore lists it as kept.
+    newCharacterWith(base)
+    UI.after["FCF_OpenNewWindow"] = function() G.combat = true end
+    WoW.chatLines = {}
+    A.Commands.ui("apply Base")
+    A._shown.onConfirm()
+    UI.after = {}
+    check("D4 create: stopped by combat", said("Stopped (combat"))
+    eq("D4 create: no group written to the new tab", UI.count("AddMessageGroup:WHISPER"), 0)
+    eq("D5 create: nothing attempted in combat", #G.blocked, 0)
+    eq("D4 create: the tab exists", UI.windows[4].name, "Whispers")
+    G.combat = false
+    A.Commands.restore("op")
+    check("D4 create: the restore says the tab is kept", lines():find('Chat tab "Whispers" is kept', 1, true) ~= nil, lines())
+end
+
+-- Audit #95 D9: a pin that can't be stored leaves the previous complete
+-- record in place, and the apply writes nothing.
+do
+    newCharacterWith(base)
+    A.Commands.ui("apply Base")
+    A._shown.onConfirm()
+    check("D9: complete record", AltStableSyncChar.loaded.ui.complete == true)
+    UI.active = 1
+    local realPin = B.Pin
+    B.Pin = function() return nil, "no-guid" end
+    WoW.chatLines = {}
+    UI.calls = {}
+    A.Commands.ui("apply Base")
+    A._shown.onConfirm()
+    B.Pin = realPin
+    check("D9: refused", said("Not applied:"))
+    eq("D9: nothing written", #UI.calls, 0)
+    check("D9: the previous record is still complete", AltStableSyncChar.loaded.ui.complete == true)
+end
+
 finish("test_uisetup")

@@ -503,4 +503,26 @@ w.x=-10
 capturedPart=M.Capture()
 check("screen anchor offscreen rejected",not capturedPart.windows[2].geometry)
 
+
+-- Audit #95 D6: on Forever (no IsUserPlaced) opening window 2 can't be
+-- undone, and with it the whole meter part: the apply preview says so, and
+-- after the restore window 1 keeps the applied values too.
+boot({forever=true})
+e=entry(); p=S.Plan(e)
+local text=table.concat(S.Describe(p),"\n")
+check("D6 forever: preview says the restore leaves the meter as set",text:find("can't be hidden again",1,true)~=nil)
+r=apply(e)
+check("D6 forever: applied",r and not r.failed)
+eq("D6 forever: window 1 locked by the apply",window(1).locked,true)
+r=restore(1)
+check("D6 forever: restore partial, window 2 shown",r.partial and window(2).shown)
+eq("D6 forever: window 1 keeps the applied lock (whole part skipped)",window(1).locked,true)
+eq("D6 forever: window 1 keeps the applied session",window(1).sessionType,1)
+boot()
+e=entry(); p=S.Plan(e)
+check("D6 mainline: no such line",table.concat(S.Describe(p),"\n"):find("can't be hidden again",1,true)==nil)
+boot({forever=true,[2]={damageMeterType=2,sessionType=1}})
+e=entry(); p=S.Plan(e)
+check("D6 forever, window 2 already shown: no such line",table.concat(S.Describe(p),"\n"):find("can't be hidden again",1,true)==nil)
+
 finish("damage meter")

@@ -329,13 +329,15 @@ Only an explicit confirmation click writes game state.
 
 ## Safety model (non-negotiable)
 
-1. **Backup before every apply, every resume and every restore.** If capturing the backup fails,
+1. **Backup before every apply and every restore.** If capturing or storing the backup fails,
    nothing is written. A no-op plan needs no backup. While an operation is `interrupted`, its
-   original backup sits in the separate `operation` slot (never evicted), so resumes can't push out
-   the real before-state; each resume still takes its own ring backup, which keeps any edits the
-   player made in between. There is at most one interrupted operation per character: starting a new
-   Load/Apply/Restore shows "Abandon the interrupted Load of X?" in its preview, and abandoning
-   moves that backup into the ring. The ring holds 10, plus the pinned `firstSeen`.
+   original backup sits in the separate `operation` slot (never evicted) until it is restored
+   (`/altsync restore op`) or abandoned. There is no resume: the next Load/Apply shows "Abandon the
+   incomplete load of X? Its backup stays in your backups." in its preview, and confirming moves
+   that backup into the ring before the new operation pins its own (audit, 2026-10-30: the code
+   has always done this; the earlier text described a resume that keeps the pin). The ring holds
+   10, newest first, so an abandoned before-state survives the next nine operations; the
+   character's very first backup (`firstSeen`) is kept forever.
 2. **Preview before write**, in our own frame. The preview captures an **immutable copy of the entry
    and its version**. Confirming applies exactly that copy, or refuses as stale if the entry, or the
    target state the plan relied on, changed since (A38).
@@ -358,7 +360,9 @@ Only an explicit confirmation click writes game state.
      slot whose answer rests on a failed read (spellbook, bag count or macro list unreadable) or on
      the entry itself (a missing macro definition, a body too long, an unsupported kind, a spell
      with no name). An account macro of that name with another body is the player's own: left alone.
-     A slot the entry has empty that holds content the backup can't restore is not listed at all.
+     A slot the entry has empty that holds content the backup can't restore is left as it is and
+     listed as left unchanged (owner, 2026-10-30; it was unlisted before, and it is never recorded
+     as unavailable, since the entry has no action there to keep).
    - The player loads or retries **explicitly**; nothing retries on an event.
    - **Cursor hygiene:** refuse to start unless the cursor is empty (so the player's own payload is
      never touched). Before each `PlaceAction`, the cursor must hold exactly what we picked up.
@@ -1109,6 +1113,17 @@ schema refusal, readiness and combat gates, macro ownership, read-back, or catal
   - **Keeping an edit of a deleted entry:** it takes the caller's name, or the first free
     "(kept)"/"(kept N)" name, and preserves the received class/category keys.
   - **Consensus reached.
+- **2026-10-30, audit of preview/apply/restore fidelity (#95, `docs/AUDIT.md`):** three plan rounds
+  with gpt-6-astra (high), consensus in round 3. Fixed: a loadout restore that wrote even when its own
+  backup couldn't be stored; a `false` from `SaveBindings` counting as success; chat writes guarded
+  once per window instead of per call; the first backup never listing created macros; the restore
+  fingerprint omitting the kept macros; `loaded.ui` replaced before a pin could fail; a created macro
+  with other text left out of the journal. Disclosed: that every binding save persists the whole key
+  map; that opening meter window 2 on Forever leaves the whole meter part unrestorable; same-name
+  ranks; kept macros by name; covered-empty slots holding something unrestorable (owner: listed, not
+  emptied). Doc fix: safety rule 1 described a resume; the code abandons into the ring. Codex cut a
+  mandatory fuzz with a plan-derived oracle in favour of deterministic rows with hand-stated outcomes.
+  Rejected: nothing material.
 - **2026-10-21, UI setups and the first-login offer (#10):** four plan rounds with gpt-6-astra (high),
   ending in **consensus**. Accepted:
   - chat on Apply additive, and Restore keeping created tabs (closing one loses its channels and

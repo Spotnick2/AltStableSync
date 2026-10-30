@@ -13,6 +13,14 @@
   The character changes only after you review and confirm it.
 - **Restore a UI change.** Applying a UI setup takes a backup first. The Backups view lets
   you preview and restore the previous state.
+- **Previews say more** (audit #95). A load or restore that saves your keybindings says so, and
+  that every key change in memory is saved with them. A spell replaced by another rank of itself
+  shows the ranks. A restore names the macros it keeps. A slot the loadout has empty that holds
+  something the backup can't put back (a mount, a flyout) is listed as left unchanged. Applying a
+  setup that opens a second damage meter says when a restore can't close it again.
+- **Safer restores** (audit #95). A restore that can't store its own backup writes nothing. A
+  keybinding save the client refuses is rolled back and reported. Chat changes stop before the next
+  write when combat starts between two of them.
 
 ## v0.3.0
 

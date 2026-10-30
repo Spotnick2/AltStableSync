@@ -237,7 +237,8 @@ local function Finish(plan)
                                    e = plan.edits,
                                    k = plan.keys, kb = plan.keysBlocked or false, s = plan.skips,
                                    wt = plan.waiting or {}, r = plan.resave or false,
-                                   u = plan.unavailable or {}, b = plan.blocked or false, p = plan.pet or false })
+                                   u = plan.unavailable or {}, b = plan.blocked or false, p = plan.pet or false,
+                                   kp = plan.kept or {} })
     return plan
 end
 
@@ -380,12 +381,14 @@ function Loadout.Plan(entry, opts)
             elseif same then
                 if want and not target then plan.waiting[#plan.waiting + 1] = { slot = slot, reason = why, want = want } end
             elseif not Game.Restorable(current, book) then
-                -- Only the loadout's own slots are listed (and so recorded as
-                -- unavailable): a loadout-empty slot holding a mount is
-                -- simply not this load's business.
-                if want then
-                    plan.skips[#plan.skips + 1] = { slot = slot, reason = "slot holds something this slice can't put back" }
-                end
+                -- Left as it is, and said: the loadout's own slots are
+                -- recorded as unavailable; a covered-empty slot holding a
+                -- mount or a flyout is listed too (owner, 2026-10-30), since
+                -- the Load can't make it match the loadout there.
+                -- `empty`: no loadout action here, so Save's merge never treats
+                -- it as a kept gap (the listing is for the player only).
+                plan.skips[#plan.skips + 1] = { slot = slot, reason = want and "slot holds something this slice can't put back"
+                    or "holds something this build can't put back, so it isn't emptied", empty = not want or nil }
             else
                 local unusable = want ~= nil and target == nil
                 plan.actions[#plan.actions + 1] = { slot = slot, target = target, current = current,
@@ -473,6 +476,9 @@ local function Execute(plan, snap)
         if why then return false, why end
         local ok, ret = pcall(fn, ...)
         if not ok then return false, "client error: " .. tostring(ret) end
+        -- An explicit false is a refusal (SaveBindings and SetBinding return
+        -- one; the #7 switch already reads it so); nil is the normal return.
+        if ret == false then return false, "the client refused" end
         return true
     end
 
@@ -481,11 +487,15 @@ local function Execute(plan, snap)
         local ok, why = call(false, CreateMacro, c.name, c.icon or "INV_Misc_QuestionMark", c.body, true)
         if not ok then return fail(why, "macro " .. c.name) end
         local matches = Game.MacrosNamed(c.name)
-        if not matches or #matches ~= 1 or matches[1].scope ~= "char"
-            or Game.Normalize(matches[1].body) ~= Game.Normalize(c.body) then
+        if not matches or #matches ~= 1 or matches[1].scope ~= "char" then
             return fail("macro not created", "macro " .. c.name)
         end
+        -- Journaled as soon as one character macro of that name exists, so a
+        -- restore lists it as kept even when its text read back wrong.
         snap.createdMacros[#snap.createdMacros + 1] = { index = matches[1].index, name = c.name, body = c.body }
+        if Game.Normalize(matches[1].body) ~= Game.Normalize(c.body) then
+            return fail("macro created with other text", "macro " .. c.name)
+        end
         result.created = result.created + 1
     end
 
@@ -824,7 +834,9 @@ function Loadout.Load(entry, shown, abandon)
             -- Every slot where the load couldn't place the loadout's action:
             -- left as it was, already empty, or emptied (#46).
             unavailable = {}
-            for _, s in ipairs(plan.skips) do unavailable[s.slot] = s.reason end
+            for _, s in ipairs(plan.skips) do
+                if not s.empty then unavailable[s.slot] = s.reason end
+            end
             for _, s in ipairs(plan.waiting) do unavailable[s.slot] = s.reason end
             for _, op in ipairs(plan.actions) do
                 if op.why then unavailable[op.slot] = op.why end
@@ -1517,7 +1529,10 @@ function Loadout.Restore(which, shown)
     else
         local snap = Snapshot(plan, "restore")
         if not snap then return nil, "Couldn't read the current setup for the backup; nothing was changed." end
-        ASS.Backups.PushRing(snap, ASS.Backups.Get(which))
+        -- Written only once its own backup is stored (safety rule 1): a
+        -- store that fails (no character GUID) refuses the restore.
+        local stored, why = ASS.Backups.PushRing(snap, ASS.Backups.Get(which))
+        if not stored then return nil, why end
         result = Execute(plan, snap)
         -- The bars no longer hold what the last load left: Save must not read
         -- the restore as edits, so the comparison goes (load again to save).

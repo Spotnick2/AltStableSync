@@ -229,6 +229,10 @@ function M.Plan(part, restoring)
                 if cur.exists and cur.geometry.userPlaced == nil then
                     return nil, "hidden window placement flag cannot be backed up; show window 2 manually first"
                 end
+                -- Without a readable placement flag (Forever lacks IsUserPlaced)
+                -- the restore refuses to hide the window it opens, and with it
+                -- the whole meter part: the apply preview says so.
+                if not cur.exists and not PlacementFlagAPI() then p.undoLeavesShown = true end
             end
             if i == 2 and not to.shown and cur.shown and not (part.journal and part.journal.opened) then
                 return nil, "backup does not prove this operation opened window 2; left shown"

@@ -55,7 +55,16 @@ function U.setup(opts)
     end
 end
 
+-- A UI write. In combat it raises and is recorded in WoW.game.blocked, as
+-- wow_game.lua's mutate() does for protected calls: the addon's rule is out
+-- of combat for every write (safety rule 7), so one it failed to guard shows
+-- up in a test instead of passing silently.
 local function call(name)
+    local G = WoW.game
+    if G and G.combat then
+        G.blocked[#G.blocked + 1] = name
+        error("ADDON_ACTION_BLOCKED: " .. name, 3)
+    end
     U.calls[#U.calls + 1] = name
 end
 local function after(name) if U.after[name] then U.after[name]() end end
