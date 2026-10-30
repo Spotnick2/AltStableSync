@@ -163,11 +163,37 @@ local function meterWindow(i, shown, mtype, session, locked)
     return w
 end
 DamageMeter = { GetSessionWindow = function(_, i) return meter.windows[i] end }
-meterWindow(1, true, 0, 0, false)
+
+-- Codex follow-up on PR #96: a manager with no readable primary window, or
+-- a window whose field can't be read, leaves the meter part out and said,
+-- so the audit's comparison is unverified, never equal on nothing.
+do
+    local a = NS.Record()
+    eq("manager without windows: the meter part is left out", a.ui.meter, nil)
+    check("and said", a.ui.why[1] == "meter window 1 missing", a.ui.why[1])
+    local c = NS.Compare(a, NS.Record(), nil, STRICT)
+    check("audit view: unverified, not equal", not c.equal and c.unverified[1] == "meter windows not recorded on either side", c.unverified[1])
+    meterWindow(1, true, nil, 0, nil)                    -- the type can't be read
+    local b = NS.Record()
+    eq("a field without its type: the meter part is left out", b.ui.meter, nil)
+    check("and said", b.ui.why[1] == "GetDamageMeterType 1: nil, not a number", b.ui.why[1])
+    meter.windows[1].GetSessionType = function() error("boom") end
+    meter.windows[1].mtype = 0
+    eq("a throwing getter: the meter part is left out", NS.Record().ui.meter, nil)
+end
+meterWindow(1, true, 0, 0, nil)                          -- a fresh window: its lock reads nil (unlocked)
 r = NS.Record()
-eq("meter window 1 read live", r.ui.meter[1], "shown type 0 session 0 unlocked 100,500 400x200")
+eq("nothing in the UI unread with a readable meter", #r.ui.why, 0, table.concat(r.ui.why, "; "))
+eq("meter window 1 read live, nil lock as unlocked", r.ui.meter[1], "shown type 0 session 0 unlocked 100,500 400x200")
 eq("no window 2 yet", r.ui.meter[2], nil)
 check("audit view: every part seen on both sides is equal", NS.Compare(r, NS.Record(), nil, STRICT).equal)
+do
+    local good = NS.Record()
+    meter.windows[1].GetSessionType = function() error("boom") end
+    local c = NS.Compare(good, NS.Record(), nil, STRICT)
+    check("meter unreadable on one side later: unverified", not c.equal and c.unverified[1] == "meter windows unreadable on one side", c.unverified[1])
+    meter.windows[1].GetSessionType = function(self) return self.session end
+end
 
 ------------------------------------------------------------
 -- Comparing UI parts, with the declared exceptions

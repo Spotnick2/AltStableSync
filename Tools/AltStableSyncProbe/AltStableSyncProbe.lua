@@ -198,24 +198,51 @@ local function readUI(rec)
             if okS then ui.chatSelected = plain(id) end
         end
     end
+    -- The meter: the primary window must exist and every field must read
+    -- with its type, else the part is left out (and said in `why`), so the
+    -- audit's comparison is unverified rather than equal on nothing (Codex
+    -- on PR #96, follow-up). A fresh window's lock reads nil on Mainline,
+    -- meaning unlocked (DamageMeter.lua Flag).
     local m = api("DamageMeter")
     if type(m) == "table" and type(m.GetSessionWindow) == "function" then
-        ui.meter = {}
+        local windows, complete = {}, true
         for i = 1, 3 do
             local okW, w = try("GetSessionWindow " .. i, m.GetSessionWindow, m, i)
             if okW and type(w) == "table" then
-                local function get(name)
+                local function get(name, kind)
                     local ok, v = try(name .. " " .. i, w[name], w)
-                    if ok then return plain(v) end
+                    if not ok then return nil, false end
+                    v = plain(v)
+                    if kind == "flag" then
+                        if v == nil then v = false end
+                        kind = "boolean"
+                    end
+                    if type(v) ~= kind then
+                        ui.why[#ui.why + 1] = ("%s %d: %s, not a %s"):format(name, i, tostring(v), kind)
+                        return nil, false
+                    end
+                    return v, true
                 end
+                local shown, okS = get("IsShown", "boolean")
+                local mtype, okT = get("GetDamageMeterType", "number")
+                local session, okN = get("GetSessionType", "number")
+                local locked, okL2 = get("IsLocked", "flag")
+                if not (okS and okT and okN and okL2) then complete = false; break end
                 local okR, x, y, wd, h = try("GetRect " .. i, w.GetRect, w)
                 local rect = okR and type(x) == "number" and type(y) == "number" and type(wd) == "number" and type(h) == "number"
                     and (" %d,%d %dx%d"):format(x, y, wd, h) or ""
-                ui.meter[i] = ("%s type %s session %s %s%s"):format(get("IsShown") and "shown" or "hidden",
-                    tostring(get("GetDamageMeterType")), tostring(get("GetSessionType")),
-                    get("IsLocked") and "locked" or "unlocked", rect)
+                windows[i] = ("%s type %d session %d %s%s"):format(shown and "shown" or "hidden", mtype, session,
+                    locked and "locked" or "unlocked", rect)
+            elseif i == 1 then
+                ui.why[#ui.why + 1] = "meter window 1 missing"
+                complete = false
+                break
+            elseif not okW then
+                complete = false
+                break
             end
         end
+        if complete then ui.meter = windows end
     end
     rec.ui = ui
 end
