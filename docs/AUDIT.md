@@ -135,7 +135,9 @@ checks. The probe's independent record now holds the UI parts (active layout, ba
 CVars, chat windows and the selected tab, meter windows 1-3) and the backups by reason and time
 (`/fp sync backups`); its comparison takes the declared exceptions as allowances and names them as
 `info`, never as `DIFF`. Each mechanical check is a step's `check`; the owner's yes/no answers gate
-them (a No or a Skip makes a check unverified, never a pass).
+them (a No or a Skip makes a check unverified, never a pass). A UI part the client doesn't expose on
+either side (no meter manager, say) makes the comparison **unverified**, never silently equal: the
+audit requires every part it claims to verify (Codex on PR #96).
 
 | Step | What it proves |
 |---|---|

@@ -404,22 +404,28 @@ end
 -- keeps created macros). `ui.meter`: the meter windows may differ (on
 -- Forever a restore can't hide the window the apply opened, so the whole
 -- meter part stays as applied). The selected chat tab is information only.
--- A part missing on both sides is skipped; on one side it's unverified.
+-- A part missing on one side is unverified. One missing on both sides is
+-- skipped, unless `ui.require[part]` names it: then it is unverified too, so
+-- the audit can never report EQUAL for a part it never saw (Codex on PR #96).
 local function compareUI(a, b, ui, out)
     local function diff(s) out.diffs[#out.diffs + 1] = s end
     local function unv(s) out.unverified[#out.unverified + 1] = s end
     local function info(s) out.info[#out.info + 1] = s end
     local x, y = a.ui, b.ui
     if type(x) ~= "table" or type(y) ~= "table" then unv("UI parts not recorded"); return end
+    local required = ui.require or {}
     local function layout(l) return l and (tostring(l.name) .. " (type " .. tostring(l.type) .. ", index " .. tostring(l.index) .. ")") or nil end
     local function part(name, p, q, label)
-        if p == nil and q == nil then return end
+        if p == nil and q == nil then
+            if required[name] then unv((label or name) .. " not recorded on either side") end
+            return
+        end
         if p == nil or q == nil then unv((label or name) .. " unreadable on one side"); return end
         if p ~= q then diff(("%s: %s -> %s"):format(label or name, tostring(p), tostring(q))) end
     end
     part("layout", layout(x.layout), layout(y.layout))
     part("bars", x.bars, y.bars, "bar toggles 2-8")
-    for _, name in ipairs(UI_CVARS) do part("cvar " .. name, (x.cvars or {})[name], (y.cvars or {})[name]) end
+    for _, name in ipairs(UI_CVARS) do part("cvars", (x.cvars or {})[name], (y.cvars or {})[name], "cvar " .. name) end
     if x.chat or y.chat then
         if not (x.chat and y.chat) then unv("chat windows unreadable on one side")
         else
@@ -438,6 +444,8 @@ local function compareUI(a, b, ui, out)
                 info(("selected chat tab: %s -> %s"):format(tostring(x.chatSelected), tostring(y.chatSelected)))
             end
         end
+    elseif required.chat then
+        unv("chat windows not recorded on either side")
     end
     if x.meter or y.meter then
         if not (x.meter and y.meter) then unv("meter windows unreadable on one side")
@@ -450,6 +458,8 @@ local function compareUI(a, b, ui, out)
                 end
             end
         end
+    elseif required.meter then
+        unv("meter windows not recorded on either side")
     end
 end
 
@@ -876,7 +886,10 @@ local function openedMeter()
     local function shown(r) return r and r.ui and r.ui.meter and r.ui.meter[2] and r.ui.meter[2]:find("^shown") ~= nil end
     return not shown(a) and shown(b)
 end
-local UI_FULL = { tabs = {}, meter = false }
+-- The audit's view of the UI parts: every part it claims to verify must have
+-- been read on both sides, else the comparison is unverified (compareUI).
+local UI_REQUIRED = { layout = true, bars = true, cvars = true, chat = true, meter = true }
+local UI_FULL = { tabs = {}, meter = false, require = UI_REQUIRED }
 
 local function acompare(title, x, y, allow, ui)
     local c = NS.Compare(arec(x), arec(y), allow, ui)
@@ -935,7 +948,7 @@ end
 -- when the apply opened meter window 2, the meter part; game state as
 -- after the loadout's restore.
 local function restoredU()
-    local ui = { tabs = createdTabs(), meter = openedMeter() }
+    local ui = { tabs = createdTabs(), meter = openedMeter(), require = UI_REQUIRED }
     local c = acompare("before vs afterRestoreU (UI)", "before", "afterRestoreU", NS.Extras(arec("afterUI"), arec("afterLoad")), ui)
     if not c.equal then return false, ("%d differences, %d unverified"):format(#c.diffs, #c.unverified) end
     local same = NS.Compare(arec("afterRestoreL"), arec("afterRestoreU"))
@@ -1023,7 +1036,8 @@ astep(nil, { text = "Turn Character Specific Keybindings back on if you use them
 Probe:Steps(AUDIT, ASTEPS)
 NS.AAT = AAT
 NS._audit = { uiChanged = uiChanged, gameChanged = gameChanged, restoredL = restoredL, restoredU = restoredU,
-              otherKeySaved = otherKeySaved, accountRestore = accountRestore, createdTabs = createdTabs, openedMeter = openedMeter }
+              otherKeySaved = otherKeySaved, accountRestore = accountRestore, createdTabs = createdTabs, openedMeter = openedMeter,
+              UI_REQUIRED = UI_REQUIRED }
 
 ------------------------------------------------------------
 -- Commands (on-demand records go to DB.adhoc, never the rehearsal)

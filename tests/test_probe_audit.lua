@@ -134,9 +134,40 @@ eq("a CVar", r.ui.cvars.damageMeterEnabled, "0")
 eq("General by slot", r.ui.chat[1].name, "General")
 eq("its groups, sorted", r.ui.chat[1].groups, "BN_WHISPER,CHANNEL,EMOTE,GUILD,PARTY,SAY,SYSTEM,WHISPER,YELL")
 eq("the Combat Log is active (docked) too", r.ui.chat[2].name, "Combat Log")
-eq("no meter manager on this client: skipped", r.ui.meter, nil)
+eq("no meter manager on this client: not read", r.ui.meter, nil)
 eq("the backups by name", r.addon.backups[1].reason, "an earlier load")
 eq("reading never writes", #G.calls, 0)
+
+-- Codex on PR #96: a part the client doesn't expose can't make the audit's
+-- comparison EQUAL. Without a meter manager on either side, the audit's view
+-- (every part required) is unverified; the permissive view skips the part.
+local STRICT = { tabs = {}, meter = false, require = NS._audit.UI_REQUIRED }
+do
+    local c = NS.Compare(r, NS.Record(), nil, STRICT)
+    check("audit view: a meter never seen is unverified, not equal",
+          not c.equal and c.unverified[1] == "meter windows not recorded on either side", c.unverified[1])
+    check("permissive view: skipped", NS.Compare(r, NS.Record(), nil, { tabs = {}, meter = false }).equal)
+end
+
+-- A minimal meter manager, so the live capture path is exercised: two
+-- windows at most, each with what readUI reads.
+local meter = { windows = {} }
+local function meterWindow(i, shown, mtype, session, locked)
+    local w = { shown = shown, mtype = mtype, session = session, locked = locked }
+    function w:IsShown() return self.shown end
+    function w:GetDamageMeterType() return self.mtype end
+    function w:GetSessionType() return self.session end
+    function w:IsLocked() return self.locked end
+    function w:GetRect() return 100, 500, 400, 200 end
+    meter.windows[i] = w
+    return w
+end
+DamageMeter = { GetSessionWindow = function(_, i) return meter.windows[i] end }
+meterWindow(1, true, 0, 0, false)
+r = NS.Record()
+eq("meter window 1 read live", r.ui.meter[1], "shown type 0 session 0 unlocked 100,500 400x200")
+eq("no window 2 yet", r.ui.meter[2], nil)
+check("audit view: every part seen on both sides is equal", NS.Compare(r, NS.Record(), nil, STRICT).equal)
 
 ------------------------------------------------------------
 -- Comparing UI parts, with the declared exceptions
@@ -201,12 +232,15 @@ S.Next()
 S.Run(); shoot()                                     -- 4 before
 check("before recorded", DB.audit.records.before and DB.audit.records.before.valid)
 
--- 5: the owner applies U: layout, a bar, a setting, a group, a new tab.
+-- 5: the owner applies U: layout, a bar, a setting, a group, a new tab, the
+-- meter (window 1 to Current Segment and locked, window 2 opened).
 UI.active = 4
 UI.bars[1] = true
 UI.cvars.damageMeterEnabled = "1"
 table.insert(UI.windows[1].groups, "COMBAT_XP_GAIN")
 UI.windows[4] = { name = "Whispers", shown = false, docked = true, uninteractable = false, groups = { "WHISPER", "BN_WHISPER" } }
+meter.windows[1].session, meter.windows[1].locked = 1, true
+meterWindow(2, true, 2, 1, true)
 backup("UI setup U", "ui")
 S.Next()
 S.Answer(true)                                       -- 6 applied
@@ -252,7 +286,8 @@ S.Answer(true)                                       -- 17
 S.Run(); shoot()                                     -- 18 afterRestoreL
 pass(18, "the loadout's restore is exact except the kept macro")
 
--- 19: the owner restores "UI setup U": the tab stays.
+-- 19: the owner restores "UI setup U": the tab stays, and on Forever the
+-- whole meter part stays as applied (window 2 can't be hidden: D6).
 UI.active = 1
 UI.bars[1] = false
 UI.cvars.damageMeterEnabled = "0"
@@ -261,7 +296,9 @@ backup("restore", "ui")
 S.Next()
 S.Answer(true)                                       -- 20
 S.Run(); shoot()                                     -- 21 afterRestoreU
-pass(21, "the UI setup's restore is exact except the kept tab")
+pass(21, "the UI setup's restore is exact except the kept tab and the meter part")
+check("the meter part is named as the expected exception",
+      tostring(result(21).checkDetail):find("the meter part", 1, true) ~= nil, result(21).checkDetail)
 
 -- 22: the second full exit.
 FP.run = FP.run + 1
@@ -304,7 +341,8 @@ eq("nothing in chat", #WoW.chat(), 0, table.concat(WoW.chat(), " | "))
 
 do
     local R = DB.audit.records
-    local keep = { afterUI = R.afterUI, afterLoad = R.afterLoad, afterRestoreL = R.afterRestoreL, afterRestoreU = R.afterRestoreU }
+    local keep = { before = R.before, afterUI = R.afterUI, afterLoad = R.afterLoad, afterRestoreL = R.afterRestoreL,
+                   afterRestoreU = R.afterRestoreU, accountAfter = R.accountAfter }
     -- A "loadout" that changed a UI part fails.
     local bad = copy(R.afterLoad); bad.ui.bars = "1111111"
     R.afterLoad = bad
@@ -321,6 +359,14 @@ do
     R.afterRestoreL = bad
     check("a loadout restore that left a key fails", not NS._audit.restoredL())
     R.afterRestoreL = keep.afterRestoreL
+    -- The audit's UI checks are unverified, never a pass, when a part was
+    -- never seen (Codex on PR #96): the meter removed from both records.
+    local b0, u0 = copy(R.before), copy(R.afterRestoreU)
+    b0.ui.meter, u0.ui.meter = nil, nil
+    R.before, R.afterRestoreU = b0, u0
+    local ok, why = NS._audit.restoredU()
+    check("a UI restore check with the meter never seen is not a pass", not ok and tostring(why):find("unverified", 1, true) ~= nil, why)
+    R.before, R.afterRestoreU = keep.before or R.before, keep.afterRestoreU
     -- The restore under Account bindings must not touch a key.
     local before, after = R.accountBefore, copy(R.accountAfter)
     after.keymap["Q"] = nil
