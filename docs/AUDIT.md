@@ -90,8 +90,40 @@ the trailing newline the server appends to macro bodies (compared normalised).
 
 ## 4. Round-trip scenarios and mutation witnesses
 
-`tests/test_roundtrip.lua`: deterministic rows, each with its expected outcome stated by hand, never
-derived from the plan. _(Day 2; filled in when it lands.)_
+`tests/test_roundtrip.lua` (347 checks): deterministic rows over the stubs, each with its expected
+outcome **stated by hand**, never derived from the plan. `observe()` reads every observable (slots,
+macros with body and icon, keys in memory and the saved set, pet slots and autocast, layout, bar
+toggles, CVars, chat windows, meter windows); `diff()` names each difference; a row passes only when
+the differences are exactly the ones it lists.
+
+| Row | What it does | Expected, by hand |
+|---|---|---|
+| R1 | Loadout L on a Character-bindings alt: two creates sorting before an updated macro that sits in two covered slots and one uncovered slot; an occupied slot overwritten; an empty-entry slot emptied; an item not in bags; an unlearned class spell; a flyout under an empty entry slot; an account macro reused; page-2 and stance-page slots; a two-key command losing a key; a key taken from an unmanaged command | 21 named differences after the load (the uncovered slot's macro text changes too); the preview covers every planned write; after Restore 1 exactly the two created macros remain, named as kept; `after == nil`; a restore of the restore returns to the loaded state |
+| R2 | The same load from Account bindings | blocked as a whole, the #7 switch offered, zero writes, no backup |
+| R3 | L's backup restored under Account bindings | actions and the macro back, keys untouched in memory and on disk, result partial, said |
+| R4 | Another addon's unsaved key before the load | the preview says every in-memory change is saved; the saved set holds it afterwards; the backup doesn't; the restore leaves it (declared, D3) |
+| R5 | Combat after the k-th mutating call, every k (the sweep stopped 33 loads); `CreateMacro` writes other text; `EditMacro` writes other text; `SaveBindings` refuses | after `restore op`: back to before except the macros created so far, each named; the odd `EditMacro` text leaves that macro named and the result partial with the pin kept; the refused save rolls the planned keys back in memory and leaves the saved set alone |
+| R6 | Combat during the restore itself | its own backup is ring 1; restoring that returns to the loaded state |
+| R7 | A bear's layout loaded on another hunter's bear | the pet bar changes exactly as stated (swap, moves, a removal; Bite stays empty since that bear lacks it); autocast travels with each ability and is never written; the restore returns the bar exactly |
+| R8 | A UI setup: layout, bars, an account CVar, a group added, a tab created, meter window 1 changed and window 2 created | 11 named differences; the restore leaves the kept tab and the (hidden) window-2 frame; a restore of the restore returns to the applied state; a layout deleted between preview and confirm refuses with nothing written; on Forever's meter surface the apply preview warns and the whole meter part stays as applied (D6) |
+| R9 | The store through a Lua round trip (SavedVariables lose table identity) | "first" and "1" both name the two kept macros and restore to before except them |
+
+**Mutation witnesses.** Each break was applied, `tests/test_roundtrip.lua` run, the break reverted
+(`restored: all green` after every run):
+
+| Witness | Break | Result |
+|---|---|---|
+| W1 | one `SetBinding` dropped, read-backs intact | 14 red: the engine's own read-back fails the load ("bindings failed"); R1, R4 see it |
+| W2 | the same, with both key read-backs removed | 1 red: R1's hand-stated key list (the load "succeeds" with a key missing) |
+| W3 | the action read-back removed and the stub misplacing slot 15 | 2 red: R1's slot list, R3's restore |
+| W4 | `snap.editedMacros` not written | 36 red: every restore that must put the macro back |
+| W5 | a slot written outside the plan after the actions | 32 red: R1's exact list, the fault sweep's cursor check |
+| D1-D14 | each fix reverted in turn | the named test of each goes red (section 2) |
+
+Also observed while building the rows: the stub forgot a pet ability's autocast while it was off the
+bar; the measured client keeps it in the spellbook (`docs/forever-api-notes.md`, 2026-10-11), so
+`tests/wow_game.lua` now does too (`autocastMemory`). Without it R7's restore reported a false
+autocast change.
 
 ## 5. In game (build 70532)
 

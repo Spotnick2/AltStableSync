@@ -38,6 +38,8 @@
 --     for the n-th pet call (PickupPetAction / PickupSpellBookItem)
 --   WoW.game.onPetCall = function(name, n)  -- e.g. a resummon between calls
 --   WoW.game.afterPetCall = function(n)       -- after the n-th call acted (a client that misplaces)
+-- An ability taken off the bar keeps its autocast in the pet's spellbook and
+-- gets it back when placed again (measured 2026-10-11): G.pet.autocastMemory.
 ------------------------------------------------------------
 
 local G = {}
@@ -246,7 +248,9 @@ C_SpellBook = {
     PickupSpellBookItem = function(i, bank)
         if G.petCallFault("PickupSpellBookItem") then return end
         local b = bank == Enum.SpellBookSpellBank.Pet and G.pet and G.pet.book[i]
-        if b and b.id then G.cursor = { kind = "petaction", item = { spell = b.id } } end
+        if b and b.id then
+            G.cursor = { kind = "petaction", item = { spell = b.id, autocast = (G.pet.autocastMemory or {})[b.id] } }
+        end
         G.petCallAfter()
     end,
 }
@@ -376,6 +380,10 @@ function PickupPetAction(i)
     elseif not G.cursor and a then
         bar[i] = nil
         G.cursor = { kind = "petaction", item = a }
+        if a.spell then
+            G.pet.autocastMemory = G.pet.autocastMemory or {}
+            G.pet.autocastMemory[a.spell] = a.autocast
+        end
     end
     G.petCallAfter()
 end
