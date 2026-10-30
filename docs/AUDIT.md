@@ -1,6 +1,7 @@
 # Audit: does the preview match the apply, and does restore really restore?
 
-Issue #95, branch `audit/preview-restore`, on `release/v1.0.0` (launch 2026-11-04). The question
+Issue #95, branch `audit/preview-restore`, on `main` after the v1.0.0 release notes (#94); launch
+2026-11-04. The question
 audited, as one property: **the state after Load/Apply equals the state the preview described, and
 the state after Restore equals the state before the operation, within a declared scope, with every
 exception named in the preview or the report.** The plan was reviewed with Codex gpt-6-astra (high)
