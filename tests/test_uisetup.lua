@@ -447,6 +447,21 @@ do
     eq("save: record advanced", AltStableSyncChar.loaded.ui.version, e.version)
 end
 
+-- Save updates the setup's own tabs; a tab only this character has isn't
+-- added, and the preview says so (#98, E12).
+do
+    newCharacterWith(base)
+    A.Commands.ui("apply Base")
+    A._shown.onConfirm()
+    UI.windows[5] = { name = "Loot", shown = true, docked = true, groups = { "LOOT" } }
+    A.Commands.ui("save")
+    check("E12: the extra tab is named", lines():find('Chat tab "Loot" isn\'t in this setup, and Save doesn\'t add it', 1, true) ~= nil, lines())
+    if A._shown.onConfirm then A._shown.onConfirm() end
+    local names = {}
+    for _, t in ipairs(A.Catalog.Get(base.id).modules.chat.tabs or {}) do names[t.name] = true end
+    check("E12: and not saved", not names.Loot and names.Whispers)
+end
+
 -- Save without having applied anything: refused, Save As offered.
 do
     newCharacterWith(base)
