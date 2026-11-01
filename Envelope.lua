@@ -64,6 +64,11 @@ end
 -- decompressed data, refused before it is checksummed or deserialized
 -- (DecompressString itself has no output limit).
 Envelope.RAW_MAX, Envelope.SHARE_MAX, Envelope.BOX_MAX, Envelope.CBOR_MAX = 20000, 16384, 24000, 65536
+-- Sync messages (#98, E2): one entry (a worst-case loadout measured 22,335
+-- bytes of CBOR), and a manifest or request. Like CBOR_MAX these refuse the
+-- checksum and the parse of an oversized result; they can't bound the
+-- client's DecompressString itself, which has no output limit.
+Envelope.ENTRY_CBOR_MAX, Envelope.MESSAGE_CBOR_MAX = 262144, 65536
 
 -- The string -> the table, or nil plus "bad-envelope" / "bad-checksum" /
 -- "older-schema" / "newer-schema" (anything but SCHEMA: refused, never
@@ -100,7 +105,7 @@ end
 -- The entry, or nil plus why. Catalog.Upsert validates its fields. A share
 -- string is never a sync message (#71).
 function Envelope.Decode(text)
-    local value, err = Envelope.Unpack(text)
+    local value, err = Envelope.Unpack(text, Envelope.ENTRY_CBOR_MAX)
     if not value then return nil, err end
     if type(value.e) ~= "table" or value.share ~= nil then return nil, "bad-envelope" end
     value.e.previous = nil

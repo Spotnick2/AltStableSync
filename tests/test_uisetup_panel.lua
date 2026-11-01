@@ -14,7 +14,7 @@ local A, P, W
 
 local function boot(ui)
     WoW.reset()
-    for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Game.lua", "Pet.lua", "Backups.lua",
+    for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Game.lua", "Pet.lua", "Share.lua", "Backups.lua",
                          "Ready.lua", "Loadout.lua", "UISetup.lua", "Preview.lua", "Reload.lua", "Commands.lua", "Panel.lua" }) do
         assert(loadfile(f))("AltStableSync", {})
     end

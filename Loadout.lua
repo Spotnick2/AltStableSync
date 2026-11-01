@@ -967,6 +967,13 @@ function Loadout.Merge(rec, current, characterBindings, drop)
     if not (Cover.Ok(B) and Cover.Ok(A)) then
         return nil, "This character's record of the loaded setup is damaged (no list of covered slots). Load it again."
     end
+    -- Every part the merge reads, before it reads it (#98, E1): B is a
+    -- catalog shape, A a comparison (it may list a pet's unfilled slots and
+    -- a macro action's icon), `unavailable` slot -> reason.
+    local S = ASS.Share
+    if not (S and S.GoodModules(B, "lenient") and S.GoodModules(A, "comparison") and S.GoodUnavailable(rec.unavailable)) then
+        return nil, "This character's record of the loaded setup is damaged. Load it again."
+    end
     local bCov, aCov = B.cover, A.cover
     local bSet, aSet = Cover.AddTo({}, bCov), Cover.AddTo({}, aCov)
     local stale = 0         -- slots that differ from B but have no comparison
@@ -1182,6 +1189,7 @@ function Loadout.Merge(rec, current, characterBindings, drop)
     return {
         added = added, addedFull = addedFull,
         before = bAct,                  -- B's actions, for the preview's "was -> now"
+        beforeMacros = B.macros or {},  -- B's character macros: the preview names each changed one (#98)
         ignored = ignored, marked = marked,
         modules = out,
         noop = Serialize(out) == Serialize(B),

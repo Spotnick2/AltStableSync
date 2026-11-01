@@ -292,12 +292,16 @@ local function GoodUIModules(m)
     return true
 end
 
--- Content an entry may hold: a table; a loadout's with a valid cover (#5),
--- a UI setup's with well-formed parts (#10).
+-- Content an entry may hold: a table; a UI setup's with well-formed parts
+-- (#10); a loadout's with a valid cover (#5) and every known part well
+-- formed (#98, E1: Share.GoodModules, "lenient", so what A35 keeps from
+-- another build still saves). Without the validator nothing passes.
 local function GoodModules(kind, modules)
     if type(modules) ~= "table" then return false end
     if kind == "ui" then return GoodUIModules(modules) end
-    return kind ~= "loadout" or ASS.Cover.Ok(modules)
+    if kind ~= "loadout" then return true end
+    local S = ASS.Share
+    return S ~= nil and S.GoodModules(modules, "lenient") == true
 end
 Catalog.GoodUIModules = GoodUIModules
 
@@ -419,7 +423,7 @@ local function ValidIncoming(x)
     if not (OptionalType(x.ancestors, "table") and OptionalType(x.deleted, "boolean")
             and OptionalType(x.name, "string") and OptionalType(x.class, "string")
             and OptionalType(x.category, "string") and OptionalType(x.modules, "table")
-            and OptionalType(x.provenance, "table")) then
+            and OptionalType(x.provenance, "table") and OptionalType(x.parent, "string")) then
         return false
     end
     if x.conflict ~= nil then
@@ -439,13 +443,48 @@ local function ValidIncoming(x)
     return true
 end
 
--- A clean local copy of an incoming entry: never its `previous` (local Save
--- recovery belongs to the account that saved), ancestors capped.
+-- The fields an entry may carry (#98, E3); anything else a peer sends is
+-- dropped, never stored or sent on. Never `previous`: local Save recovery
+-- belongs to the account that saved.
+local ENTRY_FIELDS = { id = true, kind = true, class = true, category = true, name = true, version = true,
+                       parent = true, ancestors = true, created = true, updated = true, provenance = true,
+                       modules = true, deleted = true, conflict = true }
+local CONFLICT_FIELDS = { of = true, from = true, name = true, deletion = true, retired = true }
+local TIME_MAX = 2 ^ 31          -- display times: a whole second before 2038, else dropped
+
+local function Time(t)
+    if type(t) == "number" and t == t and t >= 0 and t < TIME_MAX then return t end
+    return nil
+end
+Catalog.Time = Time
+
+-- A clean local copy of an incoming entry: the known fields only, times
+-- that `date` can show, provenance as text, ancestors capped.
 local function Sanitize(x)
-    local e = Copy(x)
-    e.previous = nil
+    local e = {}
+    for k, v in pairs(x) do
+        if ENTRY_FIELDS[k] then e[k] = Copy(v) end
+    end
+    e.created, e.updated = Time(e.created), Time(e.updated)
+    if type(e.provenance) == "table" then
+        local p = e.provenance
+        e.provenance = { sourceChar = type(p.sourceChar) == "string" and p.sourceChar or nil,
+                         build = type(p.build) == "string" and p.build or nil }
+    end
+    if type(e.conflict) == "table" then
+        for k in pairs(e.conflict) do
+            if not CONFLICT_FIELDS[k] then e.conflict[k] = nil end
+        end
+    end
     e.ancestors = AncestorList({}, e.ancestors)
     return e
+end
+
+-- An entry keeps its identity under one id (#98, E5): nothing here ever
+-- changes a stored entry's kind, class or category, so an incoming version
+-- that does is refused, never a silent move to another list.
+local function SameIdentity(a, b)
+    return a.kind == b.kind and a.class == b.class and a.category == b.category
 end
 
 -- Would receiving `id` at `version` change anything here? False when we hold
@@ -476,6 +515,14 @@ function Catalog.Upsert(incoming, fromChar)
     -- past) is the other account's copy of OUR content: nothing to keep.
     -- Retired copies (tombstones) still propagate, which is how a resolution
     -- settles both accounts.
+    -- A conflict copy carries its root's identity (Upsert makes it from a
+    -- version of that root); one that doesn't is refused like any change.
+    if type(incoming.conflict) == "table" then
+        local root = p[incoming.conflict.of]
+        if root and not SameIdentity(root, incoming) then return nil, "bad-entry" end
+    end
+    if local_ and not SameIdentity(local_, incoming) then return nil, "bad-entry" end
+
     if type(incoming.conflict) == "table" and not incoming.deleted then
         local root = p[incoming.conflict.of]
         if root and (root.version == incoming.version or Contains(root.ancestors, incoming.version)) then

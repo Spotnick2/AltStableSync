@@ -54,13 +54,16 @@ end
 
 local function Plural(n, word) return n .. " " .. word .. (n == 1 and "" or "s") end
 
+-- A time `date` can show, or "?" (a synced entry's times are display only, #98).
+local function Shown(t) return ASS.Catalog and ASS.Catalog.Time and ASS.Catalog.Time(t) end
+
 local function When(t)
-    if type(t) ~= "number" or not date then return "?" end
+    if not Shown(t) or not date then return "?" end
     return date("%Y-%m-%d %H:%M", t)
 end
 
 local function Short(t)
-    if type(t) ~= "number" or not date then return "?" end
+    if not Shown(t) or not date then return "?" end
     return date("%b %d, %H:%M", t)
 end
 

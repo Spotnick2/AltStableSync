@@ -26,13 +26,17 @@ local function boot()
     assert(loadfile("Core.lua"))("AltStableSync", {})
     assert(loadfile("Categories.lua"))("AltStableSync", {})
     assert(loadfile("Catalog.lua"))("AltStableSync", {})
+    assert(loadfile("Game.lua"))("AltStableSync", {})
+    assert(loadfile("Pet.lua"))("AltStableSync", {})
+    assert(loadfile("Share.lua"))("AltStableSync", {})
     WoW.fire("ADDON_LOADED", "AltStableSync")
     assert(AltStableSync.db, "init failed: " .. tostring(AltStableSync.disabled))
     return AltStableSync, AltStableSync.Catalog
 end
 
 local A, C = boot()
-local function mods(tag) return { actions = { [1] = { spell = tag } }, bindings = {}, macros = {}, cover = { { 1, 12 } } } end
+-- The tag rides as an unsupported action's text: a shape the catalog accepts.
+local function mods(tag) return { actions = { [1] = { kind = "unsupported", what = tag } }, bindings = {}, macros = {}, cover = { { 1, 12 } } } end
 local function loadout(class, category, name, tag)
     return C.Create("loadout", { class = class, category = category, name = name,
                                  provenance = { sourceChar = "Karuzo-Elegia", build = "70245" } }, mods(tag))
@@ -76,8 +80,8 @@ do
     -- The stored modules are a copy: changing the caller's table changes nothing.
     local m = mods("heal")
     local e2 = C.Create("loadout", { class = "PRIEST", category = "holy", name = "Raid" }, m)
-    m.actions[1].spell = "changed"
-    eq("create: modules copied", e2.modules.actions[1].spell, "heal")
+    m.actions[1].what = "changed"
+    eq("create: modules copied", e2.modules.actions[1].what, "heal")
 
     -- A01: separate lists per category; listing writes nothing.
     eq("A01: discipline list", #C.List("loadout", "PRIEST", "discipline"), 1)
@@ -111,7 +115,7 @@ do
     local fork = loadout("PRIEST", "discipline", "Dungeon healing", "renew")
     check("A05: new id", fork.id ~= e.id)
     eq("A05: original untouched", e.version, before)
-    eq("A05: original content untouched", e.modules.actions[1].spell, "smite")
+    eq("A05: original content untouched", e.modules.actions[1].what, "smite")
 end
 
 ------------------------------------------------------------
@@ -132,20 +136,20 @@ do
     eq("replace: parent", r.parent, v0)
     eq("replace: ancestors start with parent", r.ancestors[1], v0)
     eq("replace: previous.of is the new version", r.previous.of, r.version)
-    eq("replace: previous holds old content", r.previous.modules.actions[1].spell, "v0")
-    eq("replace: new content", r.modules.actions[1].spell, "v1")
+    eq("replace: previous holds old content", r.previous.modules.actions[1].what, "v0")
+    eq("replace: new content", r.modules.actions[1].what, "v1")
 
     -- A39: a Save from a stale baseline is refused, and nothing changes.
     local v1 = r.version
     local _, err = C.Replace(e.id, mods("stale"), v0)
     eq("A39: stale refused", err, "stale")
-    eq("A39: content unchanged", e.modules.actions[1].spell, "v1")
+    eq("A39: content unchanged", e.modules.actions[1].what, "v1")
     eq("A39: version unchanged", e.version, v1)
 
     -- A44: undo my last Save, once.
     local u, uerr = C.UndoLastSave(e.id, v1)
     check("A44: undo ok", u ~= nil, tostring(uerr))
-    eq("A44: content restored", e.modules.actions[1].spell, "v0")
+    eq("A44: content restored", e.modules.actions[1].what, "v0")
     check("A44: undo is a new version", e.version ~= v1 and e.version ~= v0)
     eq("A44: undo descends from the bad save", e.ancestors[1], v1)
     eq("A44: not repeatable", select(2, C.UndoLastSave(e.id, e.version)), "no-undo")
@@ -159,7 +163,7 @@ do
     local vNow = e.version
     eq("#5: undo of a cover-less previous refused", select(2, C.UndoLastSave(e.id, e.version)), "bad-modules")
     eq("#5: entry unchanged", e.version, vNow)
-    eq("#5: content unchanged", e.modules.actions[1].spell, "v2")
+    eq("#5: content unchanged", e.modules.actions[1].what, "v2")
 
     -- Rename: validated and versioned.
     loadout("PRIEST", "discipline", "Raid", "x")
@@ -189,8 +193,8 @@ do
     local g = loadout("PRIEST", "holy", "Copy check", "a")
     local gm = mods("b")
     C.Replace(g.id, gm, g.version)
-    gm.actions[1].spell = "changed"
-    eq("replace: modules copied", g.modules.actions[1].spell, "b")
+    gm.actions[1].what = "changed"
+    eq("replace: modules copied", g.modules.actions[1].what, "b")
 
     -- Ancestors are capped.
     local f = loadout("PRIEST", "holy", "Long", "0")
@@ -276,7 +280,7 @@ do
     local after = 0
     for _ in pairs(a.db.presets) do after = after + 1 end
     eq("older version: no conflict copy", after, before)
-    eq("older version: content kept", root(a, id).modules.actions[1].spell, "A2")
+    eq("older version: content kept", root(a, id).modules.actions[1].what, "A2")
 end
 
 -- A conflict copy id that already exists - live or retired - is never
@@ -363,7 +367,7 @@ do
     use(a)
     for i = 1, 3 do C.Replace(id, mods("A" .. i), root(a, id).version) end
     sync(a, b)
-    eq("lag: B fast-forwards", root(b, id).modules.actions[1].spell, "A3")
+    eq("lag: B fast-forwards", root(b, id).modules.actions[1].what, "A3")
     eq("lag: no conflict copies", liveConflicts(a) + liveConflicts(b), 0)
     check("lag: manifests agree", same(a, b))
     -- A's own undo survives the trip; B never got A's `previous`.
@@ -376,8 +380,8 @@ do
     use(a); C.Replace(id, mods("A"), root(a, id).version)
     use(b); C.Replace(id, mods("B"), root(b, id).version)
     sync(a, b)
-    eq("conflict: A keeps its own", root(a, id).modules.actions[1].spell, "A")
-    eq("conflict: B keeps its own", root(b, id).modules.actions[1].spell, "B")
+    eq("conflict: A keeps its own", root(a, id).modules.actions[1].what, "A")
+    eq("conflict: B keeps its own", root(b, id).modules.actions[1].what, "B")
     eq("conflict: one copy each side", liveConflicts(a) .. "/" .. liveConflicts(b), "1/1")
     local copyOnA
     for cid, e in pairs(a.db.presets) do if e.conflict and not e.deleted then copyOnA = cid end end
@@ -400,9 +404,9 @@ do
     cp.modules.cover = cov
     local r = C.Resolve(copyOnA, "theirs", root(a, id).version)
     check("resolve: ok", r ~= nil)
-    eq("resolve: theirs content", root(a, id).modules.actions[1].spell, "B")
+    eq("resolve: theirs content", root(a, id).modules.actions[1].what, "B")
     sync(a, b)
-    eq("resolve: B converged", root(b, id).modules.actions[1].spell, "B")
+    eq("resolve: B converged", root(b, id).modules.actions[1].what, "B")
     eq("resolve: no live copies left anywhere", liveConflicts(a) + liveConflicts(b), 0)
     check("resolve: manifests agree", same(a, b))
     -- Settled: another exchange changes nothing.
@@ -424,8 +428,8 @@ do
     local copyOnB = id .. "~" .. root(a, id).version
     check("delete copy: ok", C.DeleteConflictCopy(copyOnB, root(b, id).version) ~= nil)
     sync(a, b)
-    eq("delete copy: B kept its own", root(b, id).modules.actions[1].spell, "B")
-    eq("delete copy: A converged on B", root(a, id).modules.actions[1].spell, "B")
+    eq("delete copy: B kept its own", root(b, id).modules.actions[1].what, "B")
+    eq("delete copy: A converged on B", root(a, id).modules.actions[1].what, "B")
     eq("delete copy: no live copies", liveConflicts(a) + liveConflicts(b), 0)
     check("delete copy: manifests agree", same(a, b))
 end
@@ -472,7 +476,7 @@ do
     check("del/edit: copy exists on A", a.db.presets[copyOnA] and not a.db.presets[copyOnA].deleted)
     local r, kept = C.Resolve(copyOnA, "theirs", root(a, id).version)
     check("del/edit: resolved", r ~= nil)
-    check("del/edit: edit kept as a new entry", kept and kept.id ~= id and kept.modules.actions[1].spell == "B-edit")
+    check("del/edit: edit kept as a new entry", kept and kept.id ~= id and kept.modules.actions[1].what == "B-edit")
     check("del/edit: root still deleted", root(a, id).deleted)
     sync(a, b)
     check("del/edit: B's root deleted too", root(b, id).deleted)
@@ -496,7 +500,7 @@ for _, choice in ipairs({ "delete", "mine" }) do
         check("edit/del delete: both deleted", root(a, id).deleted and root(b, id).deleted)
     else
         check("edit/del mine: both live", not root(a, id).deleted and not root(b, id).deleted)
-        eq("edit/del mine: B has A's edit", root(b, id).modules.actions[1].spell, "A-edit")
+        eq("edit/del mine: B has A's edit", root(b, id).modules.actions[1].what, "A-edit")
     end
     check("edit/del " .. choice .. ": converged", same(a, b))
     eq("edit/del " .. choice .. ": no live copies", liveConflicts(a) + liveConflicts(b), 0)
@@ -509,7 +513,7 @@ do
     sync(a, b)
     use(a); C.UndoLastSave(id, root(a, id).version)
     sync(a, b)
-    eq("undo: B got the undo", root(b, id).modules.actions[1].spell, "base")
+    eq("undo: B got the undo", root(b, id).modules.actions[1].what, "base")
     check("undo: converged", same(a, b))
 
     local a2, b2, id2 = pair()
@@ -519,7 +523,7 @@ do
     sync(a2, b2)
     use(a2)
     eq("undo: lapses after a newer save arrived", select(2, C.UndoLastSave(id2, root(a2, id2).version)), "no-undo")
-    eq("undo: newer save intact", root(a2, id2).modules.actions[1].spell, "theirs-newer")
+    eq("undo: newer save intact", root(a2, id2).modules.actions[1].what, "theirs-newer")
 end
 
 -- "Keep this version" takes the chosen version whole: its rename too.
@@ -551,7 +555,7 @@ do
     C.Resolve(copyOnA, "mine", root(a, id).version)
     sync(a, b)
     eq("late edit: no live copies anywhere", liveConflicts(a) + liveConflicts(b), 0)
-    eq("late edit: B has A2", root(b, id).modules.actions[1].spell, "A2")
+    eq("late edit: B has A2", root(b, id).modules.actions[1].what, "A2")
     check("late edit: manifests agree", same(a, b))
 end
 
@@ -590,7 +594,7 @@ do
     eq("two copies: both retired on A", liveConflicts(a), 0)
     sync(a, b)
     eq("two copies: no live copies anywhere", liveConflicts(a) + liveConflicts(b), 0)
-    eq("two copies: converged on B2", root(a, id).modules.actions[1].spell, "B2")
+    eq("two copies: converged on B2", root(a, id).modules.actions[1].what, "B2")
     check("two copies: manifests agree", same(a, b))
 end
 
@@ -639,7 +643,7 @@ do
     local rootBefore, copyBefore = root(a, id).version, a.db.presets[cid].version
     eq("stale resolve: refused", select(2, C.Resolve(cid, "theirs", seen)), "stale")
     eq("stale resolve: root unchanged", root(a, id).version, rootBefore)
-    eq("stale resolve: root content unchanged", root(a, id).modules.actions[1].spell, "A2")
+    eq("stale resolve: root content unchanged", root(a, id).modules.actions[1].what, "A2")
     eq("stale resolve: copy unchanged", a.db.presets[cid].version, copyBefore)
     check("stale resolve: copy still live", not a.db.presets[cid].deleted)
 end
@@ -666,7 +670,7 @@ do
         local tag = given and "given" or "auto"
         check("kept name (" .. tag .. "): resolved", r ~= nil and kept ~= nil)
         eq("kept name (" .. tag .. "): name", kept and kept.name, given and "Everyday from Kaleid" or "Everyday (kept 2)")
-        eq("kept name (" .. tag .. "): content", type(kept) == "table" and kept.modules.actions[1].spell, "B-edit")
+        eq("kept name (" .. tag .. "): content", type(kept) == "table" and kept.modules.actions[1].what, "B-edit")
         check("kept name (" .. tag .. "): root still deleted", root(a, id).deleted)
         sync(a, b)
         eq("kept name (" .. tag .. "): no live copies", liveConflicts(a) + liveConflicts(b), 0)
@@ -691,7 +695,7 @@ do
     local r, kept = C.Resolve(cid, "theirs", a.db.presets[newer.id].version)
     check("unknown category: kept", r ~= nil and type(kept) == "table", tostring(kept))
     eq("unknown category: category preserved", type(kept) == "table" and kept.category, "newcategory")
-    eq("unknown category: content", type(kept) == "table" and kept.modules.actions[1].spell, "future-edit")
+    eq("unknown category: content", type(kept) == "table" and kept.modules.actions[1].what, "future-edit")
     sync(a, b)
     eq("unknown category: no live copies", liveConflicts(a) + liveConflicts(b), 0)
     check("unknown category: converged", same(a, b))
@@ -707,7 +711,7 @@ do
     send(b, a)
     use(a)
     eq("stale delete: refused", select(2, C.Delete(id, seen)), "stale")
-    eq("stale delete: newer kept", root(a, id).modules.actions[1].spell, "newer")
+    eq("stale delete: newer kept", root(a, id).modules.actions[1].what, "newer")
 end
 
 ------------------------------------------------------------
