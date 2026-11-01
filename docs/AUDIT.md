@@ -289,4 +289,5 @@ this client's session token and holding exactly SyncA's content (by digest); eac
 is this client's, and the loadout Save changed a button. A version received by sync, a cancelled
 Save or an unrelated new loadout fails the step.
 
-_Results: pending the owner's session; they go here and to `docs/forever-api-notes.md` "Build 70532"._
+_Results: pending the live client (2026-11-04; nothing can run in game before launch), tracked in
+#100. They go here and to `docs/forever-api-notes.md` under the build they ran on._
