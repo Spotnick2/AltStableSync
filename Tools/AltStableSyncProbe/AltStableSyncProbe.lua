@@ -1152,12 +1152,18 @@ function NS.CatalogRecord(role, label)
         if type(e) == "table" then
             parts[#parts + 1] = canon(id) .. "=" .. canon(e, true)
             local c = type(e.conflict) == "table" and e.conflict or nil
+            -- `md`: the content's own digest, so an import can be matched to
+            -- the entry it was shared from.
             entries[id] = { v = e.version, name = e.name, kind = e.kind, class = e.class, category = e.category,
-                            deleted = e.deleted and true or nil, of = c and c.of or nil }
+                            deleted = e.deleted and true or nil, of = c and c.of or nil,
+                            md = type(e.modules) == "table" and digest(canon(e.modules)) or nil }
         end
     end
     local text = table.concat(parts, ";")
-    local rec = { entries = entries, digest = digest(text), size = #text, link = linkState(A), status = {} }
+    -- `writer`: this session's version token, so a version this client minted
+    -- (a Save, an import here) is told from one received by sync.
+    local rec = { entries = entries, digest = digest(text), size = #text, link = linkState(A), status = {},
+                  writer = type(A.writer) == "string" and A.writer or nil }
     local L = type(A.Link) == "table" and A.Link or nil
     for id, x in pairs(entries) do
         if not x.deleted and not x.of and L and type(L.EntryStatus) == "function" then
@@ -1313,10 +1319,25 @@ local function survived(role)
         return a.digest == b.digest, ("final %s, after the exit %s"):format(a.digest, b.digest)
     end
 end
+-- Was `version` minted by this client in this session (not received)?
+local function mine(r, version)
+    return type(r.writer) == "string" and type(version) == "string" and version:sub(1, #r.writer + 1) == r.writer .. ":"
+end
+-- The import: exactly one new live loadout, made here, holding exactly the
+-- content of the entry it was shared from (SyncA, as this account holds it).
 local function imported()
     local a, b = crec("B", "resolved"), crec("B", "imported")
-    if not (a and b) then return false, "records missing" end
-    return liveLoadouts(b) == liveLoadouts(a) + 1, ("live loadouts %d -> %d"):format(liveLoadouts(a), liveLoadouts(b))
+    local root = DB.catalog.B and DB.catalog.B.root
+    if not (a and b and root) then return false, "records missing" end
+    local new = {}
+    for id, x in pairs(b.entries) do
+        if not x.deleted and not x.of and x.kind == "loadout" and not a.entries[id] then new[#new + 1] = id end
+    end
+    if #new ~= 1 then return false, #new .. " new live loadouts since the resolution, expected 1" end
+    local x, src = b.entries[new[1]], b.entries[root]
+    if not mine(b, x.v) then return false, "the new loadout wasn't made on this client (" .. tostring(x.v) .. ")" end
+    if not (src and x.md == src.md) then return false, "the new loadout's content isn't SyncA's" end
+    return true, ("%s imported here with SyncA's content (%s)"):format(tostring(x.name), tostring(x.md))
 end
 local function keptBefore()
     local r = crec("B", "keptBefore")
@@ -1331,19 +1352,34 @@ local function keptAfter()
     if not (a and b and a.loadout and b.loadout) then return false, "records missing" end
     if a.loadout.id ~= b.loadout.id then return false, "another loadout is loaded now" end
     if a.loadout.entryVersion == b.loadout.entryVersion then return false, "no Save since the load (the entry's version didn't move)" end
-    local lost = {}
+    -- The Save is this client's (a version received by sync proves nothing).
+    if not mine(b, b.loadout.entryVersion) then
+        return false, "the entry's new version wasn't saved here (" .. tostring(b.loadout.entryVersion) .. ")"
+    end
+    local lost, moved = {}, 0
     for slot in pairs(a.loadout.unavailable) do
         if a.loadout.actions[slot] ~= b.loadout.actions[slot] then lost[#lost + 1] = tostring(slot) end
     end
+    for slot, x in pairs(b.loadout.actions) do
+        if not a.loadout.unavailable[slot] and a.loadout.actions[slot] ~= x then moved = moved + 1 end
+    end
+    for slot in pairs(a.loadout.actions) do
+        if not a.loadout.unavailable[slot] and b.loadout.actions[slot] == nil then moved = moved + 1 end
+    end
     if #lost > 0 then return false, "the Save changed kept slots: " .. table.concat(lost, ", ") end
-    return true, "every slot the load couldn't fill kept its saved action"
+    if moved == 0 then return false, "the Save saved no button change" end
+    return true, ("the Save here saved %d changed slot(s) and kept every slot the load couldn't fill"):format(moved)
 end
 local function meterKept()
     local a, b = crec("B", "meterBefore"), crec("B", "meterAfter")
     if not (a and b and a.ui and b.ui) then return false, "no applied UI setup recorded" end
     if a.ui.id ~= b.ui.id then return false, "another UI setup is applied now" end
     if not a.ui.meter2 then return false, "that setup has no meter window 2" end
-    return a.ui.meter2 == b.ui.meter2, "saved window 2: " .. tostring(b.ui.meter2)
+    -- A Save happened here: the entry moved to a version this client minted.
+    if a.ui.entryVersion == b.ui.entryVersion or not mine(b, b.ui.entryVersion) then
+        return false, "no Save here since the apply (version " .. tostring(b.ui.entryVersion) .. ")"
+    end
+    return a.ui.meter2 == b.ui.meter2, "saved here; window 2: " .. tostring(b.ui.meter2)
 end
 
 for role, proc in pairs(CPROC) do
@@ -1393,7 +1429,7 @@ cstep("B", nil, { text = "Move one button on the bars, then Save (the preview li
     button = "Record", run = crecord("B", "keptAfter"), check = keptAfter })
 cstep("B", nil, { text = "UI setup tab: Apply a setup whose meter has window 2. Then close meter window 2 (its X), and press Record.",
     button = "Record", run = crecord("B", "meterBefore") })
-cstep("B", "meter", { text = "UI setup tab: Save.... Does its preview say \"Damage meter window 2: hidden here; kept as saved.\"? (Confirm if it lists other changes, else Cancel.)", ask = true })
+cstep("B", "meter", { text = "Change one setting the setup holds (Raid frames: class colors, say), so Save has something to save. Then UI setup tab: Save.... Does its preview say \"Damage meter window 2: hidden here; kept as saved.\"? Confirm it either way.", ask = true })
 cstep("B", nil, { text = "Record after that Save.", button = "Record", run = crecord("B", "meterAfter"), check = cgated("B", meterKept, "meter") })
 cstep("B", nil, { text = "Type  /altsync link refresh  on both, wait 10 seconds, then press Record (account A records its final too).",
     button = "Record", run = crecord("B", "final"), check = settled("B"), screenshot = "catalog B: final" })

@@ -283,6 +283,10 @@ never run on live before (`docs/RUNBOOK.md` step 7).
 
 Afterwards I parse both accounts' `AltStableSync.lua`, drop each entry's `previous` and compare
 the presets' content with sorted keys (not the whole files: backups and the minimap setting are
-account-local). The two `final` digests must match each other too.
+account-local). The two `final` digests must match each other too. Each step that claims an
+operation proves it happened here (Codex on PR #99): the import is the one new loadout, minted by
+this client's session token and holding exactly SyncA's content (by digest); each Save's new version
+is this client's, and the loadout Save changed a button. A version received by sync, a cancelled
+Save or an unrelated new loadout fails the step.
 
 _Results: pending the owner's session; they go here and to `docs/forever-api-notes.md` "Build 70532"._

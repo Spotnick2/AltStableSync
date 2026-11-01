@@ -176,6 +176,7 @@ eq("A finished", rec("catalog").status, "done")
 
 for id in pairs(P) do P[id] = nil end
 for id in pairs(status) do status[id] = nil end
+AltStableSync.writer = "bbbbbbbbbbbb"                  -- this client's session token: B mints bbbbbbbbbbbb:n
 fp("steps sync catalog2")
 S.Run()                                                -- 1 Start
 S.Next()                                               -- 2 /altsync link
@@ -261,12 +262,41 @@ do
     bad = copy(keep.keptAfter); bad.loadout.entryVersion = R.keptBefore.loadout.entryVersion
     R.keptAfter = bad
     check("no Save since the load fails", not C.keptAfter())
+    -- Codex on PR #99: a version received by sync is not this client's Save.
+    bad = copy(keep.keptAfter); bad.loadout.entryVersion = "aaaaaaaaaaaa:9"
+    R.keptAfter = bad
+    check("a received version instead of a Save here fails", not C.keptAfter())
+    -- A Save with no button change proves nothing about the merge.
+    bad = copy(keep.keptAfter); bad.loadout.actions[1] = R.keptBefore.loadout.actions[1]
+    R.keptAfter = bad
+    check("a Save without a button change fails", not C.keptAfter())
     R.keptAfter = keep.keptAfter
     -- A UI Save that wrote over window 2 fails.
     bad = copy(R.meterAfter); bad.ui.meter2 = "{[\"locked\"]=false}"
     R.meterAfter = bad
     check("a Save that changed window 2 fails", not C.meterKept())
+    -- Codex on PR #99: a cancelled Save (version unchanged) fails, and so
+    -- does a version received from the other account.
+    bad = copy(keep.meterAfter); bad.ui.entryVersion = R.meterBefore.ui.entryVersion
+    R.meterAfter = bad
+    check("a cancelled UI Save fails", not C.meterKept())
+    bad = copy(keep.meterAfter); bad.ui.entryVersion = "aaaaaaaaaaaa:9"
+    R.meterAfter = bad
+    check("a received UI version fails", not C.meterKept())
     R.meterAfter = keep.meterAfter
+    -- Codex on PR #99: the import must be the shared content, made here.
+    local newId = "loadout-bbbbbbbbbbbb-2"
+    bad = copy(keep.imported); bad.entries[newId].md = "00000000"
+    R.imported = bad
+    check("an import of other content fails", not C.imported())
+    bad = copy(keep.imported); bad.entries[newId].v = "aaaaaaaaaaaa:7"
+    R.imported = bad
+    check("a loadout received, not imported here, fails", not C.imported())
+    bad = copy(keep.imported); bad.entries["loadout-cccccccccccc-1"] = copy(bad.entries[newId])
+    R.imported = bad
+    check("two new loadouts fail", not C.imported())
+    R.imported = keep.imported
+    check("the real records pass", C.imported() and C.keptAfter() and C.meterKept())
     -- A catalog that changed across the exit fails.
     bad = copy(R.afterExit); bad.digest = "00000000"
     R.afterExit = bad
