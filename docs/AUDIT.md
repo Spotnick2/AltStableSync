@@ -223,7 +223,7 @@ run by a script that reverts one fix, runs its test, counts the reds and restore
 | E2 | No decompressed-size cap on sync messages | 256 KB per entry (a worst-case loadout is 22 KB), 64 KB per manifest or request, refused as "too-long" before the checksum and the parse | 4 red ("E2: never parsed", a genuine envelope with a 256 KB unknown part) |
 | E3 | Every top-level field a peer sent was stored and sent on; display times of any type reached `date` | The 14 known fields; times kept only when `date` can show them; provenance as text; the panel shows "?" for any other stored time | allowlist: 1 red (the exact key set); panel guard: 2 red ("the panel renders it") |
 | E4 | A manifest's part numbers, counts and ids per part were unchecked; a stray part with another batch's `n` could complete a manifest | Whole numbers, `1 <= p <= n <= 1000`, at most 100 ids, the batch's own `n` | same `n`: 1 red; `p <= n`: 4 red; ids: 3 red |
-| E5 | A successor could change an entry's kind, class or category: the loadout left its class list with no conflict (Codex, plan round 1) | A known id, and a mirror copy of a root that is here, keep that entry's identity, else "bad-entry" | 15 red ("E5 kind: refused"); the copy: 3 red |
+| E5 | A successor could change an entry's kind, class or category: the loadout left its class list with no conflict (Codex, plan round 1) | A known id, and a mirror copy of a root that is here, keep that entry's identity, else "bad-entry". A copy stored before its root (nothing to check it against then) never gives its content or deletion to a root of another identity: "Keep this version" is refused ("bad-copy", also by the command before any preview); "Keep mine" settles it (Codex on PR #99) | 15 red ("E5 kind: refused"); the copy: 3 red; the resolve guard: 5 red ("E5: its version can't be kept"); the command's check: 1 red |
 | E10 | UI Save over a meter window 2 hidden since the apply wrote the capture's default (Healing Done, unlocked) over the saved window, with one line "update the two windows" | Owner: a hidden window 2 is a skipped part; the entry keeps it and the preview says so. Meter changes listed field by field | 5 red ("E10 hidden: window 2 kept as saved"); the listing: 1 red |
 | E12 | UI Save never adds a tab only this character has, and didn't say so | One preview line per such tab | 1 red |
 | E13 | Save's first line counted changed keys, not added ones | Both counted | 1 red |
@@ -247,7 +247,7 @@ create a valid one and damage the stored copy, since `Create` now refuses it.
 
 ## 8. Round-trip rows
 
-`tests/test_roundtrip_catalog.lua` (114 checks), each outcome stated by hand:
+`tests/test_roundtrip_catalog.lua` (121 checks), each outcome stated by hand:
 
 | Row | What it does | Expected, by hand |
 |---|---|---|
@@ -256,7 +256,7 @@ create a valid one and damage the stored copy, since `Create` now refuses it.
 | C3 | An entry with junk fields, a `previous`, an out-of-range and a table time, extra provenance, non-string ancestors | stored with exactly the nine fields it validly has; the panel shows it, "Saved ? by Alt-Realm" |
 | C4 | A genuine 256 KB envelope | never parsed, not stored, said, not asked for again; the real-size entry arrives |
 | C5 | Manifest parts: `p > n`, 101 ids, a fractional `n`, a stray part with another `n` | none completes a manifest; the batch's own parts do |
-| C6 | A conflict copy before its root | stored, "unknown-id" until the root arrives, then resolved and retired |
+| C6 | A conflict copy before its root; then one claiming another class | stored, "unknown-id" until the root arrives, then resolved and retired; the mismatched one can't be kept ("bad-copy", the root untouched, the command refuses without a preview) and "Keep mine" settles it, the root keeping its class and content |
 | C7 | A legacy entry with every A35 shape and a 20-byte macro name: Create, sync, Load, Save | stored and synced; the unmanaged slot listed and never applied; the Save keeps every A35 part and passes the catalog's check; Share answers "cant-share"; a plain capture round-trips |
 | C8 | A damaged baseline, comparison or `unavailable`; a `previous` damaged or holding only an unknown key; a record's own fields | Save refused with the damaged-record line and Save As warns, nothing raised or written; Undo "bad-modules" / done with the key kept; a comparison with a macro icon and a pet's unfilled slots saves; those fields in a share string are "bad-share" |
 | C9 | A Save after editing a macro's second line and binding a key the loadout lacks | "1 slot and 1 key change", the macro named with "line 2: (no line) -> /say on my way"; the saved entry differs from the loaded one in exactly `actions.2.body`, `bindings.ACTIONBUTTON3.1`, `macros.Heal.body` |

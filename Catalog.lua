@@ -621,6 +621,11 @@ function Catalog.Resolve(copyId, choice, expectedRootVersion, newName)
     local root = p[copy.conflict.of]
     if not root then return nil, "unknown-id" end
     if root.version ~= expectedRootVersion then return nil, "stale" end
+    -- A copy stored before its root arrived was checked against nothing; one
+    -- that claims another kind, class or category never gives its content or
+    -- its deletion to the root (#98, E5, Codex on PR #99). "Keep mine" takes
+    -- nothing from it and still settles it.
+    if choice ~= "mine" and not SameIdentity(root, copy) then return nil, "bad-copy" end
 
     local rootVersion, theirsVersion = root.version, copy.version
     -- Both competing tips first, then the other branch's own history (the

@@ -297,6 +297,36 @@ do
     check("the copy retired", C.Get(copy.id).deleted == true)
 end
 
+-- A copy that arrives first claiming another class (Codex on PR #99): stored,
+-- since nothing is there to check it against; once its root arrives, its
+-- content never crosses into the root. "Keep mine" settles it.
+do
+    boot()
+    local root = { id = "loadout-eeeeeeeeeeee-2", version = "eeeeeeeeeeee:2", parent = "eeeeeeeeeeee:1",
+                   ancestors = { "eeeeeeeeeeee:1" }, kind = "loadout", class = "PRIEST", category = "holy", name = "Mixed",
+                   modules = assert(L.Capture()) }
+    local copy = C.Copy(root)
+    copy.version, copy.ancestors, copy.class, copy.category = "dddddddddddd:6", { "eeeeeeeeeeee:1" }, "MAGE", "fire"
+    copy.modules.actions = { [1] = { kind = "spell", id = 133, name = "Fireball", policy = "highest" } }
+    copy.id, copy.conflict, copy.name = root.id .. "~" .. copy.version, { of = root.id, from = "Third", name = "Mixed" }, "Mixed (from Third)"
+    eq("mismatched copy first: stored", (C.Upsert(copy, "Other-Realm")), "replace")
+    eq("its root later: stored", (C.Upsert(root, "Other-Realm")), "replace")
+    local before = ser(C.Get(root.id))
+    eq("E5: its version can't be kept", select(2, C.Resolve(copy.id, "theirs", root.version)), "bad-copy")
+    eq("E5: the root untouched", ser(C.Get(root.id)), before)
+    -- The command, on a mage (a copy is resolved by its own class), says so
+    -- before any preview.
+    A.Preview.Hide()
+    G.class = "MAGE"
+    A.Commands.ResolveCopy(copy.id, "theirs")
+    G.class = "PRIEST"
+    check("E5: the command refuses without a preview", A.Preview.Shown() == nil and said("claims another class or category"))
+    local r = C.Resolve(copy.id, "mine", root.version)
+    check("E5: Keep mine settles it", r ~= nil and C.Get(copy.id).deleted == true)
+    eq("E5: the root kept its own content and class", ser({ C.Get(root.id).class, C.Get(root.id).modules }),
+       ser({ "PRIEST", root.modules }))
+end
+
 ------------------------------------------------------------
 -- The validator: what A35 keeps from another build saves and syncs, and
 -- only a share string refuses it (E1, lenient vs strict)

@@ -923,7 +923,7 @@ offline while A saved three times) a plain fast-forward rather than a conflict.
 | Local version is in incoming `ancestors`, or the id is unknown | **replace** (fast-forward). Local `previous` is untouched; it is local Save recovery only |
 | Anything else (both accounts saved from a common version, or the lag exceeded 20 saves) | **divergent**: keep the local entry; store the incoming one whole as conflict copy `<id>~<incoming version>`, named "<name> (from <char>)", with a one-line notice. If that conflict id already exists, live **or tombstoned**, ignore it |
 | A field of the wrong type, or a loadout whose modules the catalog's validator refuses (#98) | reject (`bad-entry`); local untouched; that version isn't asked for again this session |
-| A known id (or a mirror copy of a root here) with another kind, class or category (#98) | reject: an entry keeps its identity under one id, so nothing moves to another list silently |
+| A known id (or a mirror copy of a root here) with another kind, class or category (#98) | reject: an entry keeps its identity under one id, so nothing moves to another list silently. A copy stored before its root arrived (nothing to check it against then) can't give its content or deletion to a root of another identity: "Keep this version" is refused, "Keep mine" settles it |
 | Unknown or newer envelope schema | reject; local untouched |
 | Older envelope schema (an older build: 1-12 #5, or #5's wire 2) | reject, nothing imported or remembered as refused; that peer shows "sync paused" until it updates, then the same versions are fetched |
 

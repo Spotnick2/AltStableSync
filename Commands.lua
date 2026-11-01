@@ -75,7 +75,8 @@ local COPY = {
     ["conflict-copy"] = "That is a conflict copy: settle it with /altsync resolve.",
     ["not-conflict"] = "That conflict was already settled.",
     ["rename-empty"] = "Give it a name: /altsync rename <id or name> <new name>.",
-    ["bad-modules"] = "Its saved data is damaged (no list of covered slots); nothing was changed.",
+    ["bad-modules"] = "Its saved data is damaged; nothing was changed.",
+    ["bad-copy"] = "That copy claims another class or category than its loadout, so its version can't be kept. Keep yours to settle it.",
     ["bad-category"] = "That category isn't one this class can save into.",
 }
 local function Copy(err) return COPY[err] or tostring(err) end
@@ -1041,6 +1042,10 @@ function Commands.ResolveCopy(copyId, choice)
     local name = tostring(copy.conflict.name or root.name)
     local deletion = copy.conflict.deletion
     local apiChoice = (deletion and choice == "theirs") and "delete" or choice
+    -- Refused before a preview that couldn't be confirmed (Catalog.Resolve).
+    if apiChoice ~= "mine" and (copy.kind ~= root.kind or copy.class ~= root.class or copy.category ~= root.category) then
+        Print("Not resolved: " .. Copy("bad-copy")) return
+    end
     local line
     if deletion and root.deleted then
         line = ("%q is deleted on both accounts; it stays deleted."):format(name)
