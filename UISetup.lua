@@ -349,12 +349,17 @@ function UISetup.Capture()
     else
         notes[#notes + 1] = "Chat: couldn't read the chat windows; not saved."
     end
+    -- `info` (third): what Save needs to know beyond the parts (#98, E10).
+    local info = {}
     if ASS.DamageMeter then
         local note
-        m.damageMeter, note = ASS.DamageMeter.Capture()
-        if note then notes[#notes + 1] = "Damage meter: " .. note end
+        m.damageMeter, note, info.meterSecondHidden = ASS.DamageMeter.Capture()
+        if note then
+            info.meterNote = "Damage meter: " .. note
+            notes[#notes + 1] = info.meterNote
+        end
     end
-    return m, notes
+    return m, notes, info
 end
 
 ------------------------------------------------------------
@@ -980,14 +985,28 @@ function UISetup.PlanSave()
     if not rec.complete then p.blocked = "The last apply didn't finish: apply it again, or use Save As." return done() end
     if rec.restored then p.blocked = "A backup was restored since the apply: apply it again, or use Save As." return done() end
     p.id, p.version, p.name = e.id, e.version, e.name
-    local cur, notes = UISetup.Capture()
-    for _, n in ipairs(notes) do p.notes[#p.notes + 1] = n end
+    local cur, notes, info = UISetup.Capture()
+    info = info or {}
     local old, new = e.modules, Copy(e.modules)
     local skipped = rec.skipped or {}
-    if old.damageMeter and cur.damageMeter and not skipped.damageMeter then
-        new.damageMeter = ASS.DamageMeter.Merge(cur.damageMeter, old.damageMeter)
-        if Serialize(new.damageMeter) ~= Serialize(old.damageMeter) then
-            p.changes[#p.changes + 1] = "Damage meter: update the two windows (Current Segment)."
+    local meter = old.damageMeter and cur.damageMeter and not skipped.damageMeter
+    -- A hidden window 2 here is a skipped part (#98, E10, owner): the entry
+    -- keeps its saved window 2, and the capture's Save As note (a hidden
+    -- window becomes Healing Done) doesn't apply.
+    local keepSecond = meter and info.meterSecondHidden
+    for _, n in ipairs(notes) do
+        if not (keepSecond and n == info.meterNote) then p.notes[#p.notes + 1] = n end
+    end
+    if meter then
+        local now = cur.damageMeter
+        if keepSecond then
+            now = Copy(now)
+            now.windows[2] = Copy(old.damageMeter.windows[2])
+            p.notes[#p.notes + 1] = "Damage meter window 2: hidden here; kept as saved."
+        end
+        new.damageMeter = ASS.DamageMeter.Merge(now, old.damageMeter)
+        for _, line in ipairs(ASS.DamageMeter.Changes(old.damageMeter, new.damageMeter)) do
+            p.changes[#p.changes + 1] = line
         end
     end
     if old.layout and cur.layout and not skipped.layout and not SameLayout(cur.layout, old.layout) then
@@ -1044,6 +1063,17 @@ function UISetup.PlanSave()
             end
         end
         new.chat.tabs = #tabs > 0 and tabs or nil
+        -- Save updates the setup's own tabs; a tab only this character has
+        -- isn't added (Save As takes every tab). Said, not silent (#98, E12).
+        local named = {}
+        for _, t in ipairs(old.chat.tabs or {}) do named[t.name] = true end
+        for i = 1, w and w.n or 0 do
+            if IsTab(w, i) and not named[w[i].name] and #w[i].groups > 0 then
+                named[w[i].name] = true
+                p.notes[#p.notes + 1] = ('Chat tab "%s" isn\'t in this setup, and Save doesn\'t add it: use Save As to include it.')
+                    :format(w[i].name)
+            end
+        end
     end
     p.modules = new
     p.noop = Serialize(new) == Serialize(old) or nil

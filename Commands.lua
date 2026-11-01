@@ -75,7 +75,8 @@ local COPY = {
     ["conflict-copy"] = "That is a conflict copy: settle it with /altsync resolve.",
     ["not-conflict"] = "That conflict was already settled.",
     ["rename-empty"] = "Give it a name: /altsync rename <id or name> <new name>.",
-    ["bad-modules"] = "Its saved data is damaged (no list of covered slots); nothing was changed.",
+    ["bad-modules"] = "Its saved data is damaged; nothing was changed.",
+    ["bad-copy"] = "That copy claims another class or category than its loadout, so its version can't be kept. Keep yours to settle it.",
     ["bad-category"] = "That category isn't one this class can save into.",
 }
 local function Copy(err) return COPY[err] or tostring(err) end
@@ -518,7 +519,9 @@ function Commands.save(arg)
         for _, l in ipairs(lines) do Print(l) end
         return
     end
-    local lines = { ("%s and %s change in %q."):format(Plural(#m.changed, "slot"), Plural(#m.keysChanged, "key"), name) }
+    -- Every key the save writes counts: changed, and added (#98, E13).
+    local lines = { ("%s and %s change in %q."):format(Plural(#m.changed, "slot"),
+        Plural(#m.keysChanged + #(m.keysAdded or {}), "key"), name) }
     if (m.added or 0) > 0 then
         lines[#lines + 1] = ("Adds %s this loadout didn't cover yet (%d with an action, counted above)."):format(
             Plural(m.added, "slot"), m.addedFull or 0)
@@ -542,6 +545,33 @@ function Commands.save(arg)
         items[#items + 1] = { slot = slot, text = text }
     end
     BySlot(lines, items)
+    -- Each character macro whose text or icon the save changes, by name,
+    -- with its first differing line, as the Load preview shows (#98, E15).
+    local was, now, changedMacros = m.beforeMacros or {}, m.modules.macros or {}, {}
+    for n, def in pairs(now) do
+        local old = was[n]
+        if not old or ASS.Game.Normalize(old.body) ~= ASS.Game.Normalize(def.body) or old.icon ~= def.icon then
+            changedMacros[#changedMacros + 1] = n
+        end
+    end
+    table.sort(changedMacros)
+    if #changedMacros > 0 then
+        lines[#lines + 1] = ("Character macros saved with new text or icon: %d"):format(#changedMacros)
+        for _, n in ipairs(changedMacros) do
+            local old, def = was[n], now[n]
+            if not old then
+                local first = (ASS.Game.Normalize(def.body) .. "\n"):match("^(.-)\n")
+                lines[#lines + 1] = ("  %s: new to this loadout; line 1: %s"):format(n, ASS.Code(first))
+            else
+                local what = {}
+                local from, to, line = FirstDiff(old.body, def.body)
+                if from then what[#what + 1] = "text changes" end
+                if old.icon ~= def.icon then what[#what + 1] = "icon changes" end
+                lines[#lines + 1] = ("  %s: %s"):format(n, table.concat(what, ", "))
+                if from then lines[#lines + 1] = ("    line %d: %s -> %s"):format(line, ASS.Code(from), ASS.Code(to)) end
+            end
+        end
+    end
     local Game = ASS.Game
     for _, cmd in ipairs(m.keysChanged) do
         local keys = m.modules.bindings and m.modules.bindings[cmd] or {}
@@ -1012,6 +1042,10 @@ function Commands.ResolveCopy(copyId, choice)
     local name = tostring(copy.conflict.name or root.name)
     local deletion = copy.conflict.deletion
     local apiChoice = (deletion and choice == "theirs") and "delete" or choice
+    -- Refused before a preview that couldn't be confirmed (Catalog.Resolve).
+    if apiChoice ~= "mine" and (copy.kind ~= root.kind or copy.class ~= root.class or copy.category ~= root.category) then
+        Print("Not resolved: " .. Copy("bad-copy")) return
+    end
     local line
     if deletion and root.deleted then
         line = ("%q is deleted on both accounts; it stays deleted."):format(name)

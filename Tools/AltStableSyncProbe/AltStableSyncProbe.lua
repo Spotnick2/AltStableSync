@@ -9,7 +9,9 @@
 -- `/fp steps sync audit` (audit #95, docs/AUDIT.md section 5) does the same
 -- for a UI setup and a loadout together, with the UI parts recorded too
 -- (layout, bar toggles, CVars, chat windows, meter windows), two full exits,
--- and the short checks the stubs can't answer.
+-- and the short checks the stubs can't answer. `/fp steps sync catalog` and
+-- `catalog2` (audit #98) take the two WoW accounts through catalog sync,
+-- an import, two Saves and a full exit of both clients.
 --
 -- It only READS: every Load, Restore, Save As and Import is the owner's own
 -- click. It never calls a mutating client function or an AltStableSync
@@ -1073,6 +1075,377 @@ NS._audit = { uiChanged = uiChanged, gameChanged = gameChanged, restoredL = rest
               UI_REQUIRED = UI_REQUIRED }
 
 ------------------------------------------------------------
+-- The catalog procedures (#98, docs/AUDIT.md section 8): the two WoW
+-- accounts online at once, each on its own client. Account A runs
+-- `/fp steps sync catalog`, account B `/fp steps sync catalog2`. Each
+-- records its own account's catalog (a digest of every entry, its local
+-- `previous` left out), its Link status and its loaded records, around a
+-- Save As that syncs, a rename on both while offline (one conflict copy each
+-- side), a resolution that settles both, an import, a Save that keeps what
+-- this character can't use, a UI Save over a hidden meter window 2, and a
+-- full exit of both clients. The two accounts' records are compared on disk
+-- afterwards (their digests must match). Records go to DB.catalog[role];
+-- a record may be taken again (sync takes a moment), the last one counts.
+------------------------------------------------------------
+
+local CPROC = { A = "catalog", B = "catalog2" }
+local CLABELS = { start = true, saved = true, synced = true, received = true, diverged = true, resolved = true,
+                  imported = true, keptBefore = true, keptAfter = true, meterBefore = true, meterAfter = true,
+                  final = true, afterExit = true }
+local ROOT = "SyncTest"                 -- one word, so the slash commands take it by name
+
+local function crun(role)
+    local R = DB and type(DB.catalog) == "table" and DB.catalog[role]
+    if type(R) ~= "table" or type(R.records) ~= "table" then error("no catalog run: start it from its first step", 0) end
+    return R
+end
+
+-- A canonical text: sorted keys, strings quoted. `dropPrevious` leaves out an
+-- entry's local-only `previous` (sync never carries it).
+local function canon(v, dropPrevious)
+    local t = type(v)
+    if t == "string" then return ("%q"):format(v) end
+    if t ~= "table" then return tostring(v) end
+    local keys = {}
+    for k in pairs(v) do if not (dropPrevious and k == "previous") then keys[#keys + 1] = k end end
+    table.sort(keys, function(x, y) return type(x) .. tostring(x) < type(y) .. tostring(y) end)
+    local out = {}
+    for _, k in ipairs(keys) do out[#out + 1] = "[" .. canon(k) .. "]=" .. canon(v[k]) end
+    return "{" .. table.concat(out, ",") .. "}"
+end
+
+-- Adler-32 as two 16-bit halves, the probe's own (independent of the addon).
+local function digest(s)
+    local a, b = 1, 0
+    for i = 1, #s do
+        a = (a + s:byte(i)) % 65521
+        b = (b + a) % 65521
+    end
+    return ("%04x%04x"):format(b, a)
+end
+
+local function linkState(A)
+    local L = type(A.Link) == "table" and A.Link or {}
+    local out = { state = L.state, why = L.why, peers = {} }
+    if type(L.sync) == "table" and type(L.sync.Peers) == "function" then
+        local ok, peers = pcall(L.sync.Peers)
+        for _, p in ipairs(ok and type(peers) == "table" and peers or {}) do
+            out.peers[#out.peers + 1] = { label = tostring(p.label), heard = p.heard and true or false, schema = p.schema }
+        end
+    end
+    return out
+end
+
+-- Record `label` for `role` ("A" | "B"): the catalog, the Link, this
+-- character's loaded records. Reads only.
+function NS.CatalogRecord(role, label)
+    local R = crun(role)
+    assert(CLABELS[label], "unknown catalog record " .. tostring(label))
+    local A = rawget(_G, "AltStableSync")
+    if type(A) ~= "table" or type(A.Ready) ~= "table" then error("AltStableSync isn't loaded", 0) end
+    local okR, ready, why = pcall(A.Ready.IsReady)
+    if not okR or not ready then error("not ready yet (" .. tostring(why) .. "): wait a moment, then Retry", 0) end
+    local presets = catalog()
+    local parts, entries = {}, {}
+    for _, id in ipairs(sortedKeys(presets)) do
+        local e = presets[id]
+        if type(e) == "table" then
+            parts[#parts + 1] = canon(id) .. "=" .. canon(e, true)
+            local c = type(e.conflict) == "table" and e.conflict or nil
+            -- `md`: the content's own digest, so an import can be matched to
+            -- the entry it was shared from.
+            entries[id] = { v = e.version, name = e.name, kind = e.kind, class = e.class, category = e.category,
+                            deleted = e.deleted and true or nil, of = c and c.of or nil,
+                            md = type(e.modules) == "table" and digest(canon(e.modules)) or nil }
+        end
+    end
+    local text = table.concat(parts, ";")
+    -- `writer`: this session's version token, so a version this client minted
+    -- (a Save, an import here) is told from one received by sync.
+    local rec = { entries = entries, digest = digest(text), size = #text, link = linkState(A), status = {},
+                  writer = type(A.writer) == "string" and A.writer or nil }
+    local L = type(A.Link) == "table" and A.Link or nil
+    for id, x in pairs(entries) do
+        if not x.deleted and not x.of and L and type(L.EntryStatus) == "function" then
+            local ok, st = pcall(L.EntryStatus, presets[id])
+            rec.status[id] = ok and st or nil
+        end
+    end
+    local char = rawget(_G, "AltStableSyncChar")
+    local loaded = type(char) == "table" and type(char.loaded) == "table" and char.loaded or {}
+    local lo, ui = loaded.loadout, loaded.ui
+    if type(lo) == "table" then
+        local e = presets[lo.id]
+        rec.loadout = { id = lo.id, entryVersion = type(e) == "table" and e.version or nil, unavailable = {}, actions = {} }
+        for slot, reason in pairs(type(lo.unavailable) == "table" and lo.unavailable or {}) do
+            rec.loadout.unavailable[slot] = tostring(reason)
+        end
+        local m = type(e) == "table" and type(e.modules) == "table" and e.modules
+        for slot, a in pairs(m and type(m.actions) == "table" and m.actions or {}) do rec.loadout.actions[slot] = canon(a) end
+    end
+    if type(ui) == "table" then
+        local e = presets[ui.id]
+        local m = type(e) == "table" and type(e.modules) == "table" and e.modules.damageMeter
+        rec.ui = { id = ui.id, entryVersion = type(e) == "table" and e.version or nil,
+                   meter2 = type(m) == "table" and type(m.windows) == "table" and canon(m.windows[2]) or nil }
+    end
+    local stamp = api("time")
+    rec.at = stamp and stamp() or 0
+    local taken = R.records[label] ~= nil
+    R.records[label] = rec
+    local live, copies = 0, 0
+    for _, x in pairs(entries) do
+        if not x.deleted then if x.of then copies = copies + 1 else live = live + 1 end end
+    end
+    local heard = 0
+    for _, p in ipairs(rec.link.peers) do if p.heard then heard = heard + 1 end end
+    local summary = ("%s%s: %d live, %d conflict copies, digest %s (%d bytes); Link %s, %d peer(s) heard"):format(
+        label, taken and " (taken again)" or "", live, copies, rec.digest, rec.size, tostring(rec.link.state), heard)
+    say(summary)
+    return summary
+end
+
+local function crec(role, label) return DB and type(DB.catalog) == "table" and type(DB.catalog[role]) == "table"
+    and DB.catalog[role].records[label] end
+
+-- The live entry named `name` (not a conflict copy): id, entry.
+local function named(r, name)
+    for id, x in pairs(r and r.entries or {}) do
+        if not x.deleted and not x.of and x.name == name then return id, x end
+    end
+end
+-- Live conflict copies of `root`.
+local function copiesOf(r, root)
+    local n = 0
+    for _, x in pairs(r and r.entries or {}) do if not x.deleted and x.of == root then n = n + 1 end end
+    return n
+end
+local function liveLoadouts(r)
+    local n = 0
+    for _, x in pairs(r and r.entries or {}) do if not x.deleted and not x.of and x.kind == "loadout" then n = n + 1 end end
+    return n
+end
+
+local CSTEPS, CAT = {}, {}
+local function cstep(role, id, def)
+    local list = CSTEPS[role]
+    list[#list + 1] = def
+    if id then CAT[role][id] = #list end
+end
+local function cyes(role, id)
+    local fp = rawget(_G, "ForeverProbeDB")
+    local recs = type(fp) == "table" and type(fp.steps) == "table" and type(fp.steps.records) == "table" and fp.steps.records
+    local r = recs and recs["AltStableSyncProbe/" .. CPROC[role]]
+    local res = type(r) == "table" and type(r.results) == "table" and r.results[CAT[role][id]]
+    return type(res) == "table" and res.status == "yes"
+end
+local function cgated(role, fn, ...)
+    local ids = { ... }
+    return function()
+        for _, id in ipairs(ids) do
+            if not cyes(role, id) then
+                local _, detail = fn()
+                return false, "unverified: no Yes at step " .. tostring(CAT[role][id]) .. "; " .. tostring(detail)
+            end
+        end
+        return fn()
+    end
+end
+
+local function cstart(role)
+    return function()
+        DB.catalog = type(DB.catalog) == "table" and DB.catalog or {}
+        local okG, guid = pcall(api("UnitGUID"), "player")
+        local stamp = api("time")
+        DB.catalog[role] = { id = stamp and stamp() or 0, guid = okG and guid or nil, records = {} }
+        say(("catalog run %s started (account %s)"):format(tostring(DB.catalog[role].id), role))
+        local loaded = NS.State()
+        return loaded, "account " .. role
+    end
+end
+local function crecord(role, label) return function() return NS.CatalogRecord(role, label) end end
+
+-- The checks, each on this account's own records.
+local function linked(role)
+    return function()
+        local r = crec(role, "start")
+        if not r then return false, "no start record" end
+        if r.link.state ~= "on" then return false, "Link is " .. tostring(r.link.state) .. " (" .. tostring(r.link.why) .. ")" end
+        for _, p in ipairs(r.link.peers) do
+            if p.heard and not p.schema then return true, "linked to " .. p.label end
+        end
+        return false, "no other account heard yet (or on another schema): wait, then Back and Record again"
+    end
+end
+local function rootIs(role, label, name, copies)
+    return function()
+        local r = crec(role, label)
+        if not r then return false, "no " .. label .. " record" end
+        local id = named(r, name)
+        if not id then return false, "no live entry named " .. name end
+        DB.catalog[role].root = DB.catalog[role].root or id
+        if DB.catalog[role].root ~= id then return false, name .. " isn't the run's entry (" .. id .. ")" end
+        local n = copiesOf(r, id)
+        if n ~= copies then return false, ("%d live conflict copies of %s, expected %d"):format(n, name, copies) end
+        return true, ("%s is %s; %d conflict copies"):format(name, id, n)
+    end
+end
+local function confirmed(role, label)
+    return function()
+        local R, r = DB.catalog[role], crec(role, label)
+        if not (r and R.root) then return false, "no record or no entry yet" end
+        local st = r.status[R.root]
+        return st == "confirmed", "status of " .. ROOT .. ": " .. tostring(st)
+    end
+end
+local function settled(role)
+    return function()
+        local r = crec(role, "final")
+        if not r then return false, "no final record" end
+        local copies, pending = 0, {}
+        for id, x in pairs(r.entries) do
+            if not x.deleted and x.of then copies = copies + 1 end
+            if not x.deleted and not x.of and r.status[id] ~= "confirmed" then pending[#pending + 1] = tostring(x.name) end
+        end
+        if copies > 0 then return false, copies .. " live conflict copies" end
+        if #pending > 0 then return false, "not confirmed: " .. table.concat(pending, ", ") end
+        return true, "no conflict copies; every live entry confirmed; digest " .. r.digest
+    end
+end
+local function survived(role)
+    return function()
+        local a, b = crec(role, "final"), crec(role, "afterExit")
+        if not (a and b) then return false, "records missing" end
+        return a.digest == b.digest, ("final %s, after the exit %s"):format(a.digest, b.digest)
+    end
+end
+-- Was `version` minted by this client in this session (not received)?
+local function mine(r, version)
+    return type(r.writer) == "string" and type(version) == "string" and version:sub(1, #r.writer + 1) == r.writer .. ":"
+end
+-- The import: exactly one new live loadout, made here, holding exactly the
+-- content of the entry it was shared from (SyncA, as this account holds it).
+local function imported()
+    local a, b = crec("B", "resolved"), crec("B", "imported")
+    local root = DB.catalog.B and DB.catalog.B.root
+    if not (a and b and root) then return false, "records missing" end
+    local new = {}
+    for id, x in pairs(b.entries) do
+        if not x.deleted and not x.of and x.kind == "loadout" and not a.entries[id] then new[#new + 1] = id end
+    end
+    if #new ~= 1 then return false, #new .. " new live loadouts since the resolution, expected 1" end
+    local x, src = b.entries[new[1]], b.entries[root]
+    if not mine(b, x.v) then return false, "the new loadout wasn't made on this client (" .. tostring(x.v) .. ")" end
+    if not (src and x.md == src.md) then return false, "the new loadout's content isn't SyncA's" end
+    return true, ("%s imported here with SyncA's content (%s)"):format(tostring(x.name), tostring(x.md))
+end
+local function keptBefore()
+    local r = crec("B", "keptBefore")
+    local lo = r and r.loadout
+    if not lo then return false, "no loaded loadout on this character" end
+    local n = 0
+    for _ in pairs(lo.unavailable) do n = n + 1 end
+    return n > 0, n .. " slots the load couldn't fill"
+end
+local function keptAfter()
+    local a, b = crec("B", "keptBefore"), crec("B", "keptAfter")
+    if not (a and b and a.loadout and b.loadout) then return false, "records missing" end
+    if a.loadout.id ~= b.loadout.id then return false, "another loadout is loaded now" end
+    if a.loadout.entryVersion == b.loadout.entryVersion then return false, "no Save since the load (the entry's version didn't move)" end
+    -- The Save is this client's (a version received by sync proves nothing).
+    if not mine(b, b.loadout.entryVersion) then
+        return false, "the entry's new version wasn't saved here (" .. tostring(b.loadout.entryVersion) .. ")"
+    end
+    local lost, moved = {}, 0
+    for slot in pairs(a.loadout.unavailable) do
+        if a.loadout.actions[slot] ~= b.loadout.actions[slot] then lost[#lost + 1] = tostring(slot) end
+    end
+    for slot, x in pairs(b.loadout.actions) do
+        if not a.loadout.unavailable[slot] and a.loadout.actions[slot] ~= x then moved = moved + 1 end
+    end
+    for slot in pairs(a.loadout.actions) do
+        if not a.loadout.unavailable[slot] and b.loadout.actions[slot] == nil then moved = moved + 1 end
+    end
+    if #lost > 0 then return false, "the Save changed kept slots: " .. table.concat(lost, ", ") end
+    if moved == 0 then return false, "the Save saved no button change" end
+    return true, ("the Save here saved %d changed slot(s) and kept every slot the load couldn't fill"):format(moved)
+end
+local function meterKept()
+    local a, b = crec("B", "meterBefore"), crec("B", "meterAfter")
+    if not (a and b and a.ui and b.ui) then return false, "no applied UI setup recorded" end
+    if a.ui.id ~= b.ui.id then return false, "another UI setup is applied now" end
+    if not a.ui.meter2 then return false, "that setup has no meter window 2" end
+    -- A Save happened here: the entry moved to a version this client minted.
+    if a.ui.entryVersion == b.ui.entryVersion or not mine(b, b.ui.entryVersion) then
+        return false, "no Save here since the apply (version " .. tostring(b.ui.entryVersion) .. ")"
+    end
+    return a.ui.meter2 == b.ui.meter2, "saved here; window 2: " .. tostring(b.ui.meter2)
+end
+
+for role, proc in pairs(CPROC) do
+    CSTEPS[role], CAT[role] = { rev = 1, title = ("Catalog audit, account %s (#98)"):format(role) }, {}
+end
+
+-- Account A drives.
+cstep("A", nil, { text = "Start the catalog audit on account A. It reads AltStableSync's catalog and Link.", button = "Start",
+    run = cstart("A") })
+cstep("A", nil, { text = "Log your other WoW account in on a second client (a lower-level character there helps later) and start  /fp steps sync catalog2  on it. Here, type  /altsync link . Then press Next." })
+cstep("A", nil, { text = "Record the start (both accounts should see each other).", button = "Record", run = crecord("A", "start"),
+    check = linked("A") })
+cstep("A", nil, { text = "Save As a loadout here named exactly  " .. ROOT .. "  (Save As..., any category). Then press Record.",
+    button = "Record", run = crecord("A", "saved"), check = rootIs("A", "saved", ROOT, 0) })
+cstep("A", nil, { text = "On account B: wait until /altsync list shows " .. ROOT .. ", then type  /altsync link refresh  there. Wait 5 seconds, then press Record here.",
+    button = "Record", run = crecord("A", "synced"), check = confirmed("A", "synced") })
+cstep("A", nil, { text = "On BOTH accounts type  /altsync link off . Here:  /altsync rename " .. ROOT .. " SyncA ; on B:  /altsync rename " .. ROOT .. " SyncB . Then  /altsync link on  on both. Wait 10 seconds, then press Record.",
+    button = "Record", run = crecord("A", "diverged"), check = rootIs("A", "diverged", "SyncA", 1) })
+cstep("A", nil, { text = "Resolve here:  /altsync resolve SyncA mine  (keep this account's). On B:  /altsync link refresh . Wait 10 seconds, then press Record.",
+    button = "Record", run = crecord("A", "resolved"), check = rootIs("A", "resolved", "SyncA", 0) })
+cstep("A", nil, { text = "Share: in the panel browse SyncA, Manage... > Share..., Ctrl+C. Paste it into Import on account B (B's procedure says when). Then press Next." })
+cstep("A", nil, { text = "Do account B's steps up to its last Record before the exit. Then  /altsync link refresh  on both, wait 10 seconds, and press Record here.",
+    button = "Record", run = crecord("A", "final"), check = settled("A"), screenshot = "catalog A: final" })
+cstep("A", nil, { text = "Exit BOTH clients fully (not /reload), relaunch both, and log the same characters in.", reload = "exit" })
+cstep("A", "exit", { text = "Did you exit both clients fully and relaunch them?", ask = true })
+cstep("A", nil, { text = "Wait until /altsync link shows account B, then press Record. The catalog should be exactly as before the exit.",
+    button = "Record", run = crecord("A", "afterExit"), check = cgated("A", survived("A"), "exit") })
+cstep("A", nil, { text = "Type /reload (or press Reload now) so the results are written to disk.", reload = true })
+
+-- Account B follows.
+cstep("B", nil, { text = "Start the catalog audit on account B (a lower-level character helps: one that hasn't learned everything).",
+    button = "Start", run = cstart("B") })
+cstep("B", nil, { text = "Type  /altsync link  here. Then press Next." })
+cstep("B", nil, { text = "Record the start.", button = "Record", run = crecord("B", "start"), check = linked("B") })
+cstep("B", nil, { text = "When account A has saved " .. ROOT .. ", wait until /altsync list shows it here, then press Record.",
+    button = "Record", run = crecord("B", "received"), check = rootIs("B", "received", ROOT, 0) })
+cstep("B", nil, { text = "Type  /altsync link refresh  (account A confirms). Then press Next." })
+cstep("B", nil, { text = "Type  /altsync link off  here (A does too), then  /altsync rename " .. ROOT .. " SyncB  (A renames to SyncA). Then  /altsync link on  on both. Wait 10 seconds, then press Record.",
+    button = "Record", run = crecord("B", "diverged"), check = rootIs("B", "diverged", "SyncB", 1) })
+cstep("B", nil, { text = "When account A has resolved it, type  /altsync link refresh  here, wait 10 seconds, then press Record.",
+    button = "Record", run = crecord("B", "resolved"), check = rootIs("B", "resolved", "SyncA", 0) })
+cstep("B", "import", { text = "Import account A's share string here (Import..., paste, Review..., Import). It needs a character of the same class as A's. Did it import?", ask = true })
+cstep("B", nil, { text = "Record after the import.", button = "Record", run = crecord("B", "imported"), check = cgated("B", imported, "import") })
+cstep("B", nil, { text = "Load a loadout here that holds spells this character hasn't learned (its preview lists slots emptied or left empty). Then press Record.",
+    button = "Record", run = crecord("B", "keptBefore"), check = keptBefore })
+cstep("B", nil, { text = "Move one button on the bars, then Save (the preview lists the entries it keeps). Confirm, then press Record.",
+    button = "Record", run = crecord("B", "keptAfter"), check = keptAfter })
+cstep("B", nil, { text = "UI setup tab: Apply a setup whose meter has window 2. Then close meter window 2 (its X), and press Record.",
+    button = "Record", run = crecord("B", "meterBefore") })
+cstep("B", "meter", { text = "Change one setting the setup holds (Raid frames: class colors, say), so Save has something to save. Then UI setup tab: Save.... Does its preview say \"Damage meter window 2: hidden here; kept as saved.\"? Confirm it either way.", ask = true })
+cstep("B", nil, { text = "Record after that Save.", button = "Record", run = crecord("B", "meterAfter"), check = cgated("B", meterKept, "meter") })
+cstep("B", nil, { text = "Type  /altsync link refresh  on both, wait 10 seconds, then press Record (account A records its final too).",
+    button = "Record", run = crecord("B", "final"), check = settled("B"), screenshot = "catalog B: final" })
+cstep("B", nil, { text = "Exit BOTH clients fully (not /reload), relaunch both, and log the same characters in.", reload = "exit" })
+cstep("B", "exit", { text = "Did you exit both clients fully and relaunch them?", ask = true })
+cstep("B", nil, { text = "Wait until /altsync link shows account A, then press Record.", button = "Record",
+    run = crecord("B", "afterExit"), check = cgated("B", survived("B"), "exit") })
+cstep("B", nil, { text = "Type /reload (or press Reload now) so the results are written to disk.", reload = true })
+
+Probe:Steps(CPROC.A, CSTEPS.A)
+Probe:Steps(CPROC.B, CSTEPS.B)
+NS.CAT = CAT
+NS._catalog = { canon = canon, digest = digest, settled = settled, survived = survived, keptAfter = keptAfter,
+                meterKept = meterKept, imported = imported }
+
+------------------------------------------------------------
 -- Commands (on-demand records go to DB.adhoc, never the rehearsal)
 ------------------------------------------------------------
 
@@ -1120,7 +1493,7 @@ boot:SetScript("OnEvent", function(_, _, name)
     if type(DB.adhoc) ~= "table" then DB.adhoc = {} end
     Probe:UseLog(DB.log, MAX_LOG)
     DB.loads = (DB.loads or 0) + 1
-    say("loaded (" .. DB.loads .. " loads). /fp steps sync stress, /fp steps sync audit, or /fp sync for the commands")
+    say("loaded (" .. DB.loads .. " loads). /fp steps sync stress, audit, catalog or catalog2, or /fp sync for the commands")
 end)
 
 NS._test = { Probe = Probe, DB = function() return DB end }

@@ -22,7 +22,7 @@ local A, L, S, B
 
 local function boot()
     WoW.reset()
-    for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Game.lua", "Pet.lua", "Backups.lua",
+    for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Game.lua", "Pet.lua", "Share.lua", "Backups.lua",
                          "Ready.lua", "Loadout.lua", "DamageMeter.lua", "UISetup.lua", "Commands.lua" }) do
         assert(loadfile(f))("AltStableSync", {})
     end
@@ -171,7 +171,9 @@ local function alt(opts)
 end
 
 local function spell(id, name, policy, class) return { kind = "spell", id = id, name = name, policy = policy or "highest", class = class } end
-local function cmacro(name) return { kind = "macro", name = name, scope = "char" } end
+-- A character macro action carries its text, as Capture writes it.
+local MACRO_BODY = { Heal = NEW, Aegis = "/cast Power Word: Shield", Bless = "/cast Power Word: Fortitude" }
+local function cmacro(name) return { kind = "macro", name = name, body = MACRO_BODY[name], scope = "char" } end
 
 -- Loadout L, covering Action Bar 1's two pages and stance page 1.
 local function loadout()

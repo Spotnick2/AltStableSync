@@ -297,6 +297,16 @@ A loadout as text, for another character, the beta → live move one loadout at 
   stripped of whitespace, the decompressed data, macro bodies (256 raw bytes, the measured 255 plus
   the server's newline), and keys per command. Anything outside them refuses the whole string.
 - **Share checks its own output** the same way, so every string it shows imports on this build.
+- **One validator, three modes** (`Share.GoodModules`, #98). **Strict** is the string's, above.
+  **Lenient** guards the catalog itself: sync receipt, Create, Replace and Undo. It checks every
+  known part the same way, and lets through as they are what A35 keeps from another build: an
+  unknown module key, any named binding command (Load binds managed ones only), an action in a
+  slot this build doesn't manage (listed by Load, never applied), a key list with a hole, and
+  macro names up to 64 bytes (the client's limit isn't measured). **Comparison** guards a
+  character's loaded record before Save's merge reads it: lenient, plus a macro action's icon and
+  a pet layout's unfilled slots, which only a record carries. A malformed known part is refused
+  in every mode; a damaged record gets "load it again", never a Lua error. An entry holding a
+  lenient-only part can't be shared ("cant-share").
 - **Import is Save As from a string:** a preview shows every macro's full text, with `|` doubled so
   no markup renders. The confirm creates one new entry from what Review froze, which sync then
   carries like any Save As. It never loads anything.
@@ -776,7 +786,11 @@ refuses any backup with a kind.
   upgrade that prevents schema-10/11 code from ignoring this backup part and releasing its pin.
 - **Save** replaces the entry this character applied, at that version, only after a complete apply and
   no restore since. It updates only the parts the entry has; a part or setting the apply skipped keeps
-  the entry's value, as do unknown keys and groups this client doesn't know. Chat saves the windows as
+  the entry's value, as do unknown keys and groups this client doesn't know. A damage meter window 2
+  that is hidden here is skipped the same way (owner, 2026-10-30, #98): the entry keeps its saved
+  window 2 and the preview says so, since the capture's default (Healing Done, unlocked) is for
+  Save As. Meter changes are previewed field by field. A chat tab only this character has isn't
+  added by Save (Save As takes it), and the preview says so. Chat saves the windows as
   they are now, so groups a window had before an additive apply join the entry; the preview lists each
   group added or removed. **Save As** captures all five parts;
   a tab that receives no message types (channels only, or an addon's console tab) is left out and
@@ -908,6 +922,8 @@ offline while A saved three times) a plain fast-forward rather than a conflict.
 | Incoming version is in local `ancestors` (older than what we hold) | ignore |
 | Local version is in incoming `ancestors`, or the id is unknown | **replace** (fast-forward). Local `previous` is untouched; it is local Save recovery only |
 | Anything else (both accounts saved from a common version, or the lag exceeded 20 saves) | **divergent**: keep the local entry; store the incoming one whole as conflict copy `<id>~<incoming version>`, named "<name> (from <char>)", with a one-line notice. If that conflict id already exists, live **or tombstoned**, ignore it |
+| A field of the wrong type, or a loadout whose modules the catalog's validator refuses (#98) | reject (`bad-entry`); local untouched; that version isn't asked for again this session |
+| A known id (or a mirror copy of a root here) with another kind, class or category (#98) | reject: an entry keeps its identity under one id, so nothing moves to another list silently. A copy stored before its root arrived (nothing to check it against then) can't give its content or deletion to a root of another identity: "Keep this version" is refused, "Keep mine" settles it |
 | Unknown or newer envelope schema | reject; local untouched |
 | Older envelope schema (an older build: 1-12 #5, or #5's wire 2) | reject, nothing imported or remembered as refused; that peer shows "sync paused" until it updates, then the same versions are fetched |
 
@@ -934,6 +950,13 @@ offline while A saved three times) a plain fast-forward rather than a conflict.
     **Keep mine** mints a live version descending from both (the only way a live version may
     descend from a tombstone).
 - There is no field merging, ever.
+- **What is stored of a received entry** (#98): its 14 known fields only (`id, kind, class,
+  category, name, version, parent, ancestors, created, updated, provenance, modules, deleted,
+  conflict`), never `previous`; display times only when `date` can show them; provenance as text.
+  A loadout's modules pass the catalog's **lenient** validator (below, "Share strings"). An
+  entry's decompressed data is capped at 256 KB and a manifest's or request's at 64 KB: the cap
+  refuses the checksum and the parse, while the client's decompressor itself has no limit. A
+  manifest part needs whole numbers, `1 <= p <= n <= 1000`, at most 100 ids and its batch's `n`.
 - **Accepted edge case:** when two incomparable tombstones meet, the losing one's history is dropped
   (the tie-break keeps one whole version). A delayed older message from that losing branch can then
   arrive as one extra conflict copy, even though that account had already deleted the entry. The
@@ -1124,6 +1147,16 @@ schema refusal, readiness and combat gates, macro ownership, read-back, or catal
   emptied). Doc fix: safety rule 1 described a resume; the code abandons into the ring. Codex cut a
   mandatory fuzz with a plan-derived oracle in favour of deterministic rows with hand-stated outcomes.
   Rejected: nothing material.
+- **2026-10-31, audit of the three catalog inputs (#98, `docs/AUDIT.md` part 2):** seven plan
+  rounds with gpt-6-astra (high), consensus in round 7. Accepted: an entry keeps its kind, class
+  and category under one id (a successor that changes them was silently moving a loadout to
+  another list); one module validator in strict, lenient and comparison modes, so sync refuses
+  malformed loadouts while A35's kept content still saves and a damaged loaded record is refused
+  before the merge reads it; decompressed-size caps on sync messages, stated as refusing the
+  parse rather than bounding the decompressor; a field allowlist and display-time checks on
+  receipt; manifest part checks including the batch's `n`; a two-client in-game procedure whose
+  catalogs are compared on disk without the local `previous`; corrected mutation oracles. Owner:
+  a hidden meter window 2 is a skipped part on UI Save. Rejected: nothing material.
 - **2026-10-21, UI setups and the first-login offer (#10):** four plan rounds with gpt-6-astra (high),
   ending in **consensus**. Accepted:
   - chat on Apply additive, and Restore keeping created tabs (closing one loses its channels and

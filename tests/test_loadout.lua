@@ -33,7 +33,7 @@ local MAIN_MACROS = {
 
 local function boot()
     WoW.reset()
-    for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Game.lua", "Pet.lua", "Backups.lua",
+    for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Game.lua", "Pet.lua", "Share.lua", "Backups.lua",
                          "Ready.lua", "Loadout.lua", "Commands.lua" }) do
         assert(loadfile(f))("AltStableSync", {})
     end
@@ -2004,8 +2004,12 @@ do
     eq("#46: a clean book is complete", A.Game.Spellbook().complete, true)
     -- Entry limitations are left alone too.
     boot(); ready()
+    -- A missing definition is damage: the catalog refuses it at Create (#98),
+    -- so the stored copy loses it after the fact.
     local e = custom({ actions = { [3] = { kind = "macro", name = "NoDef", scope = "char", body = "/x" },
-                                   [4] = { kind = "unsupported", what = "flyout" } } })
+                                   [4] = { kind = "unsupported", what = "flyout" } },
+                       macros = { NoDef = { body = "/x" } } })
+    e.modules.macros = nil
     alt({ actions = { [3] = { item = 4540 }, [4] = { item = 4540 } } })
     local plan = L.Plan(e)
     eq("#46: missing definition left alone", byReason(plan.skips)[3], "macro definition missing")
@@ -2611,7 +2615,7 @@ do
     G.bindFault = nil
     local db, ch = AltStableSyncDB, AltStableSyncChar
     WoW.reset()
-    for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Game.lua", "Pet.lua", "Backups.lua",
+    for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Game.lua", "Pet.lua", "Share.lua", "Backups.lua",
                          "Ready.lua", "Loadout.lua", "Commands.lua" }) do
         assert(loadfile(f))("AltStableSync", {})
     end

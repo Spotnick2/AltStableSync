@@ -1,5 +1,8 @@
 # Audit: does the preview match the apply, and does restore really restore?
 
+Part 1 (#95, sections 1-5): preview, apply and restore. Part 2 (#98, sections 6-9): the three
+inputs that write the catalog: sync receipt, Share/Import, the Save merge.
+
 Issue #95, branch `audit/preview-restore`, on `main` after the v1.0.0 release notes (#94); launch
 2026-11-04. The question
 audited, as one property: **the state after Load/Apply equals the state the preview described, and
@@ -161,3 +164,130 @@ Not in the procedure (a second character, optional): the meter's existing-shown 
 window-2 cases; the 10 s toggle cache window (apply, restore within 10 s, `/reload`, full exit).
 
 _Results: pending the owner's session; they go here and to `docs/forever-api-notes.md` "Build 70532"._
+
+# Part 2: the three inputs (#98)
+
+Issue #98, branch `audit/catalog-inputs`. Part 1 (#95) left out the three inputs that write the
+catalog from something this character didn't capture: **sync receipt** (the owner's other
+account), **Share/Import** (anyone), and the **Save merge** (this character's capture merged with
+the loaded baseline). The property, one sentence per input:
+- **Sync:** a received entry changes the catalog exactly as `docs/DESIGN.md`'s receive table says,
+  never game state and never a character's baseline; it keeps its identity (id, kind, class,
+  category); nothing a peer sends makes the catalog unusable, resurrects or erases an entry
+  unreviewed, or stops the two catalogs converging.
+- **Import:** the entry created equals what Review froze and the preview described, or nothing is
+  created; every string Share makes imports; nothing from a string reaches game state.
+- **Save:** the entry after Save equals what its preview described, part by part; every character
+  macro whose text or icon changes is named with its first differing line; inherited content
+  this character can't see is kept; the confirm refuses on any difference.
+
+The plan was reviewed with Codex gpt-6-astra (high) in seven rounds to consensus (2026-10-31);
+`docs/DESIGN.md` "Review record" has the summary.
+
+Facts met on the way:
+- **The client's `DecompressString` has no output limit.** The caps below refuse the checksum and
+  the parse of an oversized result; they can't bound the decompression itself.
+- **The real data passes the new boundary.** Measured read-only on 2026-10-31 with a script over
+  the SavedVariables files (never written): both live accounts (24 entries, 13 live, the same
+  file since the 2026-10-22 transfer), both beta accounts, every `previous`, and the 10 loaded
+  loadout records in 33 beta character files (the 5 live character files hold none yet). Every
+  entry passes receipt and the catalog's validator, every live loadout passes Import's, every
+  live loadout put through `Loadout.Merge` as a Save's baseline yields output and a comparison
+  that pass: **zero refusals**.
+
+## 6. Trace matrix
+
+| Input | Boundary check | Catalog write | Said to the player | Declared exceptions (where said) |
+|---|---|---|---|---|
+| `ENT`, a new id | envelope schema, checksum, decompressed size (256 KB, E2); `ValidIncoming`: field types, `parent` a string, a conflict id `<of>~<v>`, a loadout's modules by the **lenient** validator (E1) | `Sanitize`: the 14 known fields only, display times kept only when `date` can show them, provenance as text (E3) | a refusal: "Ignored a saved setup from X that this version can't read (why)", once | an unknown module key of a newer build is kept (never applied, A35) |
+| `ENT`, a known id | the same, plus **the local entry's kind, class and category** (E5) | ignore / fast-forward / conflict copy, by the receive table | a conflict: one line per copy | — |
+| `ENT`, a mirror conflict copy | the same, plus **its root's identity** when the root is here (E5) | ignored when the root holds its version; else stored | — | a copy arriving before its root is stored and resolvable once the root arrives (row) |
+| `ENT`, refused | any of the above | none; that version isn't asked for again this session | once per reason | — |
+| `MAN` | decompressed size (64 KB, E2); `b` a string, `c`, `p`, `n` whole numbers, `1 <= p <= n <= 1000`, at most 100 ids, the same `n` as the batch's other parts (E4) | none (requests only) | — | — |
+| `REQ` | decompressed size (64 KB) | none (an answer) | — | — |
+| A share string | raw, stripped and decompressed sizes; the **strict** validator (`Share.Valid`: five fields, allowlists, managed commands, 16-byte macro names) | none until the preview's confirm; then `Catalog.Create`, which re-checks the name and the modules | every macro body in the preview; refusals by code | an entry holding what only the lenient validator admits (a newer build's part, an unmanaged command, an action outside this build's slots, a 17-64-byte macro name) can't be shared: "cant-share" |
+| Save (loadout) | the loaded record before `Merge` reads it: baseline lenient, comparison in **comparison** mode (also a macro action's icon and a pet's unfilled slots), `unavailable` slot -> reason (E1) | `Catalog.Replace` (lenient again) | every slot, key (changed **and added**, E13) and changed macro with its first differing line (E15); kept and dropped entries | a damaged record: "This character's record of the loaded setup is damaged. Load it again." (Save refused, Save As warns and captures plainly) |
+| Save As (loadout) | the same, when a record exists | `Catalog.Create` | as before | — |
+| Undo my last Save | `previous` by the lenient validator | a new version | — | an older build's `previous` with a malformed known part: "bad-modules" |
+| Save (UI setup) | the parts the apply didn't skip | `Catalog.Replace` | each change; the meter **field by field** (E10) | meter window 2 hidden here: kept as saved, said (E10, owner); a chat tab only this character has isn't added, said (E12); a stale `userPlaced` from another build stays (E11, declared) |
+
+## 7. Findings and fixes
+
+Read first, confirmed by a test that fails with the fix reverted ("witness"). The witnesses were
+run by a script that reverts one fix, runs its test, counts the reds and restores the file
+(`restored: green` after each).
+
+| # | Finding | Fix | Witness (reverted -> red) |
+|---|---|---|---|
+| E1 | A received loadout's modules were checked for their cover only: `actions = "bad"` was stored, and Load raised on it. The same damage in a character's loaded record made Save raise | One validator in three modes (`Share.GoodModules`): **strict** for share strings, **lenient** for receipt, Create, Replace and Undo (known parts checked; what A35 keeps passes as it is: unknown module keys, any named command, an action outside this build's slots, holed key lists, 64-byte macro names), **comparison** for the loaded record, checked before `Merge` reads it | receipt: 19 red ("E1 receipt, ...: refused"); the record check: 12 red ("baseline actions a string: Save doesn't raise") |
+| E2 | No decompressed-size cap on sync messages | 256 KB per entry (a worst-case loadout is 22 KB), 64 KB per manifest or request, refused as "too-long" before the checksum and the parse | 4 red ("E2: never parsed", a genuine envelope with a 256 KB unknown part) |
+| E3 | Every top-level field a peer sent was stored and sent on; display times of any type reached `date` | The 14 known fields; times kept only when `date` can show them; provenance as text; the panel shows "?" for any other stored time | allowlist: 1 red (the exact key set); panel guard: 2 red ("the panel renders it") |
+| E4 | A manifest's part numbers, counts and ids per part were unchecked; a stray part with another batch's `n` could complete a manifest | Whole numbers, `1 <= p <= n <= 1000`, at most 100 ids, the batch's own `n` | same `n`: 1 red; `p <= n`: 4 red; ids: 3 red |
+| E5 | A successor could change an entry's kind, class or category: the loadout left its class list with no conflict (Codex, plan round 1) | A known id, and a mirror copy of a root that is here, keep that entry's identity, else "bad-entry". A copy stored before its root (nothing to check it against then) never gives its content or deletion to a root of another identity: "Keep this version" is refused ("bad-copy", also by the command before any preview); "Keep mine" settles it (Codex on PR #99) | 15 red ("E5 kind: refused"); the copy: 3 red; the resolve guard: 5 red ("E5: its version can't be kept"); the command's check: 1 red |
+| E10 | UI Save over a meter window 2 hidden since the apply wrote the capture's default (Healing Done, unlocked) over the saved window, with one line "update the two windows" | Owner: a hidden window 2 is a skipped part; the entry keeps it and the preview says so. Meter changes listed field by field | 5 red ("E10 hidden: window 2 kept as saved"); the listing: 1 red |
+| E12 | UI Save never adds a tab only this character has, and didn't say so | One preview line per such tab | 1 red |
+| E13 | Save's first line counted changed keys, not added ones | Both counted | 1 red |
+| E15 | Save named "macro text or icon changed" per slot, never the text | Each changed character macro by name, with its first differing line, as the Load preview does | 2 red |
+
+Dropped or declared after reading:
+- **E6** one chat line per received conflict: polish, not a defect.
+- **E7** the Import validator against what Capture, Merge and PlanSaveAs produce: they match;
+  the round-trip property is the witness.
+- **E8** macro names are bounded in bytes; the client's own limit (letters or bytes) isn't
+  measured. The catalog takes 64 bytes; a share string keeps 16.
+- **E9** Import confirms exactly what Review froze: covered by `test_share_import`.
+- **E11** a stale `userPlaced` from another build survives a Save on Forever: declared, by the
+  meter design's "saved intent retained" (`docs/DESIGN.md`).
+- **E14** a definition no slot uses is dropped on Save (reachable only through damage); a refused
+  Replace records nothing; both Save fingerprints cover what the confirm commits.
+
+Test fixtures that held shapes no capture writes (character macro actions without their text,
+opaque tags, a key list that was a string) now hold real ones. Cases that test a damaged entry
+create a valid one and damage the stored copy, since `Create` now refuses it.
+
+## 8. Round-trip rows
+
+`tests/test_roundtrip_catalog.lua` (121 checks), each outcome stated by hand:
+
+| Row | What it does | Expected, by hand |
+|---|---|---|
+| C1 | A successor changing kind, class, category; a tombstone in another category; a mirror copy of another class | each "bad-entry", the catalog byte-identical; the same successor keeping its identity fast-forwards |
+| C2 | Eight malformed module shapes at receipt (a string for actions, a numeric command, a string key list, an out-of-set action without a kind, a macro without its definition, a record's macro icon, a record's pet `unavailable`, a 65-byte macro name) | each refused, nothing stored; stored by hand, the first makes Load's plan raise |
+| C3 | An entry with junk fields, a `previous`, an out-of-range and a table time, extra provenance, non-string ancestors | stored with exactly the nine fields it validly has; the panel shows it, "Saved ? by Alt-Realm" |
+| C4 | A genuine 256 KB envelope | never parsed, not stored, said, not asked for again; the real-size entry arrives |
+| C5 | Manifest parts: `p > n`, 101 ids, a fractional `n`, a stray part with another `n` | none completes a manifest; the batch's own parts do |
+| C6 | A conflict copy before its root; then one claiming another class | stored, "unknown-id" until the root arrives, then resolved and retired; the mismatched one can't be kept ("bad-copy", the root untouched, the command refuses without a preview) and "Keep mine" settles it, the root keeping its class and content |
+| C7 | A legacy entry with every A35 shape and a 20-byte macro name: Create, sync, Load, Save | stored and synced; the unmanaged slot listed and never applied; the Save keeps every A35 part and passes the catalog's check; Share answers "cant-share"; a plain capture round-trips |
+| C8 | A damaged baseline, comparison or `unavailable`; a `previous` damaged or holding only an unknown key; a record's own fields | Save refused with the damaged-record line and Save As warns, nothing raised or written; Undo "bad-modules" / done with the key kept; a comparison with a macro icon and a pet's unfilled slots saves; those fields in a share string are "bad-share" |
+| C9 | A Save after editing a macro's second line and binding a key the loadout lacks | "1 slot and 1 key change", the macro named with "line 2: (no line) -> /say on my way"; the saved entry differs from the loaded one in exactly `actions.2.body`, `bindings.ACTIONBUTTON3.1`, `macros.Heal.body` |
+
+E10 and E12 rows are in `tests/test_damage_meter.lua` and `tests/test_uisetup.lua`.
+
+## 9. In game
+
+`/fp steps sync catalog` on account A and `/fp steps sync catalog2` on account B, both online
+(`Tools/AltStableSyncProbe`, deployed with `pwsh Tools/deploy-probe.ps1`; tested end to end in
+`tests/test_probe_catalog.lua`). Each records its own catalog as a digest of every entry
+(`previous` left out: it is local), its Link status and its loaded records. Two-account sync has
+never run on live before (`docs/RUNBOOK.md` step 7).
+
+| Step | What it proves |
+|---|---|
+| start (both) | the two accounts see each other on live |
+| Save As `SyncTest` on A -> received on B -> confirmed on A | the transport, both clients, LibAccountSync r5 on live |
+| rename on both with Link off -> one conflict copy each side -> resolve on A -> B fast-forwards | the receive rules settle both catalogs |
+| Share on A -> Import on B | a string made by one account imports on the other |
+| Load and Save on a character that can't use everything | the Save keeps every slot the load couldn't fill |
+| UI Save over a hidden meter window 2 | the saved window 2 stays as it was (E10) |
+| final -> full exit of both clients -> afterExit (both) | each catalog survives the exit unchanged |
+
+Afterwards I parse both accounts' `AltStableSync.lua`, drop each entry's `previous` and compare
+the presets' content with sorted keys (not the whole files: backups and the minimap setting are
+account-local). The two `final` digests must match each other too. Each step that claims an
+operation proves it happened here (Codex on PR #99): the import is the one new loadout, minted by
+this client's session token and holding exactly SyncA's content (by digest); each Save's new version
+is this client's, and the loadout Save changed a button. A version received by sync, a cancelled
+Save or an unrelated new loadout fails the step.
+
+_Results: pending the live client (2026-11-04; nothing can run in game before launch), tracked in
+#100. They go here and to `docs/forever-api-notes.md` under the build they ran on._
