@@ -186,7 +186,9 @@ function M.Capture()
     if out.windows[2].geometry and out.windows[2].geometry.userPlaced == nil then
         note = note .. " Secondary position/size saved; this build's unreadable placement flag is left alone."
     end
-    return out, note
+    -- Third: window 2 is hidden or missing here, so its part above is the
+    -- default, not this character's (Save keeps the saved window, #98).
+    return out, note, not s.windows[2].shown
 end
 local function Fit(g)
     local ok, fits = pcall(function()
@@ -394,15 +396,45 @@ function M.Merge(now, old)
     end
     return out
 end
+local function TypeLabel(t)
+    local label = tostring(t)
+    for k, v in pairs(Enum and Enum.DamageMeterType or {}) do
+        if v == t then label = k:gsub("(%l)(%u)", "%1 %2") end
+    end
+    return label
+end
+local function Place(g)
+    if not g then return "not saved" end
+    return ("%.0f, %.0f; %.0f x %.0f"):format(g.x, g.y, g.width, g.height)
+end
+-- What a Save changes in the saved part, field by field (#98, E10).
+function M.Changes(old, new)
+    local lines = {}
+    for i = 1, 2 do
+        local a, b = old.windows[i] or {}, new.windows[i] or {}
+        if a.meterType ~= b.meterType then
+            lines[#lines+1] = ("Damage meter %d: %s -> %s"):format(i, TypeLabel(a.meterType), TypeLabel(b.meterType))
+        end
+        if a.sessionType ~= b.sessionType then
+            local function s(v) return v == 1 and "Current Segment" or "Overall" end
+            lines[#lines+1] = ("Damage meter %d: %s -> %s"):format(i, s(a.sessionType), s(b.sessionType))
+        end
+        if a.locked ~= b.locked then
+            lines[#lines+1] = ("Damage meter %d: %s -> %s"):format(i, a.locked and "locked" or "unlocked",
+                b.locked and "locked" or "unlocked")
+        end
+        if not Same(a.geometry, b.geometry) then
+            lines[#lines+1] = ("Damage meter %d position/size: %s -> %s"):format(i, Place(a.geometry), Place(b.geometry))
+        end
+    end
+    return lines
+end
 function M.Describe(part)
     local lines = {}
     for i = 1, 2 do
         local w = part.windows[i]
         if w and w.exists ~= false then
-            local label = tostring(w.meterType)
-            for k, v in pairs(Enum and Enum.DamageMeterType or {}) do
-                if v == w.meterType then label = k:gsub("(%l)(%u)", "%1 %2") end
-            end
+            local label = TypeLabel(w.meterType)
             local placement = w.geometry and (", position %.0f, %.0f; size %.0f x %.0f")
                 :format(w.geometry.x, w.geometry.y, w.geometry.width, w.geometry.height) or ""
             lines[#lines+1] = ("Damage meter %d: %s, %s, %s%s"):format(i, label,

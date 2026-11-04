@@ -17,7 +17,7 @@ local A, L, P
 
 local function boot()
     WoW.reset()
-    for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Envelope.lua", "Game.lua", "Pet.lua", "Backups.lua",
+    for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Envelope.lua", "Game.lua", "Pet.lua", "Share.lua", "Backups.lua",
                          "Ready.lua", "Loadout.lua", "Commands.lua" }) do
         assert(loadfile(f))("AltStableSync", {})
     end
@@ -323,16 +323,18 @@ do
     check("other family: says so", text(plan):find("no pet bar saved for this pet", 1, true) ~= nil, text(plan))
 
     -- A damaged layout is never loaded.
-    local dmg = A.Catalog.Copy(entry.modules)
-    dmg.pet[4].slots[3] = nil
-    local eDmg = assert(A.Catalog.Create("loadout", { class = "HUNTER", category = "general", name = "Damaged" }, dmg))
+    -- Damaged on disk: the catalog refuses it at Create (#98), so the
+    -- stored copy is broken after the fact.
+    local eDmg = assert(A.Catalog.Create("loadout", { class = "HUNTER", category = "general", name = "Damaged" },
+        A.Catalog.Copy(entry.modules)))
+    eDmg.modules.pet[4].slots[3] = nil
     hunter(bearB())
     plan = L.Plan(eDmg)
     check("damaged: no ops", #plan.pet.ops == 0 and plan.pet.note == "the saved Bear pet bar is damaged")
     -- An ability with id 0 and no name never empties the slot it's in.
-    local zero = A.Catalog.Copy(entry.modules)
-    zero.pet[4].slots[6] = { kind = "spell", id = 0 }
-    local eZero = assert(A.Catalog.Create("loadout", { class = "HUNTER", category = "general", name = "Zero" }, zero))
+    local eZero = assert(A.Catalog.Create("loadout", { class = "HUNTER", category = "general", name = "Zero" },
+        A.Catalog.Copy(entry.modules)))
+    eZero.modules.pet[4].slots[6] = { kind = "spell", id = 0 }    -- damaged on disk (#98)
     hunter(bearB())
     plan = L.Plan(eZero)
     check("id 0: damaged, no ops", #plan.pet.ops == 0 and plan.pet.note == "the saved Bear pet bar is damaged")

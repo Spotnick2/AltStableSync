@@ -39,6 +39,7 @@ local RETRY = 5                      -- seconds before a manifest nobody took is
 local POLL = 10                      -- seconds between Peers() polls
 local MAX_OUT = 3                    -- outstanding requests per peer
 local REQ_TIMEOUT = 30               -- seconds before an outstanding request expires (and may be asked again)
+local MAX_PARTS = 1000               -- parts in one manifest (100 ids each: far beyond any catalog)
 
 Sync.BATCH_SIZES, Sync.MAX_OUT, Sync.REQ_TIMEOUT, Sync.INTERVAL, Sync.RETRY =
     BATCH_SIZES, MAX_OUT, REQ_TIMEOUT, INTERVAL, RETRY
@@ -222,9 +223,21 @@ function Sync.New(o)
     -- a session whose message carries a lower sid than the current one's is
     -- an older one arriving late, ignored for good; a higher one replaces the
     -- current session (the peer reloaded), and the replaced one is ignored.
+    -- A whole number in 1..max.
+    local function Whole(x, max)
+        return type(x) == "number" and x >= 1 and x <= max and x == math.floor(x)
+    end
+
     local function OnManifest(p, m, sid)
-        if type(m.b) ~= "string" or type(m.c) ~= "number" or type(m.p) ~= "number"
-            or type(m.n) ~= "number" or type(m.l) ~= "table" then return end
+        -- One part of one batch (#98, E4): a counter, 1 <= p <= n, at most
+        -- one batch of ids, and the same n as the batch's other parts.
+        if type(m.b) ~= "string" or not Whole(m.c, 2 ^ 31) or not Whole(m.n, MAX_PARTS)
+            or not Whole(m.p, m.n) or type(m.l) ~= "table" then return end
+        local ids = 0
+        for _ in pairs(m.l) do
+            ids = ids + 1
+            if ids > BATCH_SIZES[1] then return end
+        end
         if p.sessions[m.b] then return end                         -- a replaced session
         if p.session ~= m.b then
             if p.session and sid and p.sessionSid and sid < p.sessionSid then
@@ -241,7 +254,7 @@ function Sync.New(o)
             p.acc = { c = m.c, n = m.n, got = {}, l = {} }
         end
         local acc = p.acc
-        if acc.got[m.p] then return end
+        if acc.n ~= m.n or acc.got[m.p] then return end
         acc.got[m.p] = true
         for id, v in pairs(m.l) do
             if type(id) == "string" and type(v) == "string" then
@@ -319,7 +332,7 @@ function Sync.New(o)
         end
         p.heard = true
         if kind == "ENT" then return OnEntry(p, body) end
-        local m, why = Env.Unpack(body)
+        local m, why = Env.Unpack(body, Env.MESSAGE_CBOR_MAX)
         if not m then Incompatible(p, why) return end
         p.schema = nil
         if kind == "MAN" then return OnManifest(p, m, tonumber(sid)) end

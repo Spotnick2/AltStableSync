@@ -25,6 +25,9 @@ WoW.reset()
 assert(loadfile("Core.lua"))("AltStableSync", {})
 assert(loadfile("Categories.lua"))("AltStableSync", {})
 assert(loadfile("Catalog.lua"))("AltStableSync", {})
+assert(loadfile("Game.lua"))("AltStableSync", {})
+assert(loadfile("Pet.lua"))("AltStableSync", {})
+assert(loadfile("Share.lua"))("AltStableSync", {})
 assert(loadfile("Envelope.lua"))("AltStableSync", {})
 assert(loadfile("Plugins/Link/Sync.lua"))("AltStableSyncLink", {})
 WoW.fire("ADDON_LOADED", "AltStableSync")
@@ -849,7 +852,7 @@ do
         local lib, inst = fakeLib(messages)
         LibStub = function(name, silent) if name == "LibAccountSync-1.0" then return lib end end
         if disabledCore then AltStableSyncDB = { schema = 99 } end
-        for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Envelope.lua", "Game.lua", "Pet.lua", "Backups.lua",
+        for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Envelope.lua", "Game.lua", "Pet.lua", "Share.lua", "Backups.lua",
                              "Ready.lua", "Loadout.lua", "Preview.lua", "Commands.lua" }) do
             assert(loadfile(f))("AltStableSync", {})
         end

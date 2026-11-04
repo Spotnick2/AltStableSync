@@ -525,4 +525,31 @@ boot({forever=true,[2]={damageMeterType=2,sessionType=1}})
 e=entry(); p=S.Plan(e)
 check("D6 forever, window 2 already shown: no such line",table.concat(S.Describe(p),"\n"):find("can't be hidden again",1,true)==nil)
 
+-- UI Save over a window 2 the player hid since the apply (#98, E10): the
+-- capture's default (Healing Done, unlocked) is for Save As; Save keeps the
+-- saved window 2 and says so. A shown window 2's changes are listed and saved.
+do
+    boot()
+    local saved={windows={{meterType=0,sessionType=1,locked=true},{meterType=0,sessionType=1,locked=true}}}
+    e=entry(saved); r=apply(e)
+    check("E10 setup: applied",r and not r.failed)
+    window(2).shown=false
+    p=S.PlanSave()
+    check("E10 hidden: Save plans",not p.blocked,tostring(p.blocked))
+    eq("E10 hidden: window 2 kept as saved",A.UISetup.Serialize(p.modules.damageMeter.windows[2]),A.UISetup.Serialize(saved.windows[2]))
+    local notes=table.concat(p.notes,"\n")
+    check("E10 hidden: said",notes:find("Damage meter window 2: hidden here; kept as saved.",1,true)~=nil,notes)
+    check("E10 hidden: the Save As note isn't shown",not notes:find("becomes Healing Done",1,true),notes)
+    check("E10 hidden: no window 2 change listed",not table.concat(p.changes,"\n"):find("Damage meter 2",1,true),table.concat(p.changes,"\n"))
+    check("E10 hidden: nothing to save",p.noop)
+    -- Shown again and unlocked: listed field by field and saved.
+    window(2).shown=true
+    window(2).locked=false; U.meter[2].locked=false
+    p=S.PlanSave()
+    local changes=table.concat(p.changes,"\n")
+    check("E10 shown: the lock change listed",changes:find("Damage meter 2: locked -> unlocked",1,true)~=nil,changes)
+    check("E10 shown: saved",S.Save(p)~=nil)
+    eq("E10 shown: window 2 unlocked in the entry",A.Catalog.Get(e.id).modules.damageMeter.windows[2].locked,false)
+end
+
 finish("damage meter")

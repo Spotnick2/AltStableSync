@@ -20,6 +20,11 @@ local INT_MAX = 2147483647
 local NAME_MAX = 240         -- bytes; the Save As box takes 60 letters
 local MACRO_BODY_MAX = 256   -- bytes, raw: 255 plus the newline the server appends (measured)
 local KEYS_MAX = 16          -- keys on one command
+-- A macro name: 16 bytes in a share string; 64 in the catalog, since the
+-- client's own limit (letters or bytes) isn't measured (#98, E8).
+local MACRO_NAME = { strict = 16, lenient = 64, comparison = 64 }
+local COMMAND_MAX = 64       -- bytes: an unmanaged binding command's name (lenient)
+local KIND_MAX = 32          -- bytes: the kind of an action in a slot this build doesn't manage
 local FAMILIES_MAX, RANGES_MAX = 64, 64
 local PET_SLOTS = 10
 local MODULE_KEYS = { actions = true, bindings = true, macros = true, cover = true, pet = true }
@@ -65,9 +70,14 @@ end
 local SPELL = { kind = true, id = true, name = true, policy = true, class = true }
 local ITEM = { kind = true, id = true }
 local MACRO = { kind = true, name = true, body = true, scope = true }
+-- The loaded record's comparison also carries a macro action's icon (Merge
+-- puts it there, Loadout.lua): never in a catalog entry or a share string.
+local MACRO_COMPARED = { kind = true, name = true, body = true, scope = true, icon = true }
 local UNSUPPORTED = { kind = true, what = true }
 
-local function GoodAction(a, macros)
+local function Icon(v) return v == nil or Int(v) or Str(v, 256, true) end
+
+local function GoodAction(a, macros, mode)
     if type(a) ~= "table" then return false end
     if a.kind == "spell" then
         return Only(a, SPELL) and Int(a.id) and (a.name == nil or Str(a.name, 100, true))
@@ -75,7 +85,11 @@ local function GoodAction(a, macros)
     elseif a.kind == "item" then
         return Only(a, ITEM) and Int(a.id)
     elseif a.kind == "macro" then
-        if not (Only(a, MACRO) and Str(a.name, 16, true) and Str(a.body, MACRO_BODY_MAX, false, true)) then return false end
+        local fields = mode == "comparison" and MACRO_COMPARED or MACRO
+        if not (Only(a, fields) and Str(a.name, MACRO_NAME[mode], true) and Str(a.body, MACRO_BODY_MAX, false, true)
+                and Icon(a.icon)) then
+            return false
+        end
         if a.scope == "char" then return macros[a.name] ~= nil end
         return a.scope == "account"
     elseif a.kind == "unsupported" then
@@ -85,31 +99,49 @@ local function GoodAction(a, macros)
 end
 
 local DEF = { body = true, icon = true }
-local function GoodMacros(m)
+local function GoodMacros(m, mode)
     if type(m) ~= "table" then return false end
     local n = 0
     for name, def in pairs(m) do
         n = n + 1
         if n > ASS.Game.MAX_CHAR_MACROS then return false end
-        if not Str(name, 16, true) or type(def) ~= "table" or not Only(def, DEF) then return false end
+        if not Str(name, MACRO_NAME[mode], true) or type(def) ~= "table" or not Only(def, DEF) then return false end
         if not Str(def.body, MACRO_BODY_MAX, false, true) then return false end
-        if def.icon ~= nil and not Int(def.icon) and not Str(def.icon, 256, true) then return false end
+        if not Icon(def.icon) then return false end
     end
     return true
 end
 
-local function GoodBindings(b)
+-- Strict: the commands this build captures, nothing else. Otherwise any
+-- command with a name (an older or newer build's, kept by Save, A35; Load
+-- binds managed commands only, so it is inert), with the same key bounds.
+local function GoodBindings(b, mode)
     if type(b) ~= "table" then return false end
     local managed = {}
     for _, cmd in ipairs(ASS.Game.COMMANDS) do managed[cmd] = true end
     for cmd, keys in pairs(b) do
-        if not managed[cmd] then return false end
-        if not List(keys, KEYS_MAX, function(k) return Str(k, 32, true) end) then return false end
+        if mode == "strict" then
+            if not managed[cmd] then return false end
+        elseif not Str(cmd, COMMAND_MAX, true) then
+            return false
+        end
+        local function key(k) return Str(k, 32, true) end
+        if mode == "strict" then
+            if not List(keys, KEYS_MAX, key) then return false end
+        else
+            -- Keys by position: a hole is allowed (Load reads up to maxn, so
+            -- a missing first key never hides the second).
+            if type(keys) ~= "table" then return false end
+            for i, k in pairs(keys) do
+                if not (Int(i) and i <= KEYS_MAX) or not key(k) then return false end
+            end
+        end
     end
     return true
 end
 
 local LAYOUT = { family = true, locale = true, slots = true }
+local LAYOUT_COMPARED = { family = true, locale = true, slots = true, unavailable = true }
 local TOKEN, PETSPELL = { kind = true, token = true }, { kind = true, id = true, name = true }
 local function GoodPetSlot(s)
     if s == false then return true end
@@ -119,13 +151,27 @@ local function GoodPetSlot(s)
     return false
 end
 
-local function GoodPet(p)
+-- A map of slots a load couldn't fill: { [slot] = reason }.
+local function GoodUnavailable(u, max)
+    if type(u) ~= "table" then return false end
+    for k, why in pairs(u) do
+        if not (Int(k) and k <= max) or not Str(why, 64, true) then return false end
+    end
+    return true
+end
+
+local function GoodPet(p, mode)
     if type(p) ~= "table" then return false end
+    -- A comparison's layout may list the pet slots its load couldn't fill
+    -- (Loadout.Load's record, read by Pet.Merge).
+    local fields = mode == "comparison" and LAYOUT_COMPARED or LAYOUT
     local n = 0
     for fam, layout in pairs(p) do
         n = n + 1
-        if n > FAMILIES_MAX or not Int(fam) or type(layout) ~= "table" or not Only(layout, LAYOUT) then return false end
-        if not Str(layout.family, 32, true) then return false end
+        if n > FAMILIES_MAX or not Int(fam) or type(layout) ~= "table" or not Only(layout, fields) then return false end
+        if layout.unavailable ~= nil and not GoodUnavailable(layout.unavailable, PET_SLOTS) then return false end
+        -- A family name is the client's, in its language: 64 bytes in the catalog.
+        if not Str(layout.family, mode == "strict" and 32 or 64, true) then return false end
         if layout.locale ~= nil and not Str(layout.locale, 32, true) then return false end
         if type(layout.slots) ~= "table" then return false end
         for k in pairs(layout.slots) do
@@ -151,23 +197,53 @@ end
 
 local SHARE = { kind = true, class = true, category = true, name = true, modules = true }
 
+-- A loadout's modules, in one of three modes (#98, E1):
+--   "strict"     a share string, from anyone: only the parts this build
+--                captures, managed commands only, 16-byte macro names;
+--   "lenient"    a catalog entry (received by sync, or Create, Replace and
+--                Undo here): the known parts checked the same way, while
+--                what A35 keeps from an older or newer build passes as it
+--                is - an unknown module key, any named binding command, an
+--                action in a slot this build doesn't manage (listed by Load,
+--                never applied) - and macro names up to 64 bytes;
+--   "comparison" the loaded record's `after`: lenient, plus the fields only
+--                a record carries (a macro action's icon, a pet layout's
+--                unavailable slots).
+-- A malformed known part is refused in every mode.
+function Share.GoodModules(m, mode)
+    mode = mode or "strict"
+    if not MACRO_NAME[mode] then return false end
+    if type(m) ~= "table" or not GoodCover(m.cover) then return false end
+    if mode == "strict" and not Only(m, MODULE_KEYS) then return false end
+    local macros = m.macros or {}
+    if m.macros ~= nil and not GoodMacros(m.macros, mode) then return false end
+    if m.actions ~= nil then
+        if type(m.actions) ~= "table" then return false end
+        local managed = ASS.Game.IS_SLOT
+        for slot, a in pairs(m.actions) do
+            if not (Int(slot) and slot <= ASS.Cover.MAX) then return false end
+            if mode ~= "strict" and not managed[slot] then
+                if type(a) ~= "table" or not Str(a.kind, KIND_MAX, true) then return false end
+            elseif not GoodAction(a, macros, mode) then
+                return false
+            end
+        end
+    end
+    if m.bindings ~= nil and not GoodBindings(m.bindings, mode) then return false end
+    if m.pet ~= nil and not GoodPet(m.pet, mode) then return false end
+    return true
+end
+
 -- Whether `x` is a share this build can import: true, or false.
 function Share.Valid(x)
     if type(x) ~= "table" or not Only(x, SHARE) or x.kind ~= "loadout" then return false end
     if not (Str(x.class, 32, true) and Str(x.category, 32, true) and Str(x.name, NAME_MAX, true)) then return false end
-    local m = x.modules
-    if type(m) ~= "table" or not Only(m, MODULE_KEYS) or not GoodCover(m.cover) then return false end
-    local macros = m.macros or {}
-    if m.macros ~= nil and not GoodMacros(m.macros) then return false end
-    if m.actions ~= nil then
-        if type(m.actions) ~= "table" then return false end
-        for slot, a in pairs(m.actions) do
-            if not (Int(slot) and slot <= ASS.Cover.MAX) or not GoodAction(a, macros) then return false end
-        end
-    end
-    if m.bindings ~= nil and not GoodBindings(m.bindings) then return false end
-    if m.pet ~= nil and not GoodPet(m.pet) then return false end
-    return true
+    return Share.GoodModules(x.modules, "strict")
+end
+
+-- A record's map of slots the load couldn't fill: absent, or slot -> reason.
+function Share.GoodUnavailable(u)
+    return u == nil or GoodUnavailable(u, ASS.Cover.MAX)
 end
 
 ------------------------------------------------------------

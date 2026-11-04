@@ -13,6 +13,9 @@ local function boot()
     assert(loadfile("Core.lua"))("AltStableSync", {})
     assert(loadfile("Categories.lua"))("AltStableSync", {})
     assert(loadfile("Catalog.lua"))("AltStableSync", {})
+    assert(loadfile("Game.lua"))("AltStableSync", {})
+    assert(loadfile("Pet.lua"))("AltStableSync", {})
+    assert(loadfile("Share.lua"))("AltStableSync", {})
     assert(loadfile("Envelope.lua"))("AltStableSync", {})
     WoW.fire("ADDON_LOADED", "AltStableSync")
     return AltStableSync, AltStableSync.Catalog, AltStableSync.Envelope
@@ -30,7 +33,7 @@ end
 
 local entry = C.Create("loadout", { class = "PRIEST", category = "holy", name = "Raid",
     provenance = { sourceChar = "Karuzo-Elegia", build = "70245" } },
-    { actions = { [1] = { kind = "spell", id = 2050 }, [12] = { kind = "macro", name = "Heal", scope = "char" } },
+    { actions = { [1] = { kind = "spell", id = 2050 }, [12] = { kind = "macro", name = "Heal", body = "/cast Heal", scope = "char" } },
       bindings = { ACTIONBUTTON1 = { "1", "SHIFT-1" } },
       macros = { Heal = { body = "/cast Heal", icon = 135915 } }, cover = { { 1, 120 }, { 145, 180 } } })
 entry = C.Replace(entry.id, entry.modules, entry.version)   -- now it has a `previous`

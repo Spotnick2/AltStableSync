@@ -18,6 +18,12 @@
   shows the ranks. A restore names the macros it keeps. A slot the loadout has empty that holds
   something the backup can't put back (a mount, a flyout) is listed as left unchanged. Applying a
   setup that opens a second damage meter says when a restore can't close it again.
+- **Safer sync and saves** (audit #98). A saved setup that arrives from your other account is
+  checked whole before it's kept: a damaged one, or one claiming to move a loadout to another
+  class or category, is ignored and reported. A damaged record of what this character loaded
+  asks you to load it again instead of failing. Saving a UI setup while the second damage meter
+  window is closed keeps the window as saved, and says so. The Save preview counts every key it
+  adds and shows the first changed line of each macro it saves.
 - **Safer restores** (audit #95). A restore that can't store its own backup writes nothing. A
   keybinding save the client refuses is rolled back and reported. Chat changes stop before the next
   write when combat starts between two of them.

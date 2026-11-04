@@ -19,7 +19,7 @@ local A, L
 
 local function boot()
     WoW.reset()
-    for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Game.lua", "Pet.lua", "Backups.lua",
+    for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Game.lua", "Pet.lua", "Share.lua", "Backups.lua",
                          "Ready.lua", "Loadout.lua", "Commands.lua" }) do
         assert(loadfile(f))("AltStableSync", {})
     end
@@ -407,7 +407,9 @@ end
 do
     for label, def in pairs({ ["no body"] = { icon = NEW_ICON }, ["body a number"] = { body = 5, icon = NEW_ICON } }) do
         boot(); char()
-        local e = loadout(nil, { Heal = def })
+        -- Damaged on disk: the catalog refuses it at Create (#98).
+        local e = loadout()
+        e.modules.macros.Heal = def
         local plan = L.Plan(e)
         local why
         for _, s in ipairs(plan.skips) do if s.slot == 4 then why = s.reason end end

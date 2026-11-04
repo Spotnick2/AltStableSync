@@ -60,7 +60,7 @@ LibStub = nil
 dofile("Libs/LibStub/LibStub.lua")
 local lib = LoadAccountSync("AltStableSync")
 check("library loaded by the main addon", lib ~= nil)
-for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Envelope.lua", "Game.lua", "Pet.lua", "Backups.lua",
+for _, f in ipairs({ "Core.lua", "Categories.lua", "Catalog.lua", "Envelope.lua", "Game.lua", "Pet.lua", "Share.lua", "Backups.lua",
                      "Ready.lua", "Loadout.lua", "Preview.lua", "Commands.lua" }) do
     assert(loadfile(f))("AltStableSync", {})
 end
