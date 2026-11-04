@@ -1,18 +1,7 @@
 # Changelog
 
-## v1.0.0
+## v1.0.1
 
-- **Save your UI as a setup.** Capture an Edit Mode layout selection, shown action bars,
-  supported game settings, chat tabs and damage-meter windows. Preview before applying it
-  to another character; Save updates the setup applied here, Save As creates another, and
-  Delete asks before removing a saved setup.
-- **Keep two damage meters.** A setup can open a Healing Done window alongside Damage Done,
-  select Current Segment for both, and carry their meter types and lock states. It also
-  carries the second window's position and size when the client exposes them safely.
-- **Set up a new character deliberately.** The first-login welcome offers a saved UI setup.
-  The character changes only after you review and confirm it.
-- **Restore a UI change.** Applying a UI setup takes a backup first. The Backups view lets
-  you preview and restore the previous state.
 - **Previews say more** (audit #95). A load or restore that saves your keybindings says so, and
   that every key change in memory is saved with them. A spell replaced by another rank of itself
   shows the ranks. A restore names the macros it keeps. A slot the loadout has empty that holds
@@ -27,6 +16,20 @@
 - **Safer restores** (audit #95). A restore that can't store its own backup writes nothing. A
   keybinding save the client refuses is rolled back and reported. Chat changes stop before the next
   write when combat starts between two of them.
+
+## v1.0.0
+
+- **Save your UI as a setup.** Capture an Edit Mode layout selection, shown action bars,
+  supported game settings, chat tabs and damage-meter windows. Preview before applying it
+  to another character; Save updates the setup applied here, Save As creates another, and
+  Delete asks before removing a saved setup.
+- **Keep two damage meters.** A setup can open a Healing Done window alongside Damage Done,
+  select Current Segment for both, and carry their meter types and lock states. It also
+  carries the second window's position and size when the client exposes them safely.
+- **Set up a new character deliberately.** The first-login welcome offers a saved UI setup.
+  The character changes only after you review and confirm it.
+- **Restore a UI change.** Applying a UI setup takes a backup first. The Backups view lets
+  you preview and restore the previous state.
 
 ## v0.3.0
 
