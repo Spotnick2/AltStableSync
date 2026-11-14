@@ -42,6 +42,15 @@ jobs:
           bash tests/fetch_libaccountsync.sh "$RUNNER_TEMP/LibAccountSync"
           echo "LIBACCOUNTSYNC=$RUNNER_TEMP/LibAccountSync" >> "$GITHUB_ENV"
 
+      # The tests' scaffolding (WowTestKit) at the commit tests/kit.pin names,
+      # outside the checkout, checked to BE that commit. Its data for the
+      # pinned build stands in for the API dump, which is local only: event
+      # names and widget methods are checked here as strictly as locally.
+      - name: Fetch WowTestKit at its pin
+        run: |
+          bash tests/fetch_kit.sh "$RUNNER_TEMP/WowTestKit"
+          echo "WOWTESTKIT=$RUNNER_TEMP/WowTestKit" >> "$GITHUB_ENV"
+
       - name: Unit tests
         env:
           FOREVERPROBE_OPTIONAL: "1"   # ForeverProbe is private and local: test_probe.lua runs locally only

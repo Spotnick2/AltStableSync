@@ -2,13 +2,13 @@
 -- test_core.lua - SavedVariables init, schema refusal, build check, slash
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
+dofile("tests/wow_stubs.lua")
 local function anyLine(pattern)
-    for _, l in ipairs(WoW.chat()) do if l:find(pattern) then return true end end
+    for _, l in ipairs(WoW.chatLines) do if l:find(pattern) then return true end end
     return false
 end
 
-dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 
 -- Load the addon the way the client does: files first, then the SV file runs,
 -- then ADDON_LOADED.

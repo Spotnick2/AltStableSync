@@ -10,8 +10,8 @@
 -- /syncprobe macroedit (docs/forever-api-notes.md).
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 
 local G = WoW.game
@@ -72,7 +72,7 @@ end
 local function text(lines) return table.concat(lines, "\n") end
 local function has(s, sub) return s:find(sub, 1, true) ~= nil end
 local function chat(sub)
-    for _, l in ipairs(WoW.chat()) do if has(l, sub) then return true end end
+    for _, l in ipairs(WoW.chatLines) do if has(l, sub) then return true end end
     return false
 end
 
@@ -163,7 +163,7 @@ do
     eq("command: the tick box", A._shown and A._shown.check and A._shown.check.text, "Include character macros")
     eq("command: ticked by default", A._shown and A._shown.check and A._shown.check.checked, true)
     A._shown.onConfirm()
-    check("report: counts the update", chat("1 macro updated"), table.concat(WoW.chat(), " / "))
+    check("report: counts the update", chat("1 macro updated"), table.concat(WoW.chatLines, " / "))
 end
 
 -- A damaged cover blocks the plan; the preview still shows that refusal,
@@ -513,7 +513,7 @@ do
     boot(); char()
     e = loadout()
     A.Commands.load(e.name .. " nomacros")
-    check("command nomacros: shown", A._shown ~= nil, table.concat(WoW.chat(), " / "))
+    check("command nomacros: shown", A._shown ~= nil, table.concat(WoW.chatLines, " / "))
     eq("command nomacros: unticked", A._shown and A._shown.check and A._shown.check.checked, false)
     check("command nomacros: no update listed", A._shown and not has(text(A._shown.lines), "to update"))
     A._shown.check.onToggle(true)

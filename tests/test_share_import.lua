@@ -13,8 +13,8 @@
 --   * Escape closes only the top layer.
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 
 local G = WoW.game
@@ -57,7 +57,7 @@ local function ser(v, seen)
     return "{" .. table.concat(out, ",") .. "}"
 end
 local function persisted() return ser(AltStableSyncDB) .. "|" .. ser(AltStableSyncChar) end
-local function said(s) return table.concat(WoW.chat(), "\n"):find(s, 1, true) ~= nil end
+local function said(s) return table.concat(WoW.chatLines, "\n"):find(s, 1, true) ~= nil end
 local function capture() return assert(A.Loadout.Capture()) end
 local function entry(name, modules, category)
     return assert(A.Catalog.Create("loadout", { class = "PRIEST", category = category or "holy", name = name,
@@ -474,7 +474,7 @@ do
     local d = import()
     check("escape: import open, panel isn't a target", not panelEscapes())
     d.box:SetFocus()
-    d.box.scripts.OnEscapePressed(d.box)
+    d.box._scripts.OnEscapePressed(d.box)
     check("escape from the paste box: import closes", not d:IsShown())
     check("escape: the panel stays", P._Frame():IsShown())
     check("escape: same frame, panel not yet a target", not panelEscapes())

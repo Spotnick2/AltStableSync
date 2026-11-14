@@ -11,8 +11,8 @@
 -- persistence still need the in-game rehearsal (#13).
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 
 local G = WoW.game
@@ -705,13 +705,13 @@ do
     WoW.chatLines = {}
     local p = L.Plan(e)
     A.Commands.Report("load", L.Load(e, p), nil, p)
-    local said = table.concat(WoW.chat(), "\n")
+    local said = table.concat(WoW.chatLines, "\n")
     check("skipped only: honest message", said:find("Nothing applied") ~= nil, said)
     alt({ actions = {} })
     WoW.chatLines = {}
     p = L.Plan(e)
     A.Commands.Report("load", L.Load(e, p), nil, p)
-    said = table.concat(WoW.chat(), "\n")
+    said = table.concat(WoW.chatLines, "\n")
     check("waiting only: says it stays empty", said:find("1 slot stays empty", 1, true) ~= nil, said)
 end
 
@@ -799,8 +799,8 @@ do
           table.concat(A._shown.lines, "\n"):find("Kept: 1 macro that load created") ~= nil, table.concat(A._shown.lines, " / "))
     WoW.chatLines = {}
     A._shown.onConfirm()
-    check("kept on match: result says so too", table.concat(WoW.chat(), "\n"):find("Kept 1 macro") ~= nil,
-          table.concat(WoW.chat(), " / "))
+    check("kept on match: result says so too", table.concat(WoW.chatLines, "\n"):find("Kept 1 macro") ~= nil,
+          table.concat(WoW.chatLines, " / "))
 end
 
 -- Combat after the first of two macro creations: the second CreateMacro is
@@ -825,7 +825,7 @@ end
 do
     WoW.chatLines = {}
     A.Commands.Report("restore", { failed = "combat", at = "slot 1", changed = 0, keys = 0, created = 0 })
-    local said = table.concat(WoW.chat(), "\n")
+    local said = table.concat(WoW.chatLines, "\n")
     check("restore stopped: points to backups", said:find("/altsync backups") ~= nil and not said:find("restore op"), said)
 end
 
@@ -1077,7 +1077,7 @@ do
     boot(); ready(); save()
     WoW.chatLines = {}
     A.Commands.saveas("Everyday")
-    local said = table.concat(WoW.chat(), "\n")
+    local said = table.concat(WoW.chatLines, "\n")
     check("copy: duplicate name explained", said:find("already has a loadout with that name") ~= nil, said)
 end
 
@@ -1097,7 +1097,7 @@ do
     WoW.chatLines = {}; A._shown = nil
     A.Commands.rename("Nope Other")
     eq("rename unknown: no preview", A._shown, nil)
-    check("rename unknown: says so", table.concat(WoW.chat(), " "):find("No loadout named") ~= nil)
+    check("rename unknown: says so", table.concat(WoW.chatLines, " "):find("No loadout named") ~= nil)
 end
 
 -- #9: Save As always previews, and saves nothing before its confirm.
@@ -1120,7 +1120,7 @@ do
     WoW.chatLines = {}; A._shown = nil
     A.Commands.SaveAsEntry("Nope", "arms")
     eq("saveas: another class's category: no preview", A._shown, nil)
-    check("saveas: another class's category: says so", table.concat(WoW.chat(), " "):find("category", 1, true) ~= nil)
+    check("saveas: another class's category: says so", table.concat(WoW.chatLines, " "):find("category", 1, true) ~= nil)
     -- A duplicate that arrives (by sync) between the preview and the confirm: refused.
     A._shown = nil
     A.Commands.SaveAsEntry("Twin", "general")
@@ -1138,12 +1138,12 @@ do
     WoW.chatLines = {}
     A.Link = { OffNote = function() return "Link is off: test" end }
     saveasConfirmed("Noted")
-    local said = table.concat(WoW.chat(), " ")
+    local said = table.concat(WoW.chatLines, " ")
     check("saveas: off note after the result", (said:find("Link is off", 1, true) or 0) > (said:find("Saved", 1, true) or 1e9), said)
     A.Link = nil
     WoW.chatLines = {}
     saveasConfirmed("Plain")
-    said = table.concat(WoW.chat(), " ")
+    said = table.concat(WoW.chatLines, " ")
     check("saveas: no Link addon, no note", said:find("Saved", 1, true) and not said:find("Link is off", 1, true), said)
 end
 
@@ -1742,7 +1742,7 @@ do
     local widened
     for _, x in ipairs(A.Catalog.List("loadout", "PRIEST", "general")) do if x.name == "Widened" then widened = x end end
     eq("#5 widening confirm: changed plan refused", widened, nil)
-    check("#5 widening confirm: says so", table.concat(WoW.chat(), " "):find("changed since the preview", 1, true) ~= nil)
+    check("#5 widening confirm: says so", table.concat(WoW.chatLines, " "):find("changed since the preview", 1, true) ~= nil)
     check("#5 old entry: saved", L.Save(m) ~= nil)
     local e = A.Catalog.Get(entry.id)
     eq("#5 old entry: cover now every bar", R(e.modules.cover), "1-120,145-180")
@@ -1820,7 +1820,7 @@ end
 do
     boot(); ready(); main()
     A.Commands.save()
-    check("no record: Save points to Save As", table.concat(WoW.chat(), " "):find("saveas", 1, true) ~= nil)
+    check("no record: Save points to Save As", table.concat(WoW.chatLines, " "):find("saveas", 1, true) ~= nil)
     saveasConfirmed("Mine")
     eq("fresh Save As: record set", A.Catalog.Get(rec().id).name, "Mine")
     check("fresh Save As: comparison set", rec().after ~= nil)
@@ -1836,12 +1836,12 @@ do
     WoW.chatLines = {}
     A._shown.onConfirm()
     eq("frozen preview: refused", A.Catalog.Get(entry.id).version, v)
-    check("frozen preview: says so", table.concat(WoW.chat(), " "):find("changed since the preview", 1, true) ~= nil)
+    check("frozen preview: says so", table.concat(WoW.chatLines, " "):find("changed since the preview", 1, true) ~= nil)
     A.Commands.save()
     A._shown.onConfirm()
     check("save: confirmed", A.Catalog.Get(entry.id).version ~= v)
     A.Commands.save("nonsense")
-    check("save: usage", table.concat(WoW.chat(), " "):find("Usage: /altsync save", 1, true) ~= nil)
+    check("save: usage", table.concat(WoW.chatLines, " "):find("Usage: /altsync save", 1, true) ~= nil)
 end
 
 ------------------------------------------------------------
@@ -1900,7 +1900,7 @@ do
     check("#46: preview footer", text:find("Backup first. Verify every write.", 1, true) ~= nil, text)
     WoW.chatLines = {}
     A.Commands.Report("load", L.Load(e, plan), nil, plan)
-    local said = table.concat(WoW.chat(), "\n")
+    local said = table.concat(WoW.chatLines, "\n")
     check("#46: result counts the emptied slots", said:find("(2 emptied)", 1, true) ~= nil, said)
     eq("#46: slot 3 empty", G.actions[3], nil)
     eq("#46: Flash Heal only where the loadout has it", G.actions[40] and G.actions[40].id, 2061)
@@ -1915,7 +1915,7 @@ do
     check("#46: no-op preview lists the waiting slot", atext:find("Stays empty until this character can use it", 1, true) ~= nil, atext)
     WoW.chatLines = {}
     A.Commands.Report("load", L.Load(e, again), nil, again)
-    said = table.concat(WoW.chat(), "\n")
+    said = table.concat(WoW.chatLines, "\n")
     check("#46: no-op says it stays empty", said:find("Already matches the loadout; 1 slot stays empty", 1, true) ~= nil, said)
     -- Save keeps the inherited spell (A08) and is a no-op.
     local m = L.PlanSave()
@@ -2087,7 +2087,7 @@ do
     G.actions[3] = { kind = "spell", id = 2061 }            -- "auto-placed"
     WoW.chatLines = {}
     A.Commands.save("")
-    local said = table.concat(WoW.chat(), "\n")
+    local said = table.concat(WoW.chatLines, "\n")
     check("#48: only the gap differs: no changes to save", said:find("No changes to save", 1, true) ~= nil, said)
     check("#48: not 'matches this character'", said:find("matches this character", 1, true) == nil, said)
     check("#48: says what it left out", said:find("holds Flash Heal now: not saved (the loadout keeps Greater Heal there)", 1, true) ~= nil, said)
@@ -2103,7 +2103,7 @@ do
     G.actions[3] = { kind = "item", id = 5512 }
     WoW.chatLines = {}
     A._shown.onConfirm()
-    check("#48: changed gap occupant: refused", table.concat(WoW.chat(), " "):find("changed since the preview", 1, true) ~= nil)
+    check("#48: changed gap occupant: refused", table.concat(WoW.chatLines, " "):find("changed since the preview", 1, true) ~= nil)
     G.actions[3] = { kind = "spell", id = 2061 }
     A.Commands.save("")
     A._shown.onConfirm()
@@ -2116,7 +2116,7 @@ do
     local fork
     for _, x in ipairs(A.Catalog.List("loadout", "PRIEST", "general")) do if x.name == "Fork" then fork = x end end
     eq("#48: Save As keeps the loadout's spell", fork and fork.modules.actions[3].id, 2060)
-    check("#48: Save As says what it left out", table.concat(WoW.chat(), "\n"):find("holds Flash Heal now: not saved", 1, true) ~= nil)
+    check("#48: Save As says what it left out", table.concat(WoW.chatLines, "\n"):find("holds Flash Heal now: not saved", 1, true) ~= nil)
     check("#48: Save after Save As: no-op", L.PlanSave().noop)
     -- A Load that still can't place it keeps the gap protected; one that
     -- can (the spell is learned) releases it, and an edit there is saved.
@@ -2244,7 +2244,7 @@ do
     eq("#46 interrupted: cursor clean", G.cursor, nil)
     WoW.chatLines = {}
     A.Commands.Report("load", r, nil, p)
-    local said = table.concat(WoW.chat(), "\n")
+    local said = table.concat(WoW.chatLines, "\n")
     check("#46 interrupted: no emptied count claimed", said:find("emptied", 1, true) == nil, said)
     L.Restore("op", L.PlanRestore("op"))
     eq("#46 interrupted: restored exactly", state(), before)
@@ -2268,7 +2268,7 @@ do
     WoW.chatLines = {}
     local again = L.Plan(e)
     A.Commands.Report("load", L.Load(e, again), nil, again)
-    local said = table.concat(WoW.chat(), "\n")
+    local said = table.concat(WoW.chatLines, "\n")
     check("#48/D12: nothing applied, one left unchanged", said:find("Nothing applied: 1 left unchanged", 1, true) ~= nil, said)
     G.actions[30] = { kind = "spell", id = 2061 }
     local m = L.PlanSave()
@@ -2344,7 +2344,7 @@ do
         end
         return table.concat(out, ",")
     end
-    local function chat() return table.concat(WoW.chat(), "\n") end
+    local function chat() return table.concat(WoW.chatLines, "\n") end
     -- The switch preview for "Everyday" on an Account-set alt.
     local function offer(opts)
         boot(); ready(); save()

@@ -18,6 +18,13 @@ local toc = read("AltStableSync.toc")
 check("toc exists", toc ~= nil)
 toc = toc or ""
 
+-- WowTestKit's TOC checks (interface 16001, the version token, every listed
+-- .lua exists, each entry listed once), for both TOCs; this file's own
+-- checks follow. The kit checks .lua entries only: the .xml entries are
+-- covered below.
+kit(Kit.checkToc, "AltStableSync.toc")
+kit(Kit.checkToc, "AltStableSyncLink.toc", { dir = "Plugins/Link/" })
+
 check("interface 16001", toc:find("## Interface: 16001", 1, true) ~= nil)
 check("version is the packager keyword", toc:find("## Version: @project-version@", 1, true) ~= nil)
 check("account SVs", toc:find("## SavedVariables: AltStableSyncDB%s*[\r\n]") ~= nil)

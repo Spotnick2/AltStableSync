@@ -12,8 +12,8 @@
 -- FLAVOUR-SESSION-PASSED <name> only when every check passed.
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 dofile("tests/libaccountsync.lua")
 dofile("tests/flavour_fixture.lua")
@@ -61,11 +61,11 @@ ChatThrottleLib = { version = 10000, BNSendGameData = function(self, prio, prefi
     if cb then cb(arg, true, 0) end
 end }
 -- The minimap and tooltip, for Minimap.lua.
-Minimap = NewWidget("Frame", "Minimap")
+Minimap = CreateFrame("Frame", "Minimap")
 function Minimap:GetCenter() return 500, 400 end
 function Minimap:GetEffectiveScale() return 1 end
 function Minimap:GetFrameLevel() return 2 end
-GameTooltip = NewWidget("GameTooltip", "GameTooltip")
+GameTooltip = CreateFrame("GameTooltip", "GameTooltip")
 function GameTooltip:AddLine() end
 GetCursorPosition = function() return 500, 600 end
 
@@ -96,7 +96,7 @@ local function pump(seconds)
     for _ = 1, math.floor(seconds * 10 + 0.5) do
         WoW.tick(0.1)
         for _, f in ipairs(WoW.frames) do
-            local h = f.scripts.OnUpdate
+            local h = f._scripts.OnUpdate
             if h and f:IsVisible() then h(f, 0.1) end
         end
     end
@@ -235,11 +235,11 @@ check(name .. ": AltStableSyncChar unchanged", okChar, whyChar)
 check(name .. ": the LibAccountSync store kept", type(AltStableSyncLAS) == "table" and next(AltStableSyncLAS) ~= nil)
 -- Chat: nothing but the build warning, off the measured build.
 local other = {}
-for _, l in ipairs(WoW.chat()) do
+for _, l in ipairs(WoW.chatLines) do
     if not l:find("is not the measured build", 1, true) then other[#other + 1] = l end
 end
 eq(name .. ": nothing else said", table.concat(other, " | "), "")
-local warned = table.concat(WoW.chat(), "\n"):find("is not the measured build", 1, true) ~= nil
+local warned = table.concat(WoW.chatLines, "\n"):find("is not the measured build", 1, true) ~= nil
 eq(name .. ": the build warning only off " .. A.MEASURED_ON_BUILD, warned, build ~= A.MEASURED_ON_BUILD)
 
 finishWith("flavour " .. name, "FLAVOUR-SESSION-PASSED " .. name)

@@ -12,8 +12,8 @@
 -- section 4.
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 dofile("tests/wow_ui.lua")
 

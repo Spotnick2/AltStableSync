@@ -1,5 +1,7 @@
 <#
-    run.ps1 - Run all AltStableSync unit tests.
+    run.ps1 - Syntax-check the addon and run every tests\test_*.lua under Lua 5.1,
+    through WowTestKit at the commit tests\kit.pin names (its scripts\run.ps1),
+    then the beta -> live transfer script's own self-test.
 
     Plain Lua 5.1 scripts (WoW's Lua - not whatever newer Lua is first on
     PATH) that load addon files against tests/wow_stubs.lua. Every
@@ -8,44 +10,29 @@
     Usage:
         pwsh tests/run.ps1
         pwsh tests/run.ps1 -Lua "C:\path\to\lua5.1.exe"
+        pwsh tests/run.ps1 -KitDev      # the ..\WowTestKit working copy, not the pin
 #>
 
 param(
-    [string]$Lua = "C:\Program Files (x86)\Lua\5.1\lua.exe"
+    [string]$Lua = "C:\Program Files (x86)\Lua\5.1\lua.exe",
+    [switch]$KitDev
 )
 
 $ErrorActionPreference = "Stop"
-
-if (-not (Test-Path $Lua)) {
-    Write-Error "Lua 5.1 interpreter not found at: $Lua  (pass -Lua <path>)"
-    exit 1
-}
-
-# Run from the repo root so tests can dofile('tests/wow_stubs.lua') and
-# loadfile('Core.lua') with paths relative to the project.
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-Push-Location $RepoRoot
-try {
-    $failed = 0
-    $files = @(Get-ChildItem (Join-Path $PSScriptRoot "test_*.lua") | Sort-Object Name)
-    if ($files.Count -eq 0) { Write-Error "no tests/test_*.lua found - nothing would be proven"; exit 1 }
-    foreach ($f in $files) {
-        Write-Host "-- $($f.Name) --" -ForegroundColor Cyan
-        & $Lua $f.FullName
-        if ($LASTEXITCODE -ne 0) { $failed++ }
-        Write-Host ""
-    }
-    # The beta -> live transfer script's own self-test (#12).
-    Write-Host "-- Transfer-Profiles.ps1 -SelfTest --" -ForegroundColor Cyan
-    & pwsh -NoProfile (Join-Path $RepoRoot "Tools/Transfer-Profiles.ps1") -SelfTest
-    if ($LASTEXITCODE -ne 0) { $failed++ }
-    Write-Host ""
-    if ($failed -gt 0) {
-        Write-Host "$failed test file(s) FAILED" -ForegroundColor Red
-        exit 1
-    }
-    Write-Host "All test files passed." -ForegroundColor Green
-}
-finally {
-    Pop-Location
-}
+
+. (Join-Path $PSScriptRoot "kit.ps1")
+$kit = Get-WowTestKit -RepoRoot $RepoRoot -KitDev:$KitDev
+
+# The kit's runner syntax-checks the TOC's .lua files, then runs every
+# tests\test_*.lua from the repo root, so tests can dofile('tests/wow_stubs.lua')
+# and loadfile('Core.lua') with paths relative to the project.
+& (Join-Path $kit "scripts\run.ps1") -RepoRoot $RepoRoot -Toc "AltStableSync.toc" -Lua $Lua
+$failed = $LASTEXITCODE
+
+# The beta -> live transfer script's own self-test (#12).
+Write-Host "-- Transfer-Profiles.ps1 -SelfTest --" -ForegroundColor Cyan
+& pwsh -NoProfile (Join-Path $RepoRoot "Tools/Transfer-Profiles.ps1") -SelfTest
+if ($LASTEXITCODE -ne 0) { $failed = 1 }
+if ($failed -ne 0) { Write-Host "Tests FAILED" -ForegroundColor Red; exit 1 }
+Write-Host "All test files passed." -ForegroundColor Green

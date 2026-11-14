@@ -118,9 +118,25 @@ No build step. The Lua 5.1 toolchain is at `C:\Program Files (x86)\Lua\5.1\` (`l
 
 ## Testing
 
-- `tests/wow_stubs.lua` is a minimal **Forever-shaped** WoW mock driven through the `WoW` table
-  (`WoW.reset()`, `WoW.fire(event, ...)`, `WoW.chat()`). A stub that returns a Classic tuple where
-  the client returns a struct makes a broken port pass — stub fidelity is part of the review surface.
+- The test scaffolding is WowTestKit (`C:\Projects\WoW\WowTestKit`; its README is the reference)
+  at the commit and client build `tests\kit.pin` names. `tests\run.ps1` puts that commit in
+  `%LOCALAPPDATA%\WowTestKit\<sha>` and hands off to the kit's runner; CI fetches it with
+  `tests\fetch_kit.sh`. `tests\kit.lua`, `kit.ps1` and `fetch_kit.sh` are the kit's bootstrap
+  copies: never edit them here. A kit need is an issue on the kit, worked around in
+  `tests\wow_stubs.lua` with a `-- WowTestKit #N:` comment meanwhile. `tests\run.ps1 -KitDev`
+  runs against the `..\WowTestKit` working copy instead of the pin.
+- `tests/wow_stubs.lua` adds this addon's own client APIs to the kit's **Forever-shaped** mock,
+  driven through the `WoW` table (`WoW.reset()`, `WoW.fire(event, ...)`, `WoW.chatLines`). A stub
+  that returns a Classic tuple where the client returns a struct makes a broken port pass — stub
+  fidelity is part of the review surface. `tests/wow_game.lua` (action bars, macros, bindings, the
+  pet) and `tests/wow_ui.lua` (Edit Mode, CVars, chat windows) are the addon's own game models.
+- `tests/harness.lua` keeps this repo's name-first `check(name, ok, detail)` / `eq(name, got, want)`
+  over the kit's condition-first ones; run a kit function (`done`, `Kit.checkToc`,
+  `Kit.checkMethods`) through `kit(fn, ...)`, which puts the kit's own `check` / `eq` back for
+  the call.
+- `tests/test_methods.lua` exercises the addon, then `Kit.checkMethods` checks every widget method
+  it called against the pinned build. A method a Blizzard mixin adds in Lua goes in its `allow`
+  table, with the Blizzard file as the reason.
 - A test `dofile`s the stubs, `loadfile`s the module, sets SavedVariables, fires `ADDON_LOADED`.
 - File-local internals are reached through the `AltStableSync._test` seam; extend it rather than
   promoting internals to globals.

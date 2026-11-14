@@ -1,5 +1,11 @@
 ------------------------------------------------------------
--- wow_stubs.lua - a minimal WoW: Forever API mock for the Lua 5.1 tests
+-- wow_stubs.lua - AltStableSync's own client APIs on top of WowTestKit's mock
+--
+-- The mechanics (strict globals, secrets, widgets that record their method
+-- calls, events checked against the build, timers, hooksecurefunc, print)
+-- are WowTestKit's, at the commit and build tests/kit.pin names. This file
+-- holds only what the kit leaves to the addon, and the few Methods entries
+-- this repo's tests rely on that differ from the core's (each says why).
 --
 -- It models FOREVER (Vanilla content on the Mainline client), not Classic: a
 -- removed Classic global is left undefined here, so code that calls one fails
@@ -8,20 +14,24 @@
 -- C:\Projects\WoW\References\Forever\api (declared). Stub fidelity is part of the review
 -- surface, not scaffolding.
 --
--- Driven through the global WoW table:
+-- Driven through the global WoW table (the kit's, plus):
 --   WoW.reset()               fresh state (clears SavedVariables, frames, chat)
 --   WoW.fire(event, ...)      dispatch an event to every registered frame
---   WoW.chat()                lines printed to DEFAULT_CHAT_FRAME
+--   WoW.chatLines             lines the addon sent to DEFAULT_CHAT_FRAME
 --   WoW.build                 the build GetBuildInfo() reports
+--   WoW.now / WoW.clock       what time() / GetTime() return (see below)
 --
--- #3 extends this with action bars, the spellbook, macros, bindings and Edit
--- Mode, shaped by the probe results (#2).
+-- tests/wow_game.lua (action bars, macros, bindings, the pet) and
+-- tests/wow_ui.lua (Edit Mode, CVars, chat windows) load after this file.
 ------------------------------------------------------------
 
-WoW = {}
+dofile("tests/kit.lua")
 
-function WoW.reset()
-    WoW.frames = {}
+local Methods = WoW.Methods
+
+-- State the tests reset (WoW.reset runs each WoW.onReset function).
+local KitUIParent = UIParent
+table.insert(WoW.onReset, function()
     WoW.chatLines = {}
     WoW.drawn = {}
     WoW.build = "70450"
@@ -32,10 +42,10 @@ function WoW.reset()
     AltStableSyncDB, AltStableSyncChar, AltStableSyncLAS = nil, nil, nil
     SlashCmdList = {}
     UISpecialFrames = {}
-    UIParent = NewWidget("Frame", "UIParent")
-end
-
-function WoW.chat() return WoW.chatLines end
+    -- A fresh UIParent each time: wow_ui's meter setup replaces it with a plain table.
+    UIParent = WoW.newWidget("Frame", nil, "UIParent")
+    UIParent._level = 0
+end)
 
 DEFAULT_CHAT_FRAME = {
     AddMessage = function(_, msg) table.insert(WoW.chatLines, msg) end,
@@ -45,10 +55,12 @@ function GetBuildInfo()
     return "1.60.1", WoW.build, "Oct  5 2026", 16001
 end
 
--- The client's time(): Unix seconds. Controlled by WoW.now.
+-- The addon's clock model. The client's time() is Unix seconds (WoW.now);
+-- GetTime() is seconds of uptime (WoW.clock), which wow_game.lua's
+-- C_Timer.After and WoW.tick advance. The kit's GetTime() and timers run on
+-- WoW.now instead, so both are replaced here (and C_Timer / WoW.tick in
+-- wow_game.lua): 130 test lines set or read WoW.now and WoW.clock apart.
 function time() return WoW.now end
-
--- The client's GetTime(): seconds of uptime. Controlled by WoW.clock.
 function GetTime() return WoW.clock end
 
 C_AddOns = {
@@ -58,137 +70,67 @@ C_AddOns = {
     end,
 }
 
--- Frames: event registration, plus what Preview.lua and Panel.lua (#9) need
--- for their real handlers to run in tests: text, shown and enabled state,
--- checks, focus, and Click(), which only clicks a visible, enabled button as
--- the client does. Any other widget method (layout, fonts, textures) is a
--- no-op returning nil.
-local Widget = {}
-function Widget:RegisterEvent(e) self.events[e] = true; return true end
-function Widget:UnregisterEvent(e) self.events[e] = nil end
-function Widget:SetScript(k, fn) self.scripts[k] = fn end
-function Widget:GetScript(k) return self.scripts[k] end
-function Widget:Show()
-    if self.shown then return end
-    self.shown = true
-    if self.scripts.OnShow then self.scripts.OnShow(self) end
-end
-function Widget:Hide()
-    if not self.shown then return end
-    self.shown = false
-    if self.scripts.OnHide then self.scripts.OnHide(self) end
-end
-function Widget:IsShown() return self.shown end
-function Widget:IsVisible()
-    local f = self
-    while f do
-        if not f.shown then return false end
-        f = f.parent
-    end
-    return true
-end
-function Widget:SetShown(on) if on then self:Show() else self:Hide() end end
--- An EditBox's SetText fires OnTextChanged, as in the client, and keeps
--- only its first maxLetters characters (#71: the paste box's limit).
-local function Fit(self, t)
+tinsert = rawget(_G, "tinsert") or table.insert
+date = rawget(_G, "date") or os.date
+
+------------------------------------------------------------
+-- Widget behaviour this addon's tests rely on, beyond the core's
+------------------------------------------------------------
+
+-- Text. An EditBox keeps only its first maxLetters characters (#71: the paste
+-- box's limit; the core has no SetMaxLetters). SetText(nil) stores "". WoW.drawn:
+-- every text set on anything but an EditBox (#75), as drawn.
+local kitSetText = Methods.SetText
+local function fit(w, t)
     t = t == nil and "" or tostring(t)
-    if self.kind == "EditBox" and (self.maxLetters or 0) > 0 and #t > self.maxLetters then t = t:sub(1, self.maxLetters) end
+    if w._type == "EditBox" and (w._maxLetters or 0) > 0 and #t > w._maxLetters then t = t:sub(1, w._maxLetters) end
     return t
 end
--- WoW.drawn: every text set on anything but an EditBox (#75), as drawn.
-function Widget:SetText(t)
-    self.text = Fit(self, t)
-    if self.kind ~= "EditBox" and WoW.drawn then WoW.drawn[#WoW.drawn + 1] = self.text end
-    if self.kind == "EditBox" and self.scripts.OnTextChanged then self.scripts.OnTextChanged(self, false) end
+function Methods.SetText(w, t)
+    t = fit(w, t)
+    if w._type ~= "EditBox" and WoW.drawn then WoW.drawn[#WoW.drawn + 1] = t end
+    kitSetText(w, t)
 end
-function Widget:SetMaxLetters(n) self.maxLetters = n end
+function Methods.SetFormattedText(w, fmt, ...) Methods.SetText(w, fmt:format(...)) end
+function Methods.SetMaxLetters(w, n) w._maxLetters = n end
+
 -- The player typing or pasting into an EditBox: userInput is true.
 function WoW.type(box, t)
-    box.text = Fit(box, t)
-    if box.scripts.OnTextChanged then box.scripts.OnTextChanged(box, true) end
+    box._text = fit(box, t)
+    if box._scripts.OnTextChanged then box._scripts.OnTextChanged(box, true) end
 end
-function Widget:GetText() return self.text end
-function Widget:SetFormattedText(fmt, ...) self:SetText(fmt:format(...)) end
-function Widget:Enable() self.enabled = true end
-function Widget:Disable() self.enabled = false end
-function Widget:IsEnabled() return self.enabled end
-function Widget:SetEnabled(on) self.enabled = on and true or false end
-function Widget:SetChecked(c) self.checked = c and true or false end
-function Widget:GetChecked() return self.checked end
-function Widget:SetFocus() self.focus = true end
-function Widget:ClearFocus() self.focus = false end
-function Widget:HasFocus() return self.focus end
-function Widget:Click(button)
-    if not (self.enabled and self:IsVisible()) then return false end
-    if self.kind == "CheckButton" then self.checked = not self.checked end
-    if self.scripts.OnClick then self.scripts.OnClick(self, button or "LeftButton") end
+
+-- Focus (the core has none).
+function Methods.SetFocus(w) w._focus = true end
+function Methods.ClearFocus(w) w._focus = false end
+function Methods.HasFocus(w) return w._focus end
+
+-- RegisterForClicks is kept as given (the core's _clicks is SetMouseClickEnabled's).
+function Methods.RegisterForClicks(w, ...) w._registeredClicks = { ... } end
+
+-- HookScript is kept apart from the frame's own script: test_minimap and
+-- test_taint prove the addon HOOKS the Minimap's OnSizeChanged rather than
+-- replacing it (a replaced script on a Blizzard frame is taint). The core
+-- folds a hook into _scripts, where it can't be told from SetScript.
+function Methods.HookScript(w, name, fn)
+    w._hooks = w._hooks or {}
+    w._hooks[name] = w._hooks[name] or {}
+    table.insert(w._hooks[name], fn)
     return true
 end
--- Points and hooks are kept, so position and resize tests can fail (#62).
-function Widget:SetPoint(...) self.points = self.points or {}; self.points[#self.points + 1] = { ... } end
-function Widget:ClearAllPoints() self.points = {} end
-function Widget:GetPoint(i) local p = (self.points or {})[i or 1]; if p then return unpack(p) end end
-function Widget:HookScript(k, fn)
-    self.hooks = self.hooks or {}
-    self.hooks[k] = self.hooks[k] or {}
-    table.insert(self.hooks[k], fn)
-    return true
-end
-function Widget:GetParent() return self.parent end
-function Widget:GetName() return self.name end
-function Widget:CreateFontString() return NewWidget("FontString", nil, self) end
-function Widget:CreateTexture() return NewWidget("Texture", nil, self) end
-function Widget:GetStringHeight() return 12 end
-function Widget:SetHeight(h) self.height = h end
-function Widget:GetHeight() return self.height end
-function Widget:SetSize(w, h) self.width, self.height = w, h end
-function Widget:GetWidth() return self.width end
-function Widget:GetVerticalScrollRange() return 0 end
-function Widget:GetVerticalScroll() return 0 end
-local function noop() end
--- Methods are capitalised; a missing lowercase field (parent, focus...) stays nil.
-local WIDGET = { __index = function(_, k)
-    if Widget[k] then return Widget[k] end
-    if type(k) == "string" and k:match("^%u") then return noop end
-end }
 
-function NewWidget(kind, name, parent)
-    local f = setmetatable({ kind = kind, name = name, parent = parent, events = {}, scripts = {},
-                             shown = true, enabled = true, checked = false, text = "" }, WIDGET)
-    return f
-end
+-- Layout the panel reads (the core has no measuring).
+function Methods.GetStringHeight() return 12 end
+function Methods.GetVerticalScrollRange() return 0 end
+function Methods.GetVerticalScroll() return 0 end
 
-function Widget:SetFrameLevel(n) self.level = n end
-function Widget:GetFrameLevel() return self.level or 1 end
-function Widget:SetAttribute(k, v) self.attributes = self.attributes or {}; self.attributes[k] = v end
-function Widget:GetAttribute(k) return self.attributes and self.attributes[k] end
-function Widget:RegisterForClicks(...) self.clicks = { ... } end
-function Widget:SetPoint(...) self.points = self.points or {}; self.points[#self.points + 1] = { ... } end
-function Widget:ClearAllPoints() self.points = {} end
-
-function CreateFrame(kind, name, parent, template)
-    local f = NewWidget(kind or "Frame", name, parent)
-    f.template = template
-    table.insert(WoW.frames, f)
-    if name then _G[name] = f end
-    return f
-end
-
-tinsert = tinsert or table.insert
-date = date or os.date
-
-function WoW.fire(event, ...)
-    for _, f in ipairs(WoW.frames) do
-        local h = f.scripts.OnEvent
-        if f.events[event] and h then h(f, event, ...) end
-    end
-end
-
+------------------------------------------------------------
 -- C_EncodingUtil (declared on 70245; the real round trip is measured in
 -- docs/forever-api-notes.md). A STAND-IN: "CBOR" is a sorted Lua literal,
 -- "Deflate" a "Z" prefix, "Base64" hex. Each decoder errors on input it
 -- didn't make, as the real ones do, so corruption tests exercise our pcalls.
 -- Tests prove our framing, checksum and schema handling, not Blizzard's codec.
+------------------------------------------------------------
 do
     local function ser(v)
         local t = type(v)
@@ -227,3 +169,18 @@ do
 end
 
 WoW.reset()
+
+-- Globals that may read nil. The addon's own, before they are assigned: the
+-- SavedVariables (nil until the client loads them), its global and its
+-- preview frame. Client APIs the addon feature-detects (`if C_Timer then`,
+-- `pcall(GetCurrentBindingSet)`) and that only wow_game.lua / wow_ui.lua
+-- define, or that a test removes on purpose to see the addon without it
+-- (C_Timer, issecretvalue, IsMouseButtonDown, C_EncodingUtil...).
+Kit.strict({
+    AltStableSync = true, AltStableSyncDB = true, AltStableSyncChar = true, AltStableSyncLAS = true,
+    AltStableSyncPreview = true, AltStableSyncProbeDB = true,
+    EditModeManagerFrame = true, Minimap = true, GameTooltip = true, ChatConfigFrame = true,
+    C_CVar = true, C_EditMode = true, C_EncodingUtil = true, C_Timer = true,
+    Constants = true, Enum = true, GetCurrentBindingSet = true, IsMouseButtonDown = true,
+    issecretvalue = true, LibStub = true, LOCALIZED_CLASS_NAMES_MALE = true, UnitClass = true,
+})

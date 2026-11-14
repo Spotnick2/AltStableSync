@@ -5,8 +5,8 @@
 -- CVars only from the allowlist, in their domain, never protected ones.
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 dofile("tests/wow_ui.lua")
 
@@ -36,7 +36,7 @@ local function boot(ui)
     WoW.clock = WoW.clock + 10
 end
 
-local function said(s) return table.concat(WoW.chat(), "\n"):find(s, 1, true) ~= nil end
+local function said(s) return table.concat(WoW.chatLines, "\n"):find(s, 1, true) ~= nil end
 local function lines() return table.concat(A._shown and A._shown.lines or {}, "\n") end
 local function has(t, v) for _, x in ipairs(t) do if x == v then return true end end return false end
 
@@ -146,7 +146,7 @@ do
     A.Commands.ui("apply Base")
     UI.cvars.raidFramesDisplayPowerBars = "1"
     A._shown.onConfirm()
-    check("stale: refused", said("Something changed since the preview"), table.concat(WoW.chat(), " | "))
+    check("stale: refused", said("Something changed since the preview"), table.concat(WoW.chatLines, " | "))
     eq("stale: nothing written", #UI.calls, 0)
     eq("stale: no backup", #(B.List()), 0)
 end

@@ -9,8 +9,8 @@
 -- Writing a field (SlashCmdList.FOO = fn) is the supported pattern.
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 
 local BLIZZARD_GLOBALS = { "SlashCmdList", "UISpecialFrames", "StaticPopupDialogs",
                            "DEFAULT_CHAT_FRAME", "ChatFrame_AddMessageEventFilter",
@@ -63,12 +63,12 @@ do
     end })
     env._G = env
     -- The client's minimap and tooltip, for Minimap.lua's handlers (#62).
-    Minimap = NewWidget("Frame", "Minimap")
-    Minimap.width, Minimap.height = 198, 198
+    Minimap = CreateFrame("Frame", "Minimap")
+    Minimap:SetSize(198, 198)
     function Minimap:GetFrameLevel() return 2 end
     function Minimap:GetCenter() return 500, 400 end
     function Minimap:GetEffectiveScale() return 1 end
-    GameTooltip = NewWidget("GameTooltip", "GameTooltip")
+    GameTooltip = CreateFrame("GameTooltip", "GameTooltip")
     function GameTooltip:AddLine() end
     GetCursorPosition = function() return 500, 600 end
     -- Core first: the panel shows text through ASS.Literal (#75).
@@ -80,7 +80,7 @@ do
     local ASS = env.AltStableSync
     ASS.Panel.Show()                                   -- no SavedVariables: the blocked view
     for _, b in pairs(ASS.Panel._W.tabs) do b:Click() end
-    ASS.Panel._Frame().scripts.OnUpdate(ASS.Panel._Frame(), 1)
+    ASS.Panel._Frame()._scripts.OnUpdate(ASS.Panel._Frame(), 1)
     ASS.Preview.Show({ title = "t", lines = { "x" }, confirm = "OK", onConfirm = function() end,
                        check = { text = "c", checked = true, onToggle = function() end } })
     env.AltStableSyncPreview.check:Click()
@@ -92,16 +92,19 @@ do
     WoW.fire("PLAYER_LOGIN")
     local mb = ASS.MinimapButton._Button()
     check("minimap button made in the recorder", mb ~= nil)
-    for _, h in ipairs((Minimap.hooks or {}).OnSizeChanged or {}) do h(Minimap) end
+    for _, h in ipairs((Minimap._hooks or {}).OnSizeChanged or {}) do h(Minimap) end
     mb:Click("LeftButton"); mb:Click("RightButton")
-    mb.scripts.OnDragStart(mb); mb.scripts.OnUpdate(mb); mb.scripts.OnDragStop(mb)
-    mb.scripts.OnEnter(mb); mb.scripts.OnLeave(mb)
+    mb._scripts.OnDragStart(mb); mb._scripts.OnUpdate(mb); mb._scripts.OnDragStop(mb)
+    mb._scripts.OnEnter(mb); mb._scripts.OnLeave(mb)
     env.AltStableSync_OnAddonCompartmentClick("AltStableSync", "LeftButton")
-    env.AltStableSync_OnAddonCompartmentEnter("AltStableSync", NewWidget("Button"))
+    env.AltStableSync_OnAddonCompartmentEnter("AltStableSync", CreateFrame("Button"))
     env.AltStableSync_OnAddonCompartmentLeave()
     check("windows write no Blizzard global", #writes == 0, table.concat(writes, ","))
     eq("windows show no StaticPopup", popups, 0)
-    check("windows register for Escape by field", #UISpecialFrames == 2 and rawget(env, "UISpecialFrames") == nil)
+    -- The kit's C_Timer is there (the old stub had none): the panel rejoins
+    -- the Escape list on a timer, as on the client.
+    WoW.flushTimers()
+    check("windows register for Escape by field",#UISpecialFrames == 2 and rawget(env, "UISpecialFrames") == nil)
     StaticPopup_Show, UnitClass = nil, unitClass
     Minimap, GameTooltip, GetCursorPosition = nil, nil, nil
 end
