@@ -91,17 +91,38 @@ local function Count(n, max)
     return type(n) == "number" and n >= 0 and n <= max and n == math.floor(n)
 end
 
+-- The "?" icon (INV_Misc_QuestionMark): a macro with it shows the icon of the
+-- spell or item it uses. Macros this addon creates without a recorded icon
+-- get it (#105).
+Game.ICON_QUESTION = 134400
+
+-- A macro's chosen icon, as Blizzard's macro editor reads it
+-- (Blizzard_MacroIconSelector.lua: C_Macro.GetSelectedMacroIcon). Not
+-- GetMacroInfo's icon: for a "?" macro that one is the icon it shows now,
+-- and writing it back would freeze the macro on it (#105). nil when the
+-- call is missing, fails or returns no fileID: never the displayed icon.
+local function SelectedIcon(i)
+    local M = C_Macro
+    if type(M) ~= "table" or type(M.GetSelectedMacroIcon) ~= "function" then return nil end
+    local ok, icon = pcall(M.GetSelectedMacroIcon, i)
+    if not ok or type(icon) ~= "number" or icon <= 0 or icon ~= math.floor(icon) then return nil end
+    return icon
+end
+
 -- Every macro and the two counts: { list = {{ index, name, icon, body,
 -- scope = "account" | "char" }}, nAccount, nChar }, or nil when anything
--- can't be read: a failed call, a count out of range, or a counted index
--- with no name (unreadable is never "no macros", #46).
+-- can't be read: a failed call, a count out of range, a counted index
+-- with no name, or no chosen icon (unreadable is never "no macros", #46).
+-- `icon` is the chosen icon (#105).
 function Game.MacroInventory()
     local out = {}
     local ok, nAccount, nChar = pcall(GetNumMacros)
     if not ok or not Count(nAccount, MAX_ACCOUNT_MACROS) or not Count(nChar, Game.MAX_CHAR_MACROS) then return nil end
     local function read(i, scope)
-        local okI, name, icon, body = pcall(GetMacroInfo, i)
+        local okI, name, _, body = pcall(GetMacroInfo, i)
         if not okI or type(name) ~= "string" then return false end
+        local icon = SelectedIcon(i)
+        if not icon then return false end
         out[#out + 1] = { index = i, name = name, icon = icon, body = body, scope = scope }
         return true
     end

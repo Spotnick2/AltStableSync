@@ -145,7 +145,7 @@ end
 
 local OLD, NEW = "/cast Heal", "/cast Heal\n/say healing"
 local ICON, NEW_ICON = 134400, 135000
-local QM = "INV_Misc_QuestionMark"
+local QM = 134400       -- "?": a macro created without a chosen icon (#105)
 local SPELLS = {
     { id = 2061, name = "Flash Heal", sub = "Rank 1" },
     { id = 2050, name = "Lesser Heal", low = true, sub = "Rank 1" }, { id = 2052, name = "Lesser Heal", sub = "Rank 2" },
@@ -192,7 +192,7 @@ local function loadout()
             [15] = spell(2052, "Lesser Heal", "exact"),          -- page 2
             [75] = spell(2050, "Lesser Heal", "exact"),          -- stance page 1
         },
-        macros = { Heal = { body = NEW, icon = NEW_ICON }, Aegis = { body = "/cast Power Word: Shield" },
+        macros = { Heal = { body = NEW, icon = NEW_ICON, sel = true }, Aegis = { body = "/cast Power Word: Shield" },
                    Bless = { body = "/cast Power Word: Fortitude" } },
         bindings = { ACTIONBUTTON1 = { "1" }, ACTIONBUTTON2 = { "2" }, ACTIONBUTTON3 = { "Q" } },
         cover = { { 1, 24 }, { 73, 84 } },

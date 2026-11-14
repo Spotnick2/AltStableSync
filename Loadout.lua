@@ -59,7 +59,7 @@ end
 -- Capture (for Save As): the slots, bindings and character macros
 ------------------------------------------------------------
 
--- modules = { actions = {[slot] = ...}, bindings = {[cmd] = {key, ...}}, macros = {[name] = {body, icon}},
+-- modules = { actions = {[slot] = ...}, bindings = {[cmd] = {key, ...}}, macros = {[name] = {body, icon, sel}},
 --             cover = the slot ranges captured (#5), pet = {[familyId] = layout} (#47, Pet.lua) }
 function Loadout.Capture()
     local Game = G()
@@ -107,7 +107,10 @@ function Loadout.Capture()
             actions[slot] = { kind = "item", id = a.id }
         elseif a and a.kind == "macro" then
             actions[slot] = { kind = "macro", name = a.name, body = a.body, scope = a.scope }
-            if a.scope == "char" then macros[a.name] = { body = a.body, icon = a.icon } end
+            -- `sel`: the icon is the macro's chosen one (#105). A definition
+            -- without it was saved by an older build, which read the icon
+            -- the macro showed: history, never written back.
+            if a.scope == "char" then macros[a.name] = { body = a.body, icon = a.icon, sel = true } end
         elseif a then
             actions[slot] = { kind = "unsupported", what = a.what }
         end
@@ -137,6 +140,14 @@ function Loadout.Blocked()
     if not G().CursorEmpty() then return "Finish placing the item or spell on your cursor, then try again." end
     return nil
 end
+
+-- A macro definition's icon as an instruction: its chosen icon when this
+-- build's reader recorded it (`sel`, #105), else nil (keep or "?").
+local function DefIcon(def)
+    if type(def) == "table" and def.sel == true and type(def.icon) == "number" then return def.icon end
+    return nil
+end
+Loadout.DefIcon = DefIcon
 
 -- Resolve one wanted action against this character. Returns the target
 -- action, or nil plus a skip reason; then `create` marks a macro to create,
@@ -193,15 +204,24 @@ local function Resolve(want, modules, book, opts)
         -- macro (an empty string is a real, empty body).
         if type(def.body) ~= "string" then return nil, "macro definition damaged" end
         local body = Game.Normalize(def.body)
+        -- Only a chosen icon (`sel`, #105) is an instruction. An older
+        -- build's definition holds the icon the macro showed then: for a "?"
+        -- macro, a spell's icon that would freeze it if written back.
+        local wanted = DefIcon(def)
         if #matches == 0 then
             if #body > MACRO_MAX then return nil, "macro too long" end
-            return { kind = "macro", name = want.name, body = body, scope = "char", icon = def.icon }, nil, true
+            -- No chosen icon: "?", which shows the spell's own icon.
+            return { kind = "macro", name = want.name, body = body, scope = "char",
+                     icon = wanted or Game.ICON_QUESTION,
+                     iconUnknown = (wanted == nil and def.icon ~= Game.ICON_QUESTION) or nil }, nil, true
         end
         local m = matches[1]
         if #matches == 1 and m.scope == "char" then
             if type(m.body) ~= "string" then return nil, "macros unreadable" end
-            -- No icon in the definition keeps this macro's own.
-            local icon = def.icon
+            -- No chosen icon in the definition keeps this macro's own, as a
+            -- value: it is what EditMacro gets, what the read-back expects
+            -- and what the backup records.
+            local icon = wanted
             if icon == nil then icon = m.icon end
             if Game.Normalize(m.body) == body and icon == m.icon then
                 return { kind = "macro", name = m.name, body = m.body, scope = "char" }
@@ -219,7 +239,7 @@ local function Resolve(want, modules, book, opts)
 end
 
 -- plan = { kind = "load"|"restore", blocked, actions = {{slot, target, current, why}},
---          creates = {{name, body, icon}}, edits = {{name, from = {body, icon}, to = {body, icon}}} (#6),
+--          creates = {{name, body, icon, iconUnknown}}, edits = {{name, from = {body, icon}, to = {body, icon}}} (#6),
 --          noCharMacros, keys = {[key] = {to = cmd|false, from}},
 --          keysBlocked, skips = {{slot, reason}}, waiting = {{slot, reason}} (load),
 --          unavailable (restore), noop, fingerprint }
@@ -372,7 +392,8 @@ function Loadout.Plan(entry, opts)
                     target, why = nil, "macro slots full"
                 else
                     creating[target.name] = true
-                    plan.creates[#plan.creates + 1] = { name = target.name, body = target.body, icon = target.icon }
+                    plan.creates[#plan.creates + 1] = { name = target.name, body = target.body, icon = target.icon,
+                                                        iconUnknown = target.iconUnknown }
                 end
                 same = Game.SameAction(current, target)
             end
@@ -419,8 +440,9 @@ end
 -- The exact pre-write snapshot of everything `plan` touches.
 local function Snapshot(plan, reason)
     local Game = G()
+    -- `selIcons`: macro icons in this journal are chosen icons (#105).
     local snap = { reason = reason, actions = {}, keys = {}, createdMacros = {},
-                   characterBindings = Game.CharacterBindings() }
+                   characterBindings = Game.CharacterBindings(), selIcons = true }
     local book = Game.Spellbook()
     for _, op in ipairs(plan.actions) do
         local a = Game.ActionAt(op.slot)
@@ -482,9 +504,11 @@ local function Execute(plan, snap)
         return true
     end
 
-    -- 1. Character macros, then verify each by name + normalised body.
+    -- 1. Character macros, then verify each by name, normalised body and
+    -- chosen icon (#105).
     for _, c in ipairs(plan.creates) do
-        local ok, why = call(false, CreateMacro, c.name, c.icon or "INV_Misc_QuestionMark", c.body, true)
+        local icon = c.icon or Game.ICON_QUESTION
+        local ok, why = call(false, CreateMacro, c.name, icon, c.body, true)
         if not ok then return fail(why, "macro " .. c.name) end
         local matches = Game.MacrosNamed(c.name)
         if not matches or #matches ~= 1 or matches[1].scope ~= "char" then
@@ -495,6 +519,9 @@ local function Execute(plan, snap)
         snap.createdMacros[#snap.createdMacros + 1] = { index = matches[1].index, name = c.name, body = c.body }
         if Game.Normalize(matches[1].body) ~= Game.Normalize(c.body) then
             return fail("macro created with other text", "macro " .. c.name)
+        end
+        if matches[1].icon ~= icon then
+            return fail("macro created with another icon", "macro " .. c.name)
         end
         result.created = result.created + 1
     end
@@ -1068,11 +1095,17 @@ function Loadout.Merge(rec, current, characterBindings, drop)
             local def = CharMacro(src[slot] == "B" and B or current, act.name)
             if def then
                 local have = macros[act.name]
-                if have and (Game.Normalize(have.body or "") ~= Game.Normalize(def.body or "") or have.icon ~= def.icon) then
+                local sameBody = have and Game.Normalize(have.body or "") == Game.Normalize(def.body or "")
+                if have and sameBody and (have.sel == true) ~= (def.sel == true) then
+                    -- The same text, one icon chosen and one only seen by an
+                    -- older build (#105): the chosen one is kept.
+                    if def.sel == true then macros[act.name] = Copy(def) end
+                elseif have and (not sameBody or have.icon ~= def.icon) then
                     return nil, ("Macro %q differs between the loaded setup and this character; rename the macro here, then save.")
                         :format(act.name)
+                else
+                    macros[act.name] = Copy(def)
                 end
-                macros[act.name] = Copy(def)
             end
         end
         local x = adv[slot]
@@ -1342,8 +1375,9 @@ local function SnapshotNow(reason)
     local Game = G()
     local blocked = Loadout.Blocked()
     if blocked then return nil, blocked end
+    -- `selIcons`: macro icons in this journal are chosen icons (#105).
     local snap = { reason = reason, actions = {}, keys = {}, createdMacros = {},
-                   characterBindings = Game.CharacterBindings() }
+                   characterBindings = Game.CharacterBindings(), selIcons = true }
     local left = {}
     local book = Game.Spellbook()
     for _, slot in ipairs(Game.SLOT_LIST) do
@@ -1372,11 +1406,13 @@ end
 -- What a backup holds and how restoring it behaves: its slots, keys, pet
 -- bar, binding set, and the macros a restore would edit or keep. The pet
 -- counts by what Pet.PlanRestore matches (family and name) and its slots;
--- its GUID changes on every summon (measured), so it's left out.
+-- its GUID changes on every summon (measured), so it's left out. `si`: an
+-- older build's backup restores macro icons differently (#105), so it is
+-- never "the same" as a fresh one.
 local function Content(s)
     local pet = s.pet and { f = s.pet.family, n = s.pet.name, s = s.pet.slots } or false
     return Serialize({ a = s.actions or {}, k = s.keys or {}, p = pet, cb = s.characterBindings and true or false,
-                       e = s.editedMacros or false, c = s.createdMacros or {} })
+                       e = s.editedMacros or false, c = s.createdMacros or {}, si = s.selIcons == true })
 end
 
 -- What Back up now would do: the snapshot, what it leaves out, whether the
@@ -1441,7 +1477,14 @@ function Loadout.PlanRestore(which)
             return one and type(x) == "table" and type(x.body) == "string"
                 and Game.Normalize(one.body) == Game.Normalize(x.body) and one.icon == x.icon
         end
-        if is(e.before) then
+        -- An older build's journal holds the icons its macros showed, not
+        -- their chosen ones (#105): whether the macro is still as that
+        -- operation left it can't be proven, so it's left as is.
+        if snap.selIcons ~= true then
+            plan.unavailable[#plan.unavailable + 1] = { name = tostring(e.name),
+                reason = m == nil and "macros unreadable"
+                    or "left as is: this backup was taken by an older version that didn't record its icon exactly" }
+        elseif is(e.before) then
             view[e.name] = e.before
         elseif is(e.after) then
             plan.edits[#plan.edits + 1] = { name = e.name, from = { body = one.body, icon = one.icon },

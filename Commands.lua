@@ -172,6 +172,12 @@ local function FirstDiff(a, b)
     end
 end
 
+-- Did a saved macro's icon change? Only two chosen icons compare (#105): an
+-- older version's definition holds the icon the macro showed.
+local function IconChanged(old, def)
+    return old.sel == true and def.sel == true and old.icon ~= def.icon
+end
+
 -- The character macros a plan creates and updates (#6). An update changes
 -- the macro itself, so every button that uses it shows the new text.
 local function MacroLines(lines, plan)
@@ -193,6 +199,14 @@ local function MacroLines(lines, plan)
         if from then lines[#lines + 1] = ("    line %d: %s -> %s"):format(line, ASS.Code(from), ASS.Code(to)) end
     end
     if ne > 0 then lines[#lines + 1] = "An updated macro changes every button that uses it, on any bar." end
+    -- Saved by an older version, which recorded the icon a macro showed,
+    -- not the one chosen (#105): created with "?", the spell's own icon.
+    for _, c in ipairs(plan.creates or {}) do
+        if c.iconUnknown then
+            lines[#lines + 1] = ("  %s: created with the \"?\" icon (the version that saved it didn't record its icon)")
+                :format(tostring(c.name))
+        end
+    end
 end
 
 -- The character macros the backed-up load created, kept by name (no macro
@@ -550,7 +564,7 @@ function Commands.save(arg)
     local was, now, changedMacros = m.beforeMacros or {}, m.modules.macros or {}, {}
     for n, def in pairs(now) do
         local old = was[n]
-        if not old or ASS.Game.Normalize(old.body) ~= ASS.Game.Normalize(def.body) or old.icon ~= def.icon then
+        if not old or ASS.Game.Normalize(old.body) ~= ASS.Game.Normalize(def.body) or IconChanged(old, def) then
             changedMacros[#changedMacros + 1] = n
         end
     end
@@ -566,7 +580,7 @@ function Commands.save(arg)
                 local what = {}
                 local from, to, line = FirstDiff(old.body, def.body)
                 if from then what[#what + 1] = "text changes" end
-                if old.icon ~= def.icon then what[#what + 1] = "icon changes" end
+                if IconChanged(old, def) then what[#what + 1] = "icon changes" end
                 lines[#lines + 1] = ("  %s: %s"):format(n, table.concat(what, ", "))
                 if from then lines[#lines + 1] = ("    line %d: %s -> %s"):format(line, ASS.Code(from), ASS.Code(to)) end
             end

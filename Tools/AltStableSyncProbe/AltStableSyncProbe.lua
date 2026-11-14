@@ -28,6 +28,7 @@ local MAX_LOG = 3000
 local SHOWN_DIFFS = 60
 
 local Probe = ForeverProbe:Module("AltStableSyncProbe", { api = 1, cmd = "sync" })
+NS.Probe = Probe                     -- Measure.lua's procedures register on it too
 local function say(msg) Probe:Say(msg) end
 
 -- Client APIs read through rawget: a missing one reads as nil, never throws
@@ -278,10 +279,21 @@ function NS.Record()
     local byName = {}
     if okN and type(nAcc) == "number" and type(nChar) == "number" then
         local function add(index, scope)
-            local okM, mName, icon, text = read(rec, "macro " .. index, "GetMacroInfo", index)
+            local okM, mName, _, text = read(rec, "macro " .. index, "GetMacroInfo", index)
             if not okM or type(mName) ~= "string" or mName == "" then
                 rec.why[#rec.why + 1] = "macro " .. index .. " unreadable"
                 return
+            end
+            -- The chosen icon, not GetMacroInfo's: a "?" macro shows its
+            -- spell's icon, which changes with a target or a form (#105).
+            local M = api("C_Macro")
+            local okI, icon = false, "C_Macro.GetSelectedMacroIcon missing"
+            if type(M) == "table" and type(M.GetSelectedMacroIcon) == "function" then
+                okI, icon = pcall(M.GetSelectedMacroIcon, index)
+            end
+            if not okI or secret(icon) then
+                rec.why[#rec.why + 1] = "macro " .. mName .. ": chosen icon unreadable (" .. tostring(icon) .. ")"
+                icon = nil
             end
             if type(icon) ~= "number" then rec.why[#rec.why + 1] = "macro " .. mName .. ": icon is a " .. type(icon) end
             local m = { scope = scope, name = mName, body = body(text), icon = plain(icon) or tostring(icon), index = index }
@@ -1493,7 +1505,7 @@ boot:SetScript("OnEvent", function(_, _, name)
     if type(DB.adhoc) ~= "table" then DB.adhoc = {} end
     Probe:UseLog(DB.log, MAX_LOG)
     DB.loads = (DB.loads or 0) + 1
-    say("loaded (" .. DB.loads .. " loads). /fp steps sync stress, audit, catalog or catalog2, or /fp sync for the commands")
+    say("loaded (" .. DB.loads .. " loads). /fp steps sync stress, audit, catalog, catalog2 or icons, or /fp sync for the commands")
 end)
 
 NS._test = { Probe = Probe, DB = function() return DB end }
