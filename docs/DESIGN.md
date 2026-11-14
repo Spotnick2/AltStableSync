@@ -36,7 +36,7 @@ client). It keeps an **account-wide catalog** of two kinds of saved entry:
   character.
 
 The day-one goal is the **Forever launch on 2026-11-04**: profiles built on the beta are carried to
-live by copying a file, then each live character loads what it wants. Myslot v6.2.0 was the
+live by copying a file, then each live character loads what it wants. Myslot was the
 inspiration. Its model is not reused: paste strings, protobuf+CRC, StaticPopups, exact spell IDs with
 no rank handling, clear-before-import, and a load path that skips its backup.
 
