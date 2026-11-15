@@ -413,8 +413,8 @@ do
     local plan = L.Plan(entry)
     local realSet = SetBinding
     local nSet = 0
-    SetBinding = function(k, c)
-        local r = realSet(k, c)
+    SetBinding = function(k, c, ctx)
+        local r = realSet(k, c, ctx)
         nSet = nSet + 1
         if nSet == 2 then WoW.game.combat = true end
         return r
@@ -876,9 +876,9 @@ do
     local before = G.keys["2"]
     local realSet = SetBinding
     local n = 0
-    SetBinding = function(k, c)
+    SetBinding = function(k, c, ctx)
         n = n + 1
-        if n == 1 then return realSet(k, c) end
+        if n == 1 then return realSet(k, c, ctx) end
         return false                                   -- refused, nothing changed
     end
     local r = L.Load(entry, L.Plan(entry))

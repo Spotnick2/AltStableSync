@@ -66,7 +66,9 @@ function G.setup(opts)
     G.blocked = {}
     G.cursor = nil
     G.bindingSet = opts.bindingSet or 2      -- Enum.BindingSet.Character
-    G.keys = copy(opts.keys or {})           -- [key] = command
+    G.keys = copy(opts.keys or {})           -- [key] = command (the None binding context)
+    G.padKeys = copy(opts.padKeys or {})     -- [key] = command (GamepadModeInGameCore, #106)
+    G.cmdContext, G.ctxLookup, G.charPadStore, G.setBindings = opts.cmdContext, nil, nil, {}
     G.savedKeys = copy(G.keys)
     G.saveFails = false
     G.accountKeys = G.bindingSet == 1 and copy(G.keys) or nil
@@ -476,22 +478,59 @@ end
 
 function GetCurrentBindingSet() return G.bindingSet end
 
-function GetBindingKey(command)
+-- Binding contexts (#106). G.keys is the None context; G.padKeys the
+-- gamepad's (GamepadModeInGameCore); any other context is empty. A command's
+-- context: G.cmdContext[command], else the gamepad's for Blizzard_Gamepad's
+-- commands, else None. What the client does with NO context is not
+-- measured, so here a call without one gets the gamepad's answer: a read or
+-- write that forgets its context fails a test.
+Enum.BindingContext = { None = 0, HousingEditor = 1, HousingEditorBasicDecorMode = 2,
+    HousingEditorExpertDecorMode = 3, HousingEditorCustomizeMode = 4, HousingEditorCleanupMode = 5,
+    HousingEditorLayoutMode = 6, HousingEditorBasicAndExpertDecorMode = 7,
+    HousingEditorExteriorCustomizationMode = 8, GamepadModeInGameCore = 9 }
+local NONE, PAD = Enum.BindingContext.None, Enum.BindingContext.GamepadModeInGameCore
+local GAMEPAD_COMMANDS = { OPENRADIAL = true, TOGGLEUIFOCUS = true, TOGGLEPINGSYSTEM = true, GAMEPADLEFTMOD = true,
+    GAMEPADRIGHTMOD = true, GAMEPADLEFTTARGETMODIFIER = true, GAMEPADRIGHTTARGETMODIFIER = true }
+for i = 1, 8 do GAMEPAD_COMMANDS["GAMEPADACTIONBUTTON" .. i] = true end
+local function contextOf(command)
+    local c = G.cmdContext and G.cmdContext[command]
+    if c ~= nil then return c end
+    return GAMEPAD_COMMANDS[command] and PAD or NONE
+end
+local function keysIn(ctx)
+    if ctx == nil then return G.padKeys end           -- no context: the wrong answer, on purpose
+    if ctx == NONE then return G.keys end
+    if ctx == PAD then return G.padKeys end
+    return {}
+end
+
+C_KeyBindings = C_KeyBindings or {}
+-- G.ctxLookup = "error" | "nil": the lookup raises, or returns nothing (the
+-- API's optional return).
+function C_KeyBindings.GetBindingContextForAction(command)
+    if G.ctxLookup == "error" then error("GetBindingContextForAction failed", 2) end
+    if G.ctxLookup == "nil" then return nil end
+    return contextOf(command)
+end
+
+function GetBindingKey(command, _, ctx)
     if G.keyFails then error("GetBindingKey failed", 2) end
     local keys = {}
-    for k, c in pairs(G.keys) do if c == command then keys[#keys + 1] = k end end
+    for k, c in pairs(keysIn(ctx)) do if c == command then keys[#keys + 1] = k end end
     table.sort(keys)
     return unpack(keys)
 end
 
-function GetBindingAction(key)
+function GetBindingAction(key, _, ctx)
     if G.actionFails then error("GetBindingAction failed", 2) end
-    return G.keys[key] or ""
+    return keysIn(ctx)[key] or ""
 end
 
-function SetBinding(key, command)
+-- G.setBindings: every SetBinding as { key, command, ctx }.
+function SetBinding(key, command, ctx)
     mutate("SetBinding", true)
-    G.keys[key] = command
+    G.setBindings[#G.setBindings + 1] = { key = key, command = command, ctx = ctx }
+    keysIn(ctx)[key] = command
     return true
 end
 
@@ -502,8 +541,10 @@ local function bindingList()
     local seen, list = {}, {}
     -- Keys bound by SetBindingClick and the like ("CLICK Bar:LeftButton")
     -- are not in the client's binding list.
-    for _, c in pairs(G.keys) do
-        if not seen[c] and not c:find(" ", 1, true) then seen[c] = true; list[#list + 1] = c end
+    for _, map in ipairs({ G.keys, G.padKeys }) do
+        for _, c in pairs(map) do
+            if not seen[c] and not c:find(" ", 1, true) then seen[c] = true; list[#list + 1] = c end
+        end
     end
     for _, c in ipairs(G.unbound) do if not seen[c] then seen[c] = true; list[#list + 1] = c end end
     table.sort(list)
@@ -519,7 +560,7 @@ function GetBinding(i)
     local c = bindingList()[i]
     if not c then return nil end
     local keys = {}
-    for k, cmd in pairs(G.keys) do if cmd == c then keys[#keys + 1] = k end end
+    for k, cmd in pairs(keysIn(contextOf(c))) do if cmd == c then keys[#keys + 1] = k end end
     table.sort(keys)
     return c, "category", unpack(keys)
 end
@@ -555,6 +596,7 @@ function LoadBindings(set)
     mutate("LoadBindings")
     if fault("LoadBindings", set) == false then return false end
     if set == Enum.BindingSet.Character and G.charStore then G.keys = copy(G.charStore) end
+    if set == Enum.BindingSet.Character and G.charPadStore then G.padKeys = copy(G.charPadStore) end
     if set == Enum.BindingSet.Account and G.accountKeys then G.keys = copy(G.accountKeys) end
     WoW.fire("UPDATE_BINDINGS")
 end

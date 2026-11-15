@@ -298,23 +298,57 @@ end
 -- Bindings, cursor
 ------------------------------------------------------------
 
--- Every key bound to `command` (GetBindingKey returns them all), as a list;
--- nil when the client call fails (unreadable is not "no keys").
-function Game.KeysFor(command)
+-- Binding contexts (#106). A command lives in one context: most in None,
+-- the gamepad's own (Blizzard_Gamepad, loaded on Forever) in
+-- GamepadModeInGameCore. Every read and write here names its context, as
+-- Blizzard's key-binding settings do (Blizzard_Keybindings.lua): what the
+-- calls do without one is not measured.
+
+-- The None context, or nil when the client has no Enum.BindingContext (then
+-- no key is read or written).
+function Game.NoneContext()
+    local E = Enum and Enum.BindingContext
+    return E and E.None
+end
+
+-- The context `command` lives in, or nil when that can't be read. The
+-- lookup's optional nil is None (Blizzard passes it straight on); a client
+-- without the lookup has no contexts but None.
+function Game.ContextOf(command)
+    local none = Game.NoneContext()
+    if none == nil then return nil end
+    local KB = C_KeyBindings
+    if type(KB) ~= "table" or type(KB.GetBindingContextForAction) ~= "function" then return none end
+    local ok, ctx = pcall(KB.GetBindingContextForAction, command)
+    if not ok then return nil end
+    if ctx == nil then return none end
+    if type(ctx) ~= "number" then return nil end
+    return ctx
+end
+
+-- Every key bound to `command` in its own context (GetBindingKey returns
+-- them all), as a list; nil when a read fails (unreadable is not "no keys").
+-- `ctx`: the context to read, else the command's own.
+function Game.KeysFor(command, ctx)
+    if ctx == nil then ctx = Game.ContextOf(command) end
+    if ctx == nil then return nil end
     -- select("#") keeps the exact return count: a nil in the middle of the
     -- tuple can't make #r stop early and hide the keys after it.
     local function pack(...) return select("#", ...), { ... } end
-    local n, r = pack(pcall(GetBindingKey, command))
+    local n, r = pack(pcall(GetBindingKey, command, nil, ctx))
     if not r[1] then return nil end
     local keys = {}
     for i = 2, n do if type(r[i]) == "string" and r[i] ~= "" then keys[#keys + 1] = r[i] end end
     return keys
 end
 
--- The command a key runs, false when unbound, nil when unreadable (a failed
--- read must never be recorded as "unbound": restoring that would wipe a key).
-function Game.CommandOf(key)
-    local ok, cmd = pcall(GetBindingAction, key)
+-- The command a key runs in context `ctx` (default None), false when
+-- unbound, nil when unreadable (a failed read must never be recorded as
+-- "unbound": restoring that would wipe a key).
+function Game.CommandOf(key, ctx)
+    if ctx == nil then ctx = Game.NoneContext() end
+    if ctx == nil then return nil end
+    local ok, cmd = pcall(GetBindingAction, key, nil, ctx)
     if not ok then return nil end
     if cmd == nil or cmd == "" then return false end
     return cmd
@@ -368,21 +402,30 @@ local KEYS = {}
 for _, m in ipairs(MODIFIERS) do for _, k in ipairs(KEY_BASES) do KEYS[#KEYS + 1] = m .. k end end
 Game.KEYS = KEYS
 
+-- The binding map's format: a map without it is an older build's (#106),
+-- read without contexts, and never compares equal to a new one.
+Game.BINDING_MAP_FORMAT = 2
+
 -- Every bound command with all its keys (command -> list), plus what each
--- of those keys and of Game.KEYS does ("@" .. key -> action) (#7). nil when
--- any read fails: an incomplete map can't prove the keys were kept. A custom
--- binding only on an input outside Game.KEYS stays out of reach: no client
--- call lists bound keys.
+-- of those keys and of Game.KEYS does ("@" .. key -> action) (#7), in the
+-- None context. Commands of another context (#106: the gamepad's) add
+-- "#" .. ctx .. ":" .. command -> keys and "@" .. ctx .. ":" .. key ->
+-- action for those keys, read in that context. nil when any read fails: an
+-- incomplete map can't prove the keys were kept. A custom binding only on
+-- an input outside Game.KEYS stays out of reach: no client call lists bound
+-- keys (and custom bindings are None-context).
 function Game.BindingMap()
+    local none = Game.NoneContext()
+    if none == nil then return nil end
     local ok, n = pcall(GetNumBindings)
     if not ok or type(n) ~= "number" or n < 1 or n ~= math.floor(n) then return nil end
     -- `queue`: keys still to read by key; `seen`: queued once each.
-    local map, queue, seen, listed = {}, {}, {}, {}
+    local map, queue, seen, listed, others = { ["!format"] = Game.BINDING_MAP_FORMAT }, {}, {}, {}, {}
     local function enqueue(k)
         if not seen[k] then seen[k] = true; queue[#queue + 1] = k end
     end
     local function addCommand(command)
-        local list = Game.KeysFor(command)
+        local list = Game.KeysFor(command, none)
         if not list then return false end
         if #list > 0 then map[command] = list end
         for _, k in ipairs(list) do enqueue(k) end
@@ -391,8 +434,14 @@ function Game.BindingMap()
     for i = 1, n do
         local okB, command = pcall(GetBinding, i)
         if not okB or type(command) ~= "string" or command == "" then return nil end
+        local ctx = Game.ContextOf(command)
+        if ctx == nil then return nil end
         listed[command] = true
-        if not addCommand(command) then return nil end
+        if ctx == none then
+            if not addCommand(command) then return nil end
+        else
+            others[#others + 1] = { command = command, ctx = ctx }
+        end
     end
     for _, k in ipairs(KEYS) do enqueue(k) end
     -- A custom command found by key adds its other keys to the queue.
@@ -400,7 +449,7 @@ function Game.BindingMap()
     while queue[i] do
         local k = queue[i]
         i = i + 1
-        local action = Game.CommandOf(k)
+        local action = Game.CommandOf(k, none)
         if action == nil then return nil end
         if action then
             map["@" .. k] = action
@@ -408,6 +457,18 @@ function Game.BindingMap()
                 listed[action] = true
                 if not addCommand(action) then return nil end
             end
+        end
+    end
+    -- Another context: its commands' keys, and what those keys do there.
+    for _, o in ipairs(others) do
+        local list = Game.KeysFor(o.command, o.ctx)
+        if not list then return nil end
+        local prefix = tostring(o.ctx) .. ":"
+        if #list > 0 then map["#" .. prefix .. o.command] = list end
+        for _, k in ipairs(list) do
+            local action = Game.CommandOf(k, o.ctx)
+            if action == nil then return nil end
+            if action then map["@" .. prefix .. k] = action end
         end
     end
     return map

@@ -7,6 +7,8 @@
 --   created, edited and deleted here. It never touches another macro, a
 --   bar, a key or a setting. A macro of that name that already exists stops
 --   the procedure: it was never ours to edit.
+--   `/fp steps sync contexts` (#106): one key chord, TEST_KEY, bound in
+--   memory (never saved) in two binding contexts, then put back as it was.
 -- Results: each step's detail in ForeverProbeDB.steps.records, and a line
 -- in the /fp console and the module's saved log.
 ------------------------------------------------------------
@@ -149,4 +151,158 @@ ISTEPS[#ISTEPS + 1] = { text = "Type /reload (or press Reload now) so the result
 
 Probe:Steps("icons", ISTEPS)
 
-NS._measure = { ICON_PROBE = ICON_PROBE, probeIndex = probeIndex, readIcons = readIcons, ISTEPS = ISTEPS }
+------------------------------------------------------------
+-- #106: binding contexts. One test chord, bound in memory (never saved) in
+-- the None context and in the gamepad's at once; every read with and
+-- without a context; then each context's original put back. The originals
+-- are saved first (AltStableSyncProbeDB.contexts), and `/fp sync contexts
+-- restore` puts them back if the run stops in between.
+------------------------------------------------------------
+
+local TEST_KEY = "ALT-CTRL-SHIFT-F11"
+local NONE_CMD, PAD_CMD = "ACTIONBUTTON12", "GAMEPADACTIONBUTTON1"
+
+local function contexts()
+    local E = api("Enum")
+    local C = E and E.BindingContext
+    if type(C) ~= "table" then error("no Enum.BindingContext on this client", 0) end
+    return C, C.None, C.GamepadModeInGameCore
+end
+
+local function pack(...) return { n = select("#", ...), ... } end
+local function show(p, from)
+    local out = {}
+    for i = from or 1, p.n do out[#out + 1] = tostring(p[i]) end
+    return table.concat(out, ", ")
+end
+local function call(name, ...)
+    local fn = api(name)
+    if type(fn) ~= "function" then return name .. " missing" end
+    local p = pack(pcall(fn, ...))
+    if not p[1] then return "error: " .. tostring(p[2]) end
+    return show(p, 2)
+end
+local function ctxOf(cmd)
+    local KB = api("C_KeyBindings")
+    if type(KB) ~= "table" or type(KB.GetBindingContextForAction) ~= "function" then return "lookup missing" end
+    local ok, ctx = pcall(KB.GetBindingContextForAction, cmd)
+    return ok and tostring(ctx) or ("error: " .. tostring(ctx))
+end
+
+local function state()
+    local C = contexts()
+    local KB = api("C_KeyBindings")
+    local active = {}
+    for name, v in pairs(C) do
+        local ok, on = false, nil
+        if KB and KB.IsBindingContextActive then ok, on = pcall(KB.IsBindingContextActive, v) end
+        active[#active + 1] = name .. "=" .. tostring(v) .. (ok and (on and " active" or " inactive") or "")
+    end
+    table.sort(active)
+    local cvar = api("C_CVar")
+    local pad = cvar and cvar.GetCVar and cvar.GetCVar("GamePadEnable")
+    local r = { contexts = table.concat(active, "; "), GamePadEnable = tostring(pad),
+                ACTIONBUTTON1 = ctxOf("ACTIONBUTTON1"), [PAD_CMD] = ctxOf(PAD_CMD), OPENRADIAL = ctxOf("OPENRADIAL"),
+                JUMP = ctxOf("JUMP"), click = ctxOf("CLICK AltStableSyncProbeNone:LeftButton") }
+    say("contexts: " .. r.contexts .. " | GamePadEnable " .. r.GamePadEnable .. " | ACTIONBUTTON1 " .. r.ACTIONBUTTON1
+        .. ", " .. PAD_CMD .. " " .. r[PAD_CMD] .. ", OPENRADIAL " .. r.OPENRADIAL .. ", JUMP " .. r.JUMP
+        .. ", a CLICK binding " .. r.click)
+    return r
+end
+
+-- Every read of the test chord and of the two commands, with and without a context.
+local function reads(label)
+    local _, NONE, PAD = contexts()
+    local r = {
+        label = label,
+        actionNoCtx = call("GetBindingAction", TEST_KEY),
+        actionNone = call("GetBindingAction", TEST_KEY, nil, NONE),
+        actionPad = call("GetBindingAction", TEST_KEY, nil, PAD),
+        noneKeysNoCtx = call("GetBindingKey", NONE_CMD),
+        noneKeysNone = call("GetBindingKey", NONE_CMD, nil, NONE),
+        padKeysNoCtx = call("GetBindingKey", PAD_CMD),
+        padKeysPad = call("GetBindingKey", PAD_CMD, nil, PAD),
+        padKeysNone = call("GetBindingKey", PAD_CMD, nil, NONE),
+    }
+    say(("contexts %s: %s action: no ctx [%s], None [%s], pad [%s]; %s keys: no ctx [%s], None [%s]; %s keys: no ctx [%s], pad [%s], None [%s]")
+        :format(label, TEST_KEY, r.actionNoCtx, r.actionNone, r.actionPad, NONE_CMD, r.noneKeysNoCtx, r.noneKeysNone,
+            PAD_CMD, r.padKeysNoCtx, r.padKeysPad, r.padKeysNone))
+    return r
+end
+
+local function store() return rawget(_G, "AltStableSyncProbeDB") end
+
+-- Put each context's original back (from the saved originals), and check.
+local function putBack()
+    outOfCombat()
+    local db = store()
+    local o = db and db.contexts
+    if type(o) ~= "table" then return true, "nothing to put back" end
+    local set, get = api("SetBinding"), api("GetBindingAction")
+    local bad = {}
+    for _, c in ipairs(o.originals) do
+        local ok, err = pcall(set, o.key, c.action ~= "" and c.action or nil, c.ctx)
+        if not ok then bad[#bad + 1] = "context " .. tostring(c.ctx) .. ": " .. tostring(err) end
+        local okR, now = pcall(get, o.key, nil, c.ctx)
+        if not okR or (now or "") ~= c.action then
+            bad[#bad + 1] = ("context %s reads %s, was %s"):format(tostring(c.ctx), tostring(now), tostring(c.action))
+        end
+    end
+    if #bad > 0 then return false, table.concat(bad, "; ") end
+    db.contexts = nil
+    say("contexts: " .. o.key .. " is back as it was in each context")
+    return true, "back as it was"
+end
+
+local CSTEPS = { title = "Binding contexts (#106)", rev = 1 }
+CSTEPS[#CSTEPS + 1] = { text = "Out of combat. This binds " .. TEST_KEY .. " in memory only (never saved) in two binding "
+    .. "contexts, reads it every way, and puts it back as it was. If the run stops before the end, type "
+    .. "/fp sync contexts restore. Press Next." }
+CSTEPS[#CSTEPS + 1] = { text = "Reading the contexts and the gamepad setting.", auto = true, run = state }
+CSTEPS[#CSTEPS + 1] = { text = "Bind the test chord in both contexts (the originals are saved first).", button = "Bind",
+    run = function()
+        outOfCombat()
+        local _, NONE, PAD = contexts()
+        local db = store()
+        if type(db) ~= "table" then error("the probe's saved table isn't loaded yet", 0) end
+        if type(db.contexts) == "table" then error("an earlier run wasn't put back: /fp sync contexts restore first", 0) end
+        local get = api("GetBindingAction")
+        local originals = {}
+        for _, ctx in ipairs({ NONE, PAD }) do
+            local ok, a = pcall(get, TEST_KEY, nil, ctx)
+            if not ok then error("can't read " .. TEST_KEY .. " in context " .. tostring(ctx) .. ": " .. tostring(a), 0) end
+            originals[#originals + 1] = { ctx = ctx, action = a or "" }
+        end
+        db.contexts = { key = TEST_KEY, originals = originals }
+        local set = api("SetBinding")
+        local r1 = pack(pcall(set, TEST_KEY, NONE_CMD, NONE))
+        local r2 = pack(pcall(set, TEST_KEY, PAD_CMD, PAD))
+        return { originals = originals[1].action .. " / " .. originals[2].action, setNone = show(r1), setPad = show(r2) }
+    end }
+CSTEPS[#CSTEPS + 1] = { text = "Reading it every way.", auto = true, run = function() return reads("bound") end }
+CSTEPS[#CSTEPS + 1] = { text = "If you can, turn gamepad mode on now (Options > Controls, or /console GamePadEnable 1), "
+    .. "then Next. Skip if you can't." }
+CSTEPS[#CSTEPS + 1] = { text = "Reading again.", button = "Read", run = function() return state(), reads("gamepad on?") end }
+CSTEPS[#CSTEPS + 1] = { text = "Put gamepad mode back as it was (if you changed it), then Next." }
+CSTEPS[#CSTEPS + 1] = { text = "Put the test chord back in each context.", button = "Put back", run = function()
+    local ok, why = putBack()
+    if not ok then error(why, 0) end
+    return why
+end, check = function()
+    local db = store()
+    return not (db and db.contexts), "the originals are back"
+end }
+CSTEPS[#CSTEPS + 1] = { text = "Type /reload (or press Reload now) so the results are written to disk.", reload = true }
+Probe:Steps("contexts", CSTEPS)
+
+Probe:Command("contexts", function(args)
+    if tostring(args or ""):match("^%s*restore") then
+        local ok, why = putBack()
+        say(ok and why or ("contexts: couldn't put it all back: " .. why))
+    else
+        say("/fp sync contexts restore - put the contexts procedure's test chord back as it was")
+    end
+end, "contexts restore: put the binding-context test chord back (#106)")
+
+NS._measure = { ICON_PROBE = ICON_PROBE, probeIndex = probeIndex, readIcons = readIcons, ISTEPS = ISTEPS,
+                TEST_KEY = TEST_KEY, CSTEPS = CSTEPS, putBack = putBack }

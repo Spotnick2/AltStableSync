@@ -299,6 +299,17 @@ local function PlanKeys(plan, wantKeys)
         if BS and Game.BindingSet() == BS.Account then plan.needsCharacterBindings = true end
         return
     end
+    -- Every key is set in the None context (#106): a command that lives in
+    -- another one is never written there by this version.
+    local none = Game.NoneContext()
+    for cmd in pairs(has) do
+        local ctx = Game.ContextOf(cmd)
+        if ctx == nil then plan.blocked = "Couldn't read the key bindings; try again." return end
+        if ctx ~= none then
+            plan.keysBlocked = ("%s is bound in another binding context, which this version doesn't set."):format(cmd)
+            return
+        end
+    end
     local want = {}
     for cmd, keys in pairs(has) do
         -- By position up to maxn: a missing first key never hides the second.
@@ -441,8 +452,9 @@ end
 local function Snapshot(plan, reason)
     local Game = G()
     -- `selIcons`: macro icons in this journal are chosen icons (#105).
+    -- `keysNone`: its keys were read in the None context (#106).
     local snap = { reason = reason, actions = {}, keys = {}, createdMacros = {},
-                   characterBindings = Game.CharacterBindings(), selIcons = true }
+                   characterBindings = Game.CharacterBindings(), selIcons = true, keysNone = true }
     local book = Game.Spellbook()
     for _, op in ipairs(plan.actions) do
         local a = Game.ActionAt(op.slot)
@@ -617,9 +629,11 @@ local function Execute(plan, snap)
     -- memory and the rollback read back too.
     if next(plan.keys) or plan.resave then
         local wasUnsaved = Unsaved()
+        -- Keys are read and written in the None context only (#106).
+        local none = Game.NoneContext()
         local function rollback(why)
             for key in pairs(plan.keys) do
-                if Game.CommandOf(key) ~= snap.keys[key] then call(true, SetBinding, key, snap.keys[key] or nil) end
+                if Game.CommandOf(key) ~= snap.keys[key] then call(true, SetBinding, key, snap.keys[key] or nil, none) end
             end
             for key in pairs(plan.keys) do
                 if Game.CommandOf(key) ~= snap.keys[key] then
@@ -631,7 +645,7 @@ local function Execute(plan, snap)
         end
         if next(plan.keys) then SetUnsaved(true) end
         for key, v in pairs(plan.keys) do
-            local ok, why = call(true, SetBinding, key, v.to or nil)
+            local ok, why = call(true, SetBinding, key, v.to or nil, none)
             if not ok then return rollback(why) end
         end
         for key, v in pairs(plan.keys) do
@@ -687,14 +701,34 @@ local function Differ(a, b)
             seen[cmd] = true
         end
     end
-    -- Commands first, then keys read by key ("@" .. key).
+    -- The format first (an older version's map, #106), then commands, then
+    -- keys read by key ("@" .. key). Another context's entries carry its
+    -- number ("#" .. ctx .. ":" .. command, "@" .. ctx .. ":" .. key).
+    local function rank(x)
+        local c = x:sub(1, 1)
+        return c == "!" and 0 or c == "@" and 2 or 1
+    end
     table.sort(names, function(x, y)
-        local kx, ky = x:sub(1, 1) == "@", y:sub(1, 1) == "@"
-        if kx ~= ky then return ky end
+        if rank(x) ~= rank(y) then return rank(x) < rank(y) end
         return x < y
     end)
+    local E = Enum and Enum.BindingContext or {}
+    local function context(n)
+        for k, v in pairs(E) do if tostring(v) == n then return k end end
+        return "context " .. n
+    end
     for i, name in ipairs(names) do
-        if name:sub(1, 1) == "@" then names[i] = "key " .. name:sub(2) end
+        local c = name:sub(1, 1)
+        local ctx, rest = name:match("^[#@](%d+):(.+)$")
+        if c == "!" then
+            names[i] = "how they were recorded (an older version)"
+        elseif c == "@" and ctx then
+            names[i] = "key " .. rest .. " (" .. context(ctx) .. ")"
+        elseif c == "@" then
+            names[i] = "key " .. name:sub(2)
+        elseif ctx then
+            names[i] = rest .. " (" .. context(ctx) .. ")"
+        end
     end
     local n = #names
     while #names > 3 do names[#names] = nil end
@@ -1376,8 +1410,9 @@ local function SnapshotNow(reason)
     local blocked = Loadout.Blocked()
     if blocked then return nil, blocked end
     -- `selIcons`: macro icons in this journal are chosen icons (#105).
+    -- `keysNone`: its keys were read in the None context (#106).
     local snap = { reason = reason, actions = {}, keys = {}, createdMacros = {},
-                   characterBindings = Game.CharacterBindings(), selIcons = true }
+                   characterBindings = Game.CharacterBindings(), selIcons = true, keysNone = true }
     local left = {}
     local book = Game.Spellbook()
     for _, slot in ipairs(Game.SLOT_LIST) do
@@ -1406,13 +1441,14 @@ end
 -- What a backup holds and how restoring it behaves: its slots, keys, pet
 -- bar, binding set, and the macros a restore would edit or keep. The pet
 -- counts by what Pet.PlanRestore matches (family and name) and its slots;
--- its GUID changes on every summon (measured), so it's left out. `si`: an
--- older build's backup restores macro icons differently (#105), so it is
--- never "the same" as a fresh one.
+-- its GUID changes on every summon (measured), so it's left out. `si`,
+-- `kn`: an older build's backup restores macro icons (#105) and keys (#106)
+-- differently, so it is never "the same" as a fresh one.
 local function Content(s)
     local pet = s.pet and { f = s.pet.family, n = s.pet.name, s = s.pet.slots } or false
     return Serialize({ a = s.actions or {}, k = s.keys or {}, p = pet, cb = s.characterBindings and true or false,
-                       e = s.editedMacros or false, c = s.createdMacros or {}, si = s.selIcons == true })
+                       e = s.editedMacros or false, c = s.createdMacros or {}, si = s.selIcons == true,
+                       kn = s.keysNone == true })
 end
 
 -- What Back up now would do: the snapshot, what it leaves out, whether the
@@ -1548,11 +1584,30 @@ function Loadout.PlanRestore(which)
             plan.keysBlocked = KEYS_BLOCKED
         else
             -- Only real differences; unsaved earlier changes are covered by
-            -- plan.resave below.
-            for key, cmd in pairs(snap.keys) do
-                local from = Game.CommandOf(key)
-                if from == nil then plan.blocked = "Couldn't read the key bindings; try again." break end
-                if from ~= cmd then plan.keys[key] = { to = cmd, from = from } end
+            -- plan.resave below. An older build read these keys without a
+            -- context (#106): what it recorded, "unbound" included, can't be
+            -- proven to be the None context's, so it isn't replayed there.
+            local none = Game.NoneContext()
+            local keys = {}
+            for key in pairs(snap.keys) do keys[#keys + 1] = key end
+            table.sort(keys)
+            for _, key in ipairs(keys) do
+                local cmd = snap.keys[key]
+                local ctx = none
+                if snap.keysNone == true and cmd then ctx = Game.ContextOf(cmd) end
+                if snap.keysNone ~= true then
+                    plan.unavailable[#plan.unavailable + 1] = { key = key,
+                        reason = "left as is: this backup was taken by an older version that didn't record its binding context" }
+                elseif ctx == nil then
+                    plan.blocked = "Couldn't read the key bindings; try again." break
+                elseif ctx ~= none then
+                    plan.unavailable[#plan.unavailable + 1] = { key = key,
+                        reason = "left as is: " .. tostring(cmd) .. " is bound in another binding context" }
+                else
+                    local from = Game.CommandOf(key)
+                    if from == nil then plan.blocked = "Couldn't read the key bindings; try again." break end
+                    if from ~= cmd then plan.keys[key] = { to = cmd, from = from } end
+                end
             end
         end
     end
