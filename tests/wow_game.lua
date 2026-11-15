@@ -418,7 +418,7 @@ end
 
 -- WoW.game.selectedIconFault = "error" | "nil": the next read
 -- of a chosen icon raises or returns nothing.
-C_Macro = C_Macro or {}
+C_Macro = rawget(_G, "C_Macro") or {}
 function C_Macro.GetSelectedMacroIcon(index)
     local fault = G.selectedIconFault
     if fault == "error" then G.selectedIconFault = nil; error("GetSelectedMacroIcon failed", 2) end

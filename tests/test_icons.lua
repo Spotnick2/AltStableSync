@@ -10,8 +10,8 @@
 -- mock (tests/wow_game.lua): spell N's icon is 900000 + N.
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 
 local G = WoW.game
@@ -205,7 +205,7 @@ do
     eq("save: the chosen definition", m and m.modules.macros.Heal.sel, true)
     eq("save: its icon", m and m.modules.macros.Heal.icon, Q)
     local saved, serr = L.Save(m)
-    check("save: saved", saved ~= nil, serr)
+    check("save: saved", saved ~= nil, type(serr) == "string" and serr or nil)
 
     -- Two older definitions that disagree still clash (nothing to prefer).
     boot(); char()
