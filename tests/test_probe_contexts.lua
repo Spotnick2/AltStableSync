@@ -10,8 +10,8 @@
 -- private and local, so CI (FOREVERPROBE_OPTIONAL=1) skips this file.
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 
 local root = (os.getenv("FOREVERPROBE") or "../ForeverProbe"):gsub("\\", "/"):gsub("/$", "")
@@ -19,8 +19,7 @@ do
     local toc = io.open(root .. "/ForeverProbe.toc", "rb")
     if not toc then
         if os.getenv("FOREVERPROBE_OPTIONAL") == "1" then
-            print("test_probe_contexts: SKIPPED (no ForeverProbe checkout; probe tests run locally)")
-            os.exit(0)
+            Kit.skip("test_probe_contexts", "no ForeverProbe checkout; probe tests run locally")
         end
         error("ForeverProbe checkout not found at " .. root .. ": clone it there or set FOREVERPROBE", 0)
     end

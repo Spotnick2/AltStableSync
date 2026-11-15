@@ -11,8 +11,8 @@
 -- forgotten context fails here; what the client does then is not measured.
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 
 local G = WoW.game

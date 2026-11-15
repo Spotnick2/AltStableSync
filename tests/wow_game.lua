@@ -504,7 +504,7 @@ local function keysIn(ctx)
     return {}
 end
 
-C_KeyBindings = C_KeyBindings or {}
+C_KeyBindings = rawget(_G, "C_KeyBindings") or {}
 -- G.ctxLookup = "error" | "nil": the lookup raises, or returns nothing (the
 -- API's optional return).
 function C_KeyBindings.GetBindingContextForAction(command)
