@@ -16,8 +16,8 @@
 --     peer's manifest).
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 
 local G = WoW.game
@@ -78,7 +78,7 @@ local function create(name, category, modules)
 end
 
 -- One model tick (1 s); tick(5.1) also runs the save status's slow poll.
-local function tick(dt) P._Frame().scripts.OnUpdate(P._Frame(), dt or 1.1) end
+local function tick(dt) P._Frame()._scripts.OnUpdate(P._Frame(), dt or 1.1) end
 local function shown() return A.Preview.Shown() end
 local function previewFrame() return _G.AltStableSyncPreview end
 local function confirm() return previewFrame().confirm:Click() end
@@ -100,7 +100,7 @@ local function pick(owner, value)
             if b.value == value then return b:Click() end
         end
         local before = W.menu.offset
-        W.menu.scripts.OnMouseWheel(W.menu, -1)
+        W.menu._scripts.OnMouseWheel(W.menu, -1)
         if W.menu.offset == before then break end
     end
     error("no menu item " .. tostring(value))
@@ -354,7 +354,7 @@ do
     WoW.chatLines = {}
     confirm()
     eq("stale: nothing written", #G.calls, 0)
-    check("stale: said so", table.concat(WoW.chat(), " "):find("review it again", 1, true) ~= nil, table.concat(WoW.chat(), " | "))
+    check("stale: said so", table.concat(WoW.chatLines, " "):find("review it again", 1, true) ~= nil, table.concat(WoW.chatLines, " | "))
     tick(0.01)
     check("stale: the footer repeats it", W.status:GetText():find("review it again", 1, true) ~= nil, W.status:GetText())
 
@@ -577,7 +577,7 @@ do
     check("dialog: Review on", d.review:IsEnabled())
     -- Enter reviews (opens the preview), never confirms.
     local n = #A.Catalog.List("loadout", "PRIEST", "holy")
-    d.name.scripts.OnEnterPressed(d.name)
+    d.name._scripts.OnEnterPressed(d.name)
     eq("dialog: Enter opens the preview", shown() and shown().title, "Save As everyday?")
     eq("dialog: Enter saved nothing", #A.Catalog.List("loadout", "PRIEST", "holy"), n)
     cancel()
@@ -611,7 +611,7 @@ do
     check("slash: closes", not P._Frame():IsShown())
     WoW.chatLines = {}
     A.SlashHandler("status")
-    check("slash: status still prints", table.concat(WoW.chat(), " "):find("schema", 1, true) ~= nil)
+    check("slash: status still prints", table.concat(WoW.chatLines, " "):find("schema", 1, true) ~= nil)
 end
 
 -- #7 through the panel: step 1 only switches the binding set, and only on its OK.
@@ -774,7 +774,7 @@ do
     tick(0.01)
     check("events: a slot change shows at once", W.saveStatus:GetText():find("Unsaved: 1 slot", 1, true) ~= nil, W.saveStatus:GetText())
     P.Hide()
-    check("events: hidden, no longer registered", not P._Frame().events.ACTIONBAR_SLOT_CHANGED)
+    check("events: hidden, no longer registered", not P._Frame()._events.ACTIONBAR_SLOT_CHANGED)
 end
 
 -- A long list stays on screen and every entry is reachable (Codex on #60).

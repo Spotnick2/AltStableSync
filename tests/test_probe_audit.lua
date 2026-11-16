@@ -12,8 +12,8 @@
 -- private and local, so CI (FOREVERPROBE_OPTIONAL=1) skips this file.
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 dofile("tests/wow_ui.lua")
 
@@ -22,8 +22,7 @@ do
     local toc = io.open(root .. "/ForeverProbe.toc", "rb")
     if not toc then
         if os.getenv("FOREVERPROBE_OPTIONAL") == "1" then
-            print("test_probe_audit: SKIPPED (no ForeverProbe checkout; probe tests run locally)")
-            os.exit(0)
+            Kit.skip("test_probe_audit", "no ForeverProbe checkout; probe tests run locally")
         end
         error("ForeverProbe checkout not found at " .. root .. ": clone it there or set FOREVERPROBE", 0)
     end
@@ -47,7 +46,7 @@ local function shoot()
         WoW.clock = WoW.clock + 0.5
         WoW.now = WoW.now + 1
         for _, f in ipairs(WoW.frames) do
-            local h = f.scripts.OnUpdate
+            local h = f._scripts.OnUpdate
             if h then h(f, 0.5) end
         end
     end
@@ -377,7 +376,7 @@ eq("five screenshots", shots, 5)
 
 eq("no mutating game call", #G.calls, 0, table.concat(G.calls, ", "))
 eq("no AltStableSync write path", #writes, 0, table.concat(writes, ", "))
-eq("nothing in chat", #WoW.chat(), 0, table.concat(WoW.chat(), " | "))
+eq("nothing in chat", #WoW.chatLines, 0, table.concat(WoW.chatLines, " | "))
 
 do
     local R = DB.audit.records

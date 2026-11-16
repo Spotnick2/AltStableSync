@@ -8,8 +8,8 @@
 -- cleared), restore (same pet, another pet, partial), Save and Save As.
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 
 local G = WoW.game
@@ -159,7 +159,7 @@ do
     check("record: backup released", A.Backups.Operation() == nil)
     WoW.chatLines = {}
     A.Commands.Report("load", r, nil, plan)
-    local said = table.concat(WoW.chat(), "\n")
+    local said = table.concat(WoW.chatLines, "\n")
     check("report: pet slots counted", said:find("6 pet slots", 1, true) ~= nil, said)
     -- Loading again: nothing to do.
     check("load again: no-op", L.Plan(entry).noop)

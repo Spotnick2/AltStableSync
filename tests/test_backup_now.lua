@@ -4,8 +4,8 @@
 -- backups store; a full ring is previewed first.
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 
 local G = WoW.game
@@ -35,7 +35,7 @@ local function boot(opts)
     WoW.clock = WoW.clock + 10
 end
 
-local function said(s) return table.concat(WoW.chat(), "\n"):find(s, 1, true) ~= nil end
+local function said(s) return table.concat(WoW.chatLines, "\n"):find(s, 1, true) ~= nil end
 local function ring() return (B.List()) end
 local function ser(v)
     if type(v) ~= "table" then return type(v):sub(1, 1) .. tostring(v) end
@@ -71,9 +71,9 @@ do
     eq("key SHIFT-2", s.keys["SHIFT-2"], "ACTIONBUTTON2")
     eq("no macro will be deleted by restoring it", next(s.createdMacros), nil)
     eq("no pet out: no pet bar", s.pet, nil)
-    check("says what it took", said("Backed up: 4 slots with an action, 3 keys."), table.concat(WoW.chat(), " | "))
-    check("says what it left out", said("Left out (restoring leaves it as it is):"), table.concat(WoW.chat(), " | "))
-    check("names the slot by bar and button", said("button 6: flyout"), table.concat(WoW.chat(), " | "))
+    check("says what it took", said("Backed up: 4 slots with an action, 3 keys."), table.concat(WoW.chatLines, " | "))
+    check("says what it left out", said("Left out (restoring leaves it as it is):"), table.concat(WoW.chatLines, " | "))
+    check("names the slot by bar and button", said("button 6: flyout"), table.concat(WoW.chatLines, " | "))
     eq("no game write", #G.calls, 0)
     eq("catalog unchanged", ser(AltStableSyncDB.presets), catalog)
     eq("character data unchanged", ser(AltStableSyncChar), char)
@@ -376,7 +376,7 @@ do
     boot()
     WoW.chatLines = {}
     A.Commands.backup()
-    check("report states the coverage", said("Restoring it leaves keys you bind later"), table.concat(WoW.chat(), " | "))
+    check("report states the coverage", said("Restoring it leaves keys you bind later"), table.concat(WoW.chatLines, " | "))
     local before = ser(ring())
     G.actions[9] = { kind = "spell", id = 2060 }             -- something new to back up
     local gic = C_Item.GetItemCount
@@ -475,12 +475,12 @@ do
     A.Commands.backup()
     C_SpellBook.HasPetSpells = hps
     eq("unreadable pet book: no backup", #ring(), 0)
-    check("unreadable pet book: said", said("Couldn't read your pet's spellbook"), table.concat(WoW.chat(), " | "))
+    check("unreadable pet book: said", said("Couldn't read your pet's spellbook"), table.concat(WoW.chatLines, " | "))
 
     hunter({ { id = 14917, name = "Growl" } })
     A.Commands.backup()
     eq("ability not in the pet book: no backup", #ring(), 0)
-    check("ability not in the pet book: names the slot", said("Pet slot 4"), table.concat(WoW.chat(), " | "))
+    check("ability not in the pet book: names the slot", said("Pet slot 4"), table.concat(WoW.chatLines, " | "))
 
     -- At a full ring's confirm, nothing is dropped.
     hunter({ { id = 14916, name = "Growl" } })
@@ -505,7 +505,7 @@ do
     WoW.chatLines = {}
     A.Commands.backup()
     eq("resummon: still one backup", #ring(), 1)
-    check("resummon: nothing new", said("nothing new"), table.concat(WoW.chat(), " | "))
+    check("resummon: nothing new", said("nothing new"), table.concat(WoW.chatLines, " | "))
     -- Another pet with the same bar is new.
     G.pet.name = "Other"
     A.Commands.backup()

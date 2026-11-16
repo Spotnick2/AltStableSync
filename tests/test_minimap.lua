@@ -4,8 +4,8 @@
 -- position and visibility, into usable data only.
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 
 local G = WoW.game
@@ -13,8 +13,8 @@ local A, P, M
 
 -- The client's minimap and tooltip, as far as the button uses them.
 local function clientFrames()
-    Minimap = NewWidget("Frame", "Minimap")
-    Minimap.width, Minimap.height = 198, 198
+    Minimap = CreateFrame("Frame", "Minimap")
+    Minimap:SetSize(198, 198)
     function Minimap:GetFrameLevel() return 2 end
     function Minimap:GetCenter() return 500, 400 end
     function Minimap:GetEffectiveScale() return 1 end
@@ -67,19 +67,19 @@ end
 do
     boot()
     local b = button()
-    check("button made at login", b ~= nil and b.parent == Minimap)
+    check("button made at login", b ~= nil and b._parent == Minimap)
     local _, rel, _, x, y = point()
     check("anchored on the minimap", rel == Minimap)
     local r = 99 + 10                                         -- half of 198, plus the clearance
     check("default angle 200 on the ellipse", near(x, r * math.cos(math.rad(200))) and near(y, r * math.sin(math.rad(200))),
           tostring(x) .. "," .. tostring(y))
     check("follows the minimap's size (a hook, not a SetScript)",
-          b._followsResize == true and Minimap.hooks and #Minimap.hooks.OnSizeChanged == 1 and Minimap.scripts.OnSizeChanged == nil)
+          b._followsResize == true and Minimap._hooks and #Minimap._hooks.OnSizeChanged == 1 and Minimap._scripts.OnSizeChanged == nil)
     eq("nothing saved at login", AltStableSyncDB.minimap, nil)
     check("the binding's text is set", BINDING_NAME_ALTSTABLESYNC_TOGGLE == "Open or close AltStableSync")
     -- Resized: it follows.
-    Minimap.width = 300
-    Minimap.hooks.OnSizeChanged[1](Minimap)
+    Minimap:SetWidth(300)
+    Minimap._hooks.OnSizeChanged[1](Minimap)
     _, _, _, x = point()
     check("resize repositions", near(x, (150 + 10) * math.cos(math.rad(200))), tostring(x))
 end
@@ -111,15 +111,15 @@ end
 do
     boot()
     local b = button()
-    b.scripts.OnDragStart(b)
+    b._scripts.OnDragStart(b)
     WoW.cursorX, WoW.cursorY = 500, 600                       -- straight above the centre: 90 degrees
-    b.scripts.OnUpdate(b)
+    b._scripts.OnUpdate(b)
     check("drag saves the angle", AltStableSyncDB.minimap and near(AltStableSyncDB.minimap.angle, 90),
           ser(AltStableSyncDB.minimap))
     local _, _, _, x, y = point()
     check("drag moves the button", near(x, 0) and near(y, 109))
-    b.scripts.OnDragStop(b)
-    check("drag stop ends the updates", b.scripts.OnUpdate == nil)
+    b._scripts.OnDragStop(b)
+    check("drag stop ends the updates", b._scripts.OnUpdate == nil)
 end
 
 -- Saved settings come back at login.
@@ -142,7 +142,7 @@ do
     A.SlashHandler("minimap")
     check("hidden", not button():IsShown())
     eq("hide saved", AltStableSyncDB.minimap and AltStableSyncDB.minimap.hide, true)
-    check("says how to bring it back", table.concat(WoW.chat(), " "):find("/altsync minimap shows it again", 1, true) ~= nil)
+    check("says how to bring it back", table.concat(WoW.chatLines, " "):find("/altsync minimap shows it again", 1, true) ~= nil)
     A.SlashHandler("minimap")
     check("shown again", button():IsShown())
     eq("hide cleared", AltStableSyncDB.minimap.hide, nil)
@@ -156,7 +156,7 @@ do
     AltStableSync_OnAddonCompartmentClick("AltStableSync", "RightButton")
     eq("addon list: right opens Backups", P.view, "backups")
     P.Hide()
-    local row = NewWidget("Button")
+    local row = CreateFrame("Button")
     AltStableSync_OnAddonCompartmentEnter("AltStableSync", row)
     check("addon list: tooltip on the row", GameTooltip.shown and GameTooltip.owner == row)
     check("addon list: no drag hint", not lines():find("Drag", 1, true), lines())
@@ -169,26 +169,26 @@ end
 do
     boot()
     local b = button()
-    b.scripts.OnEnter(b)
+    b._scripts.OnEnter(b)
     check("tooltip: no target yet", lines():find("No save target yet", 1, true) ~= nil, lines())
     check("tooltip: drag hint on the button", lines():find("Drag: move around the minimap", 1, true) ~= nil)
     check("tooltip: no Link line without the Link addon", not lines():find("Link", 1, true) and not lines():find("account", 1, true))
     local e = assert(A.Catalog.Create("loadout", { class = "PRIEST", category = "holy", name = "Raid" }, A.Loadout.Capture()))
     A.char.loaded = { loadout = { id = e.id, version = e.version } }
-    b.scripts.OnEnter(b)
+    b._scripts.OnEnter(b)
     check("tooltip: the target", lines():find("Save target: Raid - Holy", 1, true) ~= nil, lines())
     local peers = {}
     A.Link = { sync = { Peers = function() return peers end }, lib = { IsEnabled = function() return true end } }
-    b.scripts.OnEnter(b)
+    b._scripts.OnEnter(b)
     check("tooltip: offline", lines():find("Other account offline", 1, true) ~= nil, lines())
     peers = { {} }
-    b.scripts.OnEnter(b)
+    b._scripts.OnEnter(b)
     check("tooltip: online", lines():find("Other account online", 1, true) ~= nil, lines())
     A.Link = { why = "no peers yet" }
-    b.scripts.OnEnter(b)
+    b._scripts.OnEnter(b)
     check("tooltip: Link off", lines():find("Link off", 1, true) ~= nil, lines())
     A.Link = nil
-    b.scripts.OnLeave(b)
+    b._scripts.OnLeave(b)
     check("tooltip: hidden on leave", not GameTooltip.shown)
 end
 
@@ -200,9 +200,9 @@ do
     G.calls = {}
     local b = button()
     b:Click("LeftButton"); b:Click("RightButton"); b:Click("LeftButton")
-    b.scripts.OnEnter(b); b.scripts.OnLeave(b)
+    b._scripts.OnEnter(b); b._scripts.OnLeave(b)
     AltStableSync_OnAddonCompartmentClick("AltStableSync", "LeftButton")
-    AltStableSync_OnAddonCompartmentEnter("AltStableSync", NewWidget("Button"))
+    AltStableSync_OnAddonCompartmentEnter("AltStableSync", CreateFrame("Button"))
     P.Toggle(); P.Toggle()                                    -- what the key binding runs
     eq("no game write", #G.calls, 0)
     eq("catalog unchanged", ser(AltStableSyncDB.presets), catalog)
@@ -224,15 +224,15 @@ do
     check("refused: default angle (refused data not read)", near(x, 109 * math.cos(math.rad(200))))
     b:Click("LeftButton")
     check("refused: the window says why", P._Frame():IsShown() and P._W.blocked:IsShown())
-    b.scripts.OnDragStart(b)
+    b._scripts.OnDragStart(b)
     WoW.cursorX, WoW.cursorY = 500, 600
-    b.scripts.OnUpdate(b)
-    b.scripts.OnDragStop(b)
-    b.scripts.OnEnter(b)
+    b._scripts.OnUpdate(b)
+    b._scripts.OnDragStop(b)
+    b._scripts.OnEnter(b)
     check("refused: tooltip says unsupported", lines():find("Unsupported version", 1, true) ~= nil, lines())
     WoW.chatLines = {}
     A.SlashHandler("minimap")
-    check("refused: slash refuses", table.concat(WoW.chat(), " "):find("disabled", 1, true) ~= nil)
+    check("refused: slash refuses", table.concat(WoW.chatLines, " "):find("disabled", 1, true) ~= nil)
     check("refused: button still shown", b:IsShown())
     eq("refused: DB byte for byte", ser(AltStableSyncDB), dbBefore)
     eq("refused: char byte for byte", ser(AltStableSyncChar), charBefore)

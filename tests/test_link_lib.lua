@@ -10,8 +10,8 @@
 -- Battle.net is stubbed as "connected, no friends": no peer is ever found.
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/libaccountsync.lua")
 
 -- Just enough Battle.net and timers for the library to start with no peer.
@@ -98,7 +98,7 @@ local ok, err = pcall(function()
 end)
 check("link calls run on the real library", ok, tostring(err))
 check("status printed", (function()
-    for _, l in ipairs(WoW.chat()) do if tostring(l):find("Link: on", 1, true) then return true end end
+    for _, l in ipairs(WoW.chatLines) do if tostring(l):find("Link: on", 1, true) then return true end end
 end)() == true)
 
 finish("test_link_lib")

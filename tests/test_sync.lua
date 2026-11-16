@@ -10,8 +10,8 @@
 -- nothing received ever reaches game state (A40).
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 
 -- Tripwire: every game-state writer the addon could ever call.
 local touched = {}

@@ -177,11 +177,11 @@ function PetHasActionBar() return G.pet ~= nil and G.pet.hasBar end
 function GetLocale() return G.locale end
 function InCombatLockdown() return G.combat end
 
-Enum = Enum or {}
+Enum = rawget(_G, "Enum") or {}
 Enum.BindingSet = { Default = 0, Account = 1, Character = 2, Current = 3 }
 Enum.SpellBookSpellBank = { Player = 0, Pet = 1 }
 Enum.SpellBookItemType = { None = 0, Spell = 1, FutureSpell = 2, PetAction = 3, Flyout = 4 }
-Constants = Constants or {}
+Constants = rawget(_G, "Constants") or {}
 Constants.MacroConsts = { MAX_ACCOUNT_MACROS = 120, MAX_CHARACTER_MACROS = 30 }
 
 ------------------------------------------------------------

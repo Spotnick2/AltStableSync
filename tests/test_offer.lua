@@ -3,8 +3,8 @@
 -- answer records, and that it never writes game state or the catalog.
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 dofile("tests/wow_ui.lua")
 
@@ -139,7 +139,7 @@ do
     frame().confirm:Click()
     frame().confirm:Click()
     UI.after = {}
-    check("stopped apply: stopped", table.concat(WoW.chat(), " "):find("Stopped", 1, true) ~= nil)
+    check("stopped apply: stopped", table.concat(WoW.chatLines, " "):find("Stopped", 1, true) ~= nil)
     check("stopped apply: not answered", not answered())
 
     boot{ setups = { { name = "Base" } } }

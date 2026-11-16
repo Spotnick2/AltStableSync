@@ -15,8 +15,8 @@
 -- test_catalog and test_sync keep the ancestry and transport rules.
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 
 local G = WoW.game
@@ -55,7 +55,7 @@ local function ser(v)
     return "{" .. table.concat(out, ",") .. "}"
 end
 local function catalog() return ser(A.db.presets) end
-local function said(s) return table.concat(WoW.chat(), "\n"):find(s, 1, true) ~= nil end
+local function said(s) return table.concat(WoW.chatLines, "\n"):find(s, 1, true) ~= nil end
 local function previewText()
     local o = A.Preview.Shown()
     return o and ((o.title or "") .. "\n" .. table.concat(o.lines or {}, "\n")) or ""

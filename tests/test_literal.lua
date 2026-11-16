@@ -11,8 +11,8 @@
 --   * edit boxes are prefilled in the client's typed form.
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 
 local G = WoW.game
@@ -31,7 +31,7 @@ local function tooltip()
     function GameTooltip:SetText(t) self.lines = { tostring(t) } end
     function GameTooltip:Show() end
     function GameTooltip:Hide() end
-    Minimap = NewWidget("Frame", "Minimap")
+    Minimap = CreateFrame("Frame", "Minimap")
     function Minimap:GetCenter() return 500, 400 end
     function Minimap:GetEffectiveScale() return 1 end
     function Minimap:GetFrameLevel() return 2 end
@@ -101,7 +101,7 @@ local function everything()
     for _, t in ipairs(GameTooltip.lines or {}) do all[#all + 1] = t end
     return all
 end
-local function said(s) return table.concat(WoW.chat(), "\n"):find(s, 1, true) ~= nil end
+local function said(s) return table.concat(WoW.chatLines, "\n"):find(s, 1, true) ~= nil end
 local function shownBody() return _G.AltStableSyncPreview and _G.AltStableSyncPreview.body:GetText() or "" end
 local function shownTitle() return _G.AltStableSyncPreview and _G.AltStableSyncPreview.title:GetText() or "" end
 local function visible()
@@ -173,8 +173,8 @@ do
     A.Commands.list()
     check("list: the name reaches chat", said("NAMEX"))
     A.Commands.conflicts()
-    check("conflicts: the from reaches chat", table.concat(WoW.chat(), "\n"):find("NAMEX", 1, true) ~= nil)
-    check("chat: our prefix keeps its colour", WoW.chat()[1]:find("|cff00ccff[AltStableSync]|r ", 1, true) == 1)
+    check("conflicts: the from reaches chat", table.concat(WoW.chatLines, "\n"):find("NAMEX", 1, true) ~= nil)
+    check("chat: our prefix keeps its colour", WoW.chatLines[1]:find("|cff00ccff[AltStableSync]|r ", 1, true) == 1)
 
     -- The Load preview, shown twice from the same options.
     A.Commands.LoadEntry(e)

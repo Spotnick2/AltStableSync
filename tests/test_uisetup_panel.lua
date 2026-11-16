@@ -4,8 +4,8 @@
 -- writes (the real Panel, Commands and Preview handlers).
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 dofile("tests/wow_game.lua")
 dofile("tests/wow_ui.lua")
 
@@ -77,14 +77,14 @@ do
     boot()
     local R = A.Reload._test
     local b = R.button
-    check("reload: a secure action button", tostring(b.template):find("SecureActionButtonTemplate", 1, true) ~= nil)
+    check("reload: a secure action button", tostring(b._template):find("SecureActionButtonTemplate", 1, true) ~= nil)
     eq("reload: macro type", b:GetAttribute("type"), "macro")
     eq("reload: runs /reload", b:GetAttribute("macrotext"), "/reload")
-    check("reload: both mouse edges", b.clicks and b.clicks[1] == "AnyUp" and b.clicks[2] == "AnyDown")
-    check("reload: parented to UIParent, not to the prompt", b.parent == UIParent)
-    check("reload: the secure template last", tostring(b.template):match("SecureActionButtonTemplate$") ~= nil)
+    check("reload: both mouse edges", b._registeredClicks and b._registeredClicks[1] == "AnyUp" and b._registeredClicks[2] == "AnyDown")
+    check("reload: parented to UIParent, not to the prompt", b._parent == UIParent)
+    check("reload: the secure template last", tostring(b._template):match("SecureActionButtonTemplate$") ~= nil)
     check("reload: above the prompt", b:GetFrameLevel() > R.prompt:GetFrameLevel())
-    for _, p in ipairs(b.points or {}) do
+    for _, p in ipairs(b._points or {}) do
         check("reload: placed against UIParent only", p[2] == UIParent)
     end
     check("reload: hidden at load", not R.prompt:IsShown() and not b:IsShown())
@@ -131,7 +131,7 @@ do
     WoW.chatLines = {}
     A.Commands.restore("op")
     previewFrame().confirm:Click()
-    check("reload: the restore stopped", table.concat(WoW.chat(), " "):find("Stopped", 1, true) ~= nil)
+    check("reload: the restore stopped", table.concat(WoW.chatLines, " "):find("Stopped", 1, true) ~= nil)
     check("reload: asked after a partial restore", R.prompt:IsShown() and not UI.bars[1])
     UI.after = {}
 

@@ -5,8 +5,8 @@
 -- framing, checksum, schema refusal and `previous` stripping, not the codec.
 ------------------------------------------------------------
 
-dofile("tests/harness.lua")
 dofile("tests/wow_stubs.lua")
+dofile("tests/harness.lua")
 
 local function boot()
     WoW.reset()
