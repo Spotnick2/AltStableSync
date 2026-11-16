@@ -5,9 +5,8 @@
         pwsh Tools/deploy.ps1
         pwsh Tools/deploy.ps1 -AddOnsPath "D:\Games\WoW\<flavour>\Interface\AddOns"
 
-    The default is the beta (_classic_beta_). Live Forever is _forever_:
-    -AddOnsPath "C:\Program Files (x86)\World of Warcraft\_forever_\Interface\AddOns"
-    (the folder exists only after the client's first launch).
+    The default is the live client (_forever_); the folder exists only after the
+    first launch. The closed beta (_classic_beta_) is no longer a target.
 
     LibGlass-1.0 is the embedded external (.pkgmeta). For a dev copy this
     script hands that job to the LibGlass checkout's own deploy.ps1, FIRST
