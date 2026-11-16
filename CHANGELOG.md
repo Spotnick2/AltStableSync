@@ -2,6 +2,11 @@
 
 ## v1.0.1
 
+- **Macro icons stay as you chose them** (#105). A macro with the "?" icon shows the icon of the
+  spell it casts, and saving or loading it no longer freezes it on that spell's icon. Loadouts saved
+  by an earlier version keep the macro's own icon, or create it with "?", and say so; an earlier
+  version's backup leaves the macros it changed as they are. Both accounts need this version for
+  catalog sync and Share/Import, and the first Save after updating may ask you to load again.
 - **Previews say more** (audit #95). A load or restore that saves your keybindings says so, and
   that every key change in memory is saved with them. A spell replaced by another rank of itself
   shows the ranks. A restore names the macros it keeps. A slot the loadout has empty that holds

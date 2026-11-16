@@ -8,3 +8,4 @@
 ## SavedVariables: AltStableSyncProbeDB
 
 AltStableSyncProbe.lua
+Measure.lua

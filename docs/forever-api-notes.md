@@ -367,6 +367,23 @@ never calls it in combat (the write guard refuses first, and a refused or silent
 the read-back as "macro not updated"). Deleting a macro empties its slots, which is one more reason a
 load or a restore never deletes one.
 
+### A macro's chosen icon vs the one it shows (#105, read in Blizzard's source, 70938; NOT measured yet)
+
+The plain-macro row above is the only icon measurement. For a macro with the "?" icon (134400) the
+picture differs, read in Blizzard's own UI (wow-ui-source, 70938):
+- The macro editor's icon picker reads the macro's **chosen** icon with
+  `C_Macro.GetSelectedMacroIcon(index)` (`Blizzard_MacroUI/Blizzard_MacroIconSelector.lua:78`); the
+  list and the selected-macro button use `GetMacroInfo`'s texture, the icon it **shows**.
+- Editing only the text is `EditMacro(index, nil, nil, body)` (`Blizzard_MacroUI.lua:364`).
+- So for a "?" macro `GetMacroInfo` most likely reports the icon of the spell it shows (with or without
+  `#showtooltip`), and writing that back freezes the macro on it.
+
+AltStableSync reads `GetSelectedMacroIcon` since #105 and treats an older build's recorded icon as
+history (docs/DESIGN.md, schema 12 → 13). **To measure:** `/fp steps sync icons` (`Measure.lua`) on a
+throwaway macro: both reads for "?" with and without `#showtooltip`, with an unknown spell, with a
+chosen icon; what `EditMacro(i, nil, nil, body)` keeps; whether `CreateMacro` with 134400 and with
+`"INV_Misc_QuestionMark"` read back the same. Record the results here with the build.
+
 ### Edit Mode layouts: the write side (#29, #58, 2026-10-12, build 70338)
 
 Measured with `/syncprobe layouts`, `layoutadd`, `layoutupdate`, `layoutactivate`, `layoutclean`

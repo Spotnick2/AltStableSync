@@ -98,7 +98,8 @@ local function GoodAction(a, macros, mode)
     return false
 end
 
-local DEF = { body = true, icon = true }
+-- `sel` (#105): the icon is the macro's chosen one; only ever true.
+local DEF = { body = true, icon = true, sel = true }
 local function GoodMacros(m, mode)
     if type(m) ~= "table" then return false end
     local n = 0
@@ -108,6 +109,7 @@ local function GoodMacros(m, mode)
         if not Str(name, MACRO_NAME[mode], true) or type(def) ~= "table" or not Only(def, DEF) then return false end
         if not Str(def.body, MACRO_BODY_MAX, false, true) then return false end
         if not Icon(def.icon) then return false end
+        if def.sel ~= nil and (def.sel ~= true or not Int(def.icon)) then return false end
     end
     return true
 end

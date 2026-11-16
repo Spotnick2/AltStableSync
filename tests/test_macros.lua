@@ -44,7 +44,7 @@ local function loadout(actions, macros)
     local a = actions or { [4] = heal() }
     return assert(A.Catalog.Create("loadout", { class = "PRIEST", category = "general",
         name = "L" .. tostring(math.random(1, 1e9)) },
-        { actions = a, macros = macros or { Heal = { body = NEW, icon = NEW_ICON } }, cover = { { 1, 12 } } }))
+        { actions = a, macros = macros or { Heal = { body = NEW, icon = NEW_ICON, sel = true } }, cover = { { 1, 12 } } }))
 end
 
 -- This character: Heal (old text) on slot 4 and on slot 20, outside the
@@ -188,7 +188,7 @@ end
 ------------------------------------------------------------
 do
     boot(); char()
-    local e = loadout({ [4] = heal(OLD) }, { Heal = { body = OLD, icon = NEW_ICON } })
+    local e = loadout({ [4] = heal(OLD) }, { Heal = { body = OLD, icon = NEW_ICON, sel = true } })
     local plan = L.Plan(e)
     eq("icon only: one edit", #plan.edits, 1)
     check("icon only: not a no-op", not plan.noop)
@@ -217,7 +217,7 @@ do
 
     -- Same text and icon: reused, no edit.
     boot(); char()
-    e = loadout({ [4] = heal(OLD) }, { Heal = { body = OLD .. "\n", icon = ICON } })
+    e = loadout({ [4] = heal(OLD) }, { Heal = { body = OLD .. "\n", icon = ICON, sel = true } })
     plan = L.Plan(e)
     eq("same: no edit", #plan.edits, 0)
     eq("same: no op on slot 4", (function() for _, op in ipairs(plan.actions) do if op.slot == 4 then return op end end end)(), nil)
@@ -271,7 +271,7 @@ do
     -- the backup pinned with the update recorded; restore op completes.
     boot(); char()
     e = loadout({ [4] = heal(), [5] = { kind = "macro", name = "Aaa", scope = "char", body = "/a" } },
-        { Heal = { body = NEW, icon = NEW_ICON }, Aaa = { body = "/a", icon = ICON } })
+        { Heal = { body = NEW, icon = NEW_ICON, sel = true }, Aaa = { body = "/a", icon = ICON, sel = true } })
     plan = L.Plan(e)
     eq("combat: one create", #plan.creates, 1)
     eq("combat: one edit", #plan.edits, 1)
@@ -298,7 +298,7 @@ do
                       { name = "Shield", body = "/old shield", char = true, icon = ICON } },
            actions = { [4] = { macro = "Heal" }, [5] = { macro = "Shield" } } })
     e = loadout({ [4] = heal(), [5] = { kind = "macro", name = "Shield", scope = "char", body = "/new shield" } },
-        { Heal = { body = NEW, icon = NEW_ICON }, Shield = { body = "/new shield", icon = ICON } })
+        { Heal = { body = NEW, icon = NEW_ICON, sel = true }, Shield = { body = "/new shield", icon = ICON, sel = true } })
     plan = L.Plan(e)
     G.onEditMacro = function()
         G.onEditMacro = nil
@@ -335,7 +335,7 @@ do
                       { name = "Shield", body = "/old shield", char = true, icon = ICON } },
            actions = { [4] = { macro = "Heal" }, [5] = { macro = "Shield" } } })
     local e = loadout({ [4] = heal(), [5] = { kind = "macro", name = "Shield", scope = "char", body = "/new shield" } },
-        { Heal = { body = NEW, icon = NEW_ICON }, Shield = { body = "/new shield", icon = ICON } })
+        { Heal = { body = NEW, icon = NEW_ICON, sel = true }, Shield = { body = "/new shield", icon = ICON, sel = true } })
     local r = L.Load(e, L.Plan(e))
     check("again: loaded", r and not r.failed, r and r.failed)
     eq("again: two updates", r and r.edited, 2)
@@ -405,7 +405,7 @@ end
 -- Damaged and unreadable: never an update
 ------------------------------------------------------------
 do
-    for label, def in pairs({ ["no body"] = { icon = NEW_ICON }, ["body a number"] = { body = 5, icon = NEW_ICON } }) do
+    for label, def in pairs({ ["no body"] = { icon = NEW_ICON }, ["body a number"] = { body = 5, icon = NEW_ICON, sel = true } }) do
         boot(); char()
         -- Damaged on disk: the catalog refuses it at Create (#98).
         local e = loadout()
@@ -421,7 +421,7 @@ do
     end
     -- An empty string is a real body: an update.
     boot(); char()
-    eq("empty body: an update", #L.Plan(loadout(nil, { Heal = { body = "", icon = ICON } })).edits, 1)
+    eq("empty body: an update", #L.Plan(loadout(nil, { Heal = { body = "", icon = ICON, sel = true } })).edits, 1)
 
     -- This character's macro reads with no body.
     boot(); char()
@@ -434,7 +434,7 @@ do
 
     -- Too long after normalising: never written.
     boot(); char()
-    plan = L.Plan(loadout(nil, { Heal = { body = ("x"):rep(255), icon = ICON } }))
+    plan = L.Plan(loadout(nil, { Heal = { body = ("x"):rep(255), icon = ICON, sel = true } }))
     eq("too long: no edit", #plan.edits, 0)
 end
 
@@ -467,7 +467,7 @@ do
     boot(); char()
     local before = A.Game.MacrosNamed("Heal")[1].index
     local e = loadout({ [4] = heal(), [5] = { kind = "macro", name = "Aaa", scope = "char", body = "/a" } },
-        { Heal = { body = NEW, icon = NEW_ICON }, Aaa = { body = "/a", icon = ICON } })
+        { Heal = { body = NEW, icon = NEW_ICON, sel = true }, Aaa = { body = "/a", icon = ICON, sel = true } })
     local r = L.Load(e, L.Plan(e))
     check("shift: loaded", r and not r.failed, r and r.failed)
     check("shift: Heal moved", A.Game.MacrosNamed("Heal")[1].index ~= before)
@@ -484,7 +484,7 @@ do
                    actions = { [4] = { macro = "Heal" }, [6] = { spell = 2050 } } })
     local e = loadout({ [4] = heal(), [5] = { kind = "macro", name = "New", scope = "char", body = "/n" },
                         [7] = { kind = "macro", name = "Acct", scope = "account", body = "/say hi" } },
-        { Heal = { body = NEW, icon = NEW_ICON }, New = { body = "/n", icon = ICON } })
+        { Heal = { body = NEW, icon = NEW_ICON, sel = true }, New = { body = "/n", icon = ICON, sel = true } })
     local plan = L.Plan(e, { noCharMacros = true })
     eq("no macros: no edit", #plan.edits, 0)
     eq("no macros: nothing created", #plan.creates, 0)

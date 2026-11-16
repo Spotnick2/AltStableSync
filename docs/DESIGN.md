@@ -142,7 +142,7 @@ bus.
 
 ```lua
 AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
-  schema = 10,                      -- #27 1 -> 2, #28 2 -> 3, #5 3 -> 4, #46 4 -> 5, #7 5 -> 6, #47 6 -> 7, #6 7 -> 8, #62 8 -> 9, #10 9 -> 10 (stamps); an unknown or newer schema is refused untouched
+  schema = 13,                      -- #27 1 -> 2, #28 2 -> 3, #5 3 -> 4, #46 4 -> 5, #7 5 -> 6, #47 6 -> 7, #6 7 -> 8, #62 8 -> 9, #10 9 -> 10, 10/11 -> 12 (stamps), #105 12 -> 13; an unknown or newer schema is refused untouched
   presets = {
     [id] = {
       id = "loadout-a1b2c3d4e5f6-12",          -- kind-writer-seq: never collides across accounts or copies
@@ -156,6 +156,9 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
       created = <time>, updated = <time>,      -- display metadata only, never ordering
       provenance = { sourceChar = "Name-Realm", build = "70245" },
       modules = { actions = {...}, bindings = {...}, macros = {...},    -- loadout
+                  -- macros = { [name] = { body, icon, sel = true } }: `sel` (#105, schema 13) says
+                  -- `icon` is the macro's chosen icon; without it, an older build recorded the icon
+                  -- the macro showed, which is never written back
                   cover = { {1, 120}, {145, 180} } }  -- the action slots captured (#5); 1-12 for older entries
                   -- a spell action from a class spellbook tab carries class = true (#46, schema 5)
                   -- pet = { [familyId] = { family, locale, slots = { [1..10] = { kind = "token", token }
@@ -183,7 +186,9 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
                                                -- one that updates character macros holds
                                                -- editedMacros = { {name, before = {body, icon},
                                                --   after = {body, icon}}, ... } (#6), written
-                                               -- before the snapshot is stored
+                                               -- before the snapshot is stored; selIcons = true
+                                               -- (#105): its macro icons are chosen ones; an older
+                                               -- loadout snapshot's macro reverts are left as is
       firstSeen = <snapshot>,                  -- pinned forever
       operation = <snapshot> | nil,            -- the interrupted operation's original backup;
   } },                                         -- pinned until it completes or is abandoned
@@ -192,7 +197,7 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
 }
 
 AltStableSyncChar = {               -- per character
-  schema = 9,                       -- same number as the DB; an unknown or newer one is refused untouched
+  schema = 13,                      -- same number as the DB; an unknown or newer one is refused untouched
   lastSelected = { ui = id, loadout = { category = "discipline", id = id } },
   loaded = {                        -- ONE baseline per kind: the last Load/Apply, or a Save/Save As (#28)
     ui = { id, version, baseline = <modules as applied>, result = {...},
@@ -242,6 +247,17 @@ AltStableSyncLAS = <LibAccountSync store only>   -- declared ONLY by AltStableSy
   warns before a plain capture. A valid cover is ascending and canonical: adjacent ranges are merged,
   so one slot set has one spelling. Slots outside this build's set are listed by Load and Restore
   ("not supported on this build"), never written, and don't keep a backup "partial".
+- **Schema 12 → 13** (#105). A macro's icon is now its chosen one, read with
+  `C_Macro.GetSelectedMacroIcon` as Blizzard's macro editor does, never `GetMacroInfo`'s: for a "?"
+  macro that one is the icon of the spell it shows, and writing it back froze the macro on it.
+  Definitions this build saves carry `sel = true`; one without it is an older build's, and its icon is
+  history: a Load keeps the live macro's chosen icon (as a value: what `EditMacro` gets, the read-back
+  and the backup), or creates the macro with "?" and says so. Save keeps the chosen definition when an
+  older one of the same text meets it. Backups carry `selIcons = true`; restoring an older loadout
+  backup leaves its macro reverts as they are (partial, pinned), and the duplicate check tells the two
+  apart. The upgrade never reads game state or mints a version: catalog entries, backups and journals
+  stay as they are; only a character's loaded record drops its `after` when it holds a character macro
+  (keyed on that character's own old schema), so Save asks for a Load. The wire schema moves 4 → 5.
 - **Schema 7 → 8** (#6) only stamps the number: 8 adds a backup's optional `editedMacros`. Catalog
   entries don't change, so the wire schema stays 4.
 - **Schema 6 → 7** (#47) only stamps the number: 7 adds the optional `modules.pet`, a backup's `pet`

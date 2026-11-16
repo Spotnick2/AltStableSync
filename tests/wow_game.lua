@@ -24,8 +24,8 @@
 --   WoW.relaunch()             -- a full exit: macro bodies gain the server newline
 --   WoW.game.macroFault = "error" | "noop" | "wrong"  -- the next EditMacro raises, does
 --                                 nothing, or writes another body (#6)
---   WoW.game.createFault = "error" | "wrong"  -- the next CreateMacro raises, or creates the
---                                 macro with another body (audit D10)
+--   WoW.game.createFault = "error" | "wrong" | "icon"  -- the next CreateMacro raises, or creates
+--                                 the macro with another body (audit D10) or icon (#105)
 --   WoW.game.onEditMacro = function(index)  -- runs before each EditMacro (e.g. combat starts)
 --
 -- The pet (#47, measured on 70338): setup{ pet = { family = 4, familyName = "Bear",
@@ -87,7 +87,7 @@ function G.setup(opts)
     end
     G.petCalls, G.petFault, G.onPetCall, G.afterPetCall, G.petReadFails, G.petBookFails = 0, nil, nil, nil, nil, nil
     -- macros: { name, icon, body, char = bool, shows = spellID }
-    G.macroFault, G.onEditMacro, G.createFault = nil, nil, nil
+    G.macroFault, G.onEditMacro, G.createFault, G.selectedIconFault = nil, nil, nil, nil
     G.account, G.char = {}, {}
     for _, m in ipairs(opts.macros or {}) do
         local t = { name = m.name, icon = m.icon or 134400, body = m.body, shows = m.shows }
@@ -394,10 +394,38 @@ end
 
 function GetNumMacros() return #G.account, #G.char end
 
+-- A macro's icon: `m.icon` is the one chosen; GetMacroInfo gives the one
+-- it SHOWS. A "?" macro shows the icon of the spell it uses (#105, from
+-- Blizzard's macro editor, which reads the chosen one with
+-- C_Macro.GetSelectedMacroIcon): here spell N's icon is 900000 + N.
+local QUESTION = 134400
+local function chosenIcon(m)
+    if m.icon == "INV_Misc_QuestionMark" then return QUESTION end
+    return m.icon
+end
+local function shownIcon(m)
+    local icon = chosenIcon(m)
+    if icon == QUESTION and m.shows then return 900000 + m.shows end
+    return icon
+end
+G.shownIcon = shownIcon
+
 function GetMacroInfo(index)
     local m = type(index) == "number" and macroAt(index)
     if not m then return nil end
-    return m.name, m.icon, m.body
+    return m.name, shownIcon(m), m.body
+end
+
+-- WoW.game.selectedIconFault = "error" | "nil": the next read
+-- of a chosen icon raises or returns nothing.
+C_Macro = rawget(_G, "C_Macro") or {}
+function C_Macro.GetSelectedMacroIcon(index)
+    local fault = G.selectedIconFault
+    if fault == "error" then G.selectedIconFault = nil; error("GetSelectedMacroIcon failed", 2) end
+    if fault == "nil" then G.selectedIconFault = nil; return nil end
+    local m = type(index) == "number" and macroAt(index)
+    if not m then return 0 end
+    return chosenIcon(m)
 end
 
 function CreateMacro(name, icon, body, perCharacter)
@@ -408,7 +436,8 @@ function CreateMacro(name, icon, body, perCharacter)
     local fault = G.createFault
     G.createFault = nil
     if fault == "error" then error("CreateMacro failed", 2) end
-    local m = { name = name, icon = icon, body = fault == "wrong" and (body .. " -- something else") or body }
+    local m = { name = name, icon = fault == "icon" and ((tonumber(icon) or 0) + 1) or icon,
+                body = fault == "wrong" and (body .. " -- something else") or body }
     table.insert(list, m)
     G.sortMacros()
     return G.indexOf(m)

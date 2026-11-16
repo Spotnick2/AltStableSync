@@ -44,7 +44,12 @@ local ADDON_NAME = "AltStableSync"
 -- 10/11 -> 12 is a stamp: damage-meter backups must not be silently treated
 -- as restored by older engines. An unpublished draft used 11 with `meter`;
 -- UISetup refuses to claim that draft's meter snapshots were restored.
-local SCHEMA = 12
+-- 12 -> 13 (#105): macro icons are the chosen ones (C_Macro.GetSelectedMacroIcon),
+-- marked `sel` on each definition and `selIcons` on each backup; data
+-- without them is read as an older build's and never rewritten. The only
+-- change: a character's loaded record drops its `after` when it holds a
+-- character macro (its icons were the shown ones), so Save asks for a Load.
+local SCHEMA = 13
 ASS.SCHEMA = SCHEMA
 
 ------------------------------------------------------------
@@ -119,6 +124,17 @@ local function Legacy() return { { Cover.LEGACY[1][1], Cover.LEGACY[1][2] } } en
 -- 3 -> 4: a loadout's modules without a cover were captured by a 1-12 build.
 local function StampCover(modules)
     if type(modules) == "table" and modules.cover == nil then modules.cover = Legacy() end
+end
+
+-- 12 -> 13 (#105): does this comparison hold a character macro (a
+-- definition, or a slot using one)?
+local function HoldsCharMacro(modules)
+    if type(modules) ~= "table" then return false end
+    if type(modules.macros) == "table" and next(modules.macros) ~= nil then return true end
+    for _, a in pairs(type(modules.actions) == "table" and modules.actions or {}) do
+        if type(a) == "table" and a.kind == "macro" and a.scope == "char" then return true end
+    end
+    return false
 end
 
 -- The client build docs/forever-api-notes.md was measured on. A different
@@ -196,7 +212,8 @@ local function Validate(db, char)
         end
         dbAction = "upgrade1"
     elseif db.schema ~= SCHEMA and db.schema ~= 2 and db.schema ~= 3 and db.schema ~= 4 and db.schema ~= 5
-        and db.schema ~= 6 and db.schema ~= 7 and db.schema ~= 8 and db.schema ~= 9 and db.schema ~= 10 and db.schema ~= 11 then
+        and db.schema ~= 6 and db.schema ~= 7 and db.schema ~= 8 and db.schema ~= 9 and db.schema ~= 10 and db.schema ~= 11
+        and db.schema ~= 12 then
         return WrongSchema("saved data", db.schema)
     else
         for _, field in ipairs(DB_TABLES) do
@@ -226,7 +243,8 @@ local function Validate(db, char)
     elseif char.schema == nil then
         return "AltStableSyncChar has data but no schema"
     elseif char.schema ~= SCHEMA and char.schema ~= 2 and char.schema ~= 3 and char.schema ~= 4 and char.schema ~= 5
-        and char.schema ~= 6 and char.schema ~= 7 and char.schema ~= 8 and char.schema ~= 9 and char.schema ~= 10 and char.schema ~= 11 then
+        and char.schema ~= 6 and char.schema ~= 7 and char.schema ~= 8 and char.schema ~= 9 and char.schema ~= 10 and char.schema ~= 11
+        and char.schema ~= 12 then
         return WrongSchema("character data", char.schema)
     elseif char.loaded ~= nil and type(char.loaded) ~= "table" then
         return "AltStableSyncChar.loaded is a " .. type(char.loaded) .. ", not a table"
@@ -287,6 +305,15 @@ local function InitSavedVariables()
     if charAction == "upgrade" and AltStableSyncChar.schema < 4 then
         local rec = type(AltStableSyncChar.loaded) == "table" and AltStableSyncChar.loaded.loadout
         if type(rec) == "table" then StampCover(rec.baseline); StampCover(rec.after) end
+    end
+    -- #105: an older build's comparison holds the icons its character
+    -- macros showed, not their chosen ones; compared with a fresh capture it
+    -- would read as an edit. Dropped, so Save asks for a Load (Save As
+    -- stays). Keyed on this character's own schema: another character may
+    -- already have upgraded the account's.
+    if charAction == "upgrade" and AltStableSyncChar.schema < 13 then
+        local rec = type(AltStableSyncChar.loaded) == "table" and AltStableSyncChar.loaded.loadout
+        if type(rec) == "table" and HoldsCharMacro(rec.after) then rec.after, rec.unavailable = nil, nil end
     end
     if charAction == "fresh" or charAction == "upgrade" then AltStableSyncChar.schema = SCHEMA end
 
