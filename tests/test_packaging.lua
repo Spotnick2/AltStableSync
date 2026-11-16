@@ -166,8 +166,8 @@ eq("LAS store declared in exactly one TOC", declared, 1)
 -- addon's Libs where its TOC loads it; move-folders names the package. (A key
 -- prefixed with the package name would nest it elsewhere.)
 local lasKey = LAS_XML:gsub("\\", "/"):gsub("/LibAccountSync%-1%.0%.xml$", "")
-check("LibAccountSync external at the main addon's Libs, pinned to r5",
-      pkg:find("\n  " .. lasKey:gsub("%p", "%%%0") .. ":%s*\r?\n%s+url: https://github.com/Spotnick2/LibAccountSync%s*\r?\n%s+tag: r5%s*\r?\n") ~= nil)
+check("LibAccountSync external at the main addon's Libs, pinned to r6",
+      pkg:find("\n  " .. lasKey:gsub("%p", "%%%0") .. ":%s*\r?\n%s+url: https://github.com/Spotnick2/LibAccountSync%s*\r?\n%s+tag: r6%s*\r?\n") ~= nil)
 check("move-folders ships the Link addon top-level",
       pkg:find("\nmove%-folders:%s*\r?\n  AltStableSync/Plugins/Link: AltStableSyncLink%s*\r?\n") ~= nil)
 check("no external under the package name", not pkg:find("\n  AltStableSync/[^\n]*Libs", 1))

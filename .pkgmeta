@@ -21,19 +21,24 @@ manual-changelog:
 # Comments on their own lines only - the packager's YAML reader keeps an inline
 # "# ..." as part of the value (measured in GlassUnitFrames' migration).
 externals:
-  # r11 (43fd134): the opt-in pearl preset and the bar-fill repaint fix;
-  # r9-r10 only add functions (own rim/region alphas, Reflect, track
+  # r12 (34a2dd5): FONTS[key].file follows the client's locale (the
+  # Cyrillic Friz on ruRU, the client's CJK fonts on koKR/zhCN/zhTW; enUS is
+  # unchanged). r11 (43fd134): the opt-in pearl preset and the bar-fill
+  # repaint fix; r9-r10 only add functions (own rim/region alphas, Reflect, track
   # length); r8 coloured bars' fill opacity; r7 dims a disabled surface's
   # wash and edge glow; r6 added the opt-in clean preset. This addon calls
   # only New() and Apply "large", with no bars and no preset, so its look is
   # r5's, which the v0.1.0 panel was tried with in game.
   Libs/LibGlass-1.0:
     url: https://github.com/Spotnick2/LibGlass
-    tag: r11
-  # r5 (76fedef): messages mode and SendTo, both required by Link.lua.
+    tag: r12
+  # r6 (edf8a7d): the receive side's audit hardening (a Battle.net-verified
+  # sender evicts unverified streams at the shared caps; the hello's own-name
+  # check is gone). Wire, store and API are r5's. r5 (76fedef): messages mode
+  # and SendTo, both required by Link.lua.
   Libs/LibAccountSync-1.0:
     url: https://github.com/Spotnick2/LibAccountSync
-    tag: r5
+    tag: r6
 
 # WoW only discovers top-level addon folders: the packager moves the Link
 # addon out of the core folder (AltStable's and GlassChat's pattern).
