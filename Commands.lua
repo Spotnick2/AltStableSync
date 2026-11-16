@@ -279,6 +279,8 @@ function Commands.Describe(plan)
     for _, u in ipairs(plan.unavailable or {}) do
         if u.slot then
             items[#items + 1] = { slot = u.slot, text = "can't be restored exactly: " .. tostring(u.reason) }
+        elseif u.key then
+            named[#named + 1] = ("  key %s: %s"):format(tostring(u.key), tostring(u.reason))
         else
             named[#named + 1] = ("  macro %s: %s"):format(tostring(u.name), tostring(u.reason))
         end

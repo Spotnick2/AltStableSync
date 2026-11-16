@@ -7,6 +7,10 @@
   by an earlier version keep the macro's own icon, or create it with "?", and say so; an earlier
   version's backup leaves the macros it changed as they are. Both accounts need this version for
   catalog sync and Share/Import, and the first Save after updating may ask you to load again.
+- **Gamepad bindings are left alone** (#106). Keybindings are read and set in the game's usual
+  binding context, never the gamepad's, and the check before switching to character keybindings
+  covers the gamepad's bindings too. An earlier version's backup leaves the keys it changed as they
+  are, and says so.
 - **Previews say more** (audit #95). A load or restore that saves your keybindings says so, and
   that every key change in memory is saved with them. A spell replaced by another rank of itself
   shows the ranks. A restore names the macros it keeps. A slot the loadout has empty that holds

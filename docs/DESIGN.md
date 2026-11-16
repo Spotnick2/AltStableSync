@@ -411,6 +411,14 @@ Only an explicit confirmation click writes game state.
    restore never upgrades. Ambiguous or cross-locale mappings are deferred, never guessed.
 8. **Bindings are written to the Character set only, and only when it is the active set.** The
    preview shows "Destination: Character".
+   - **Binding contexts** (#106). A command lives in one context: most in None; Blizzard_Gamepad's
+     (it loads on Forever, the `camelot` game type) in GamepadModeInGameCore. Loadout keys are
+     read and written in None, by name (`GetBindingAction(key, nil, None)`,
+     `GetBindingKey(cmd, nil, ctx)`, `SetBinding(key, cmd, None)`), as Blizzard's key-binding
+     settings pass a context; what the calls do without one isn't measured. A loadout command that
+     reports another context blocks the key part. Backups carry `keysNone = true`; an older backup's
+     keys were read without a context, so restoring it leaves them as they are (partial, pinned),
+     and a recorded command of another context is never replayed into None.
    - If the character uses Account bindings, the binding part is blocked with "Enable
      character-specific keybindings in WoW settings, then try again." When the set reads as Account,
      the preview offers **OK / Cancel** instead (#7). OK runs Blizzard's checkbox sequence,
@@ -428,7 +436,10 @@ Only an explicit confirmation click writes game state.
        the binding list with all its keys, plus what every ALT/CTRL/SHIFT/META chord of the keyboard,
        mouse buttons 1-31, the wheel and the gamepad does, so keys bound by click (bar addons'
        `CLICK ...`) are compared too; each custom command found that way is read by command as well,
-       so its other keys count. A custom binding only on an input outside that list stays out of
+       so its other keys count. That is the None context; a command of another context adds its keys
+       and what they do there, qualified by the context (#106). The map carries `["!format"] = 2`, so
+       a guard an older version left never compares equal and takes the "accept the current keys"
+       path. A custom binding only on an input outside that list stays out of
        reach (no client call lists bound keys); it would need a Character store that differs
        there, which the measured case doesn't have.
        Unreadable or different stops there, so changed keys are never saved. Success is the set

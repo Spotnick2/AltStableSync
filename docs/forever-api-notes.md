@@ -384,6 +384,25 @@ throwaway macro: both reads for "?" with and without `#showtooltip`, with an unk
 chosen icon; what `EditMacro(i, nil, nil, body)` keeps; whether `CreateMacro` with 134400 and with
 `"INV_Misc_QuestionMark"` read back the same. Record the results here with the build.
 
+### Binding contexts (#106, read in Blizzard's source, 70938; NOT measured yet)
+
+- Forever is the `camelot` game type, so `Blizzard_Gamepad` and `Blizzard_GamepadActionBars`
+  (`AllowLoadGameType: camelot`) load. Their 15 bindings (OPENRADIAL, TOGGLEUIFOCUS, …,
+  GAMEPADACTIONBUTTON1-8) declare `bindingContext="GamepadModeInGameCore"`. `Enum.BindingContext`:
+  None, eight HousingEditor contexts, GamepadModeInGameCore.
+- Blizzard's key-binding settings (`Blizzard_Settings_Shared/Blizzard_Keybindings.lua`) always pass a
+  context: `ctx = C_KeyBindings.GetBindingContextForAction(action)`, then `GetBindingKey(action, nil,
+  ctx)`, `GetBindingAction(key, nil, ctx)`, `SetBinding(key, action|nil, ctx)`. So those forms exist.
+- **Unknown:** what the calls do without a context (None? the active context?), and whether one key
+  can hold a command in each context at once.
+
+AltStableSync passes the context everywhere since #106 (docs/DESIGN.md, safety rule 8). **To
+measure:** `/fp steps sync contexts` (`Measure.lua`): one chord bound in memory in None and in the
+gamepad's context at once, read with and without a context, `IsBindingContextActive` and
+`GamePadEnable` with gamepad mode off and (if possible) on, then put back. Nothing is saved; if the
+run stops half way, `/fp sync contexts restore` puts the chord back. Record the results here with the
+build.
+
 ### Edit Mode layouts: the write side (#29, #58, 2026-10-12, build 70338)
 
 Measured with `/syncprobe layouts`, `layoutadd`, `layoutupdate`, `layoutactivate`, `layoutclean`

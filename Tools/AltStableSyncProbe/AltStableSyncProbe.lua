@@ -335,8 +335,12 @@ function NS.Record()
     -- Bindings: the set, every key chord, and the binding list.
     local okS, set = read(rec, "binding set", "GetCurrentBindingSet")
     rec.set = okS and plain(set) or nil
+    -- The None binding context, as AltStableSync reads and writes keys (#106):
+    -- what the call does without one isn't measured.
+    local E = api("Enum")
+    local none = E and E.BindingContext and E.BindingContext.None
     for _, chord in ipairs(CHORDS) do
-        local okK, action = read(rec, "key " .. chord, "GetBindingAction", chord)
+        local okK, action = read(rec, "key " .. chord, "GetBindingAction", chord, nil, none)
         if not okK then break end
         if type(action) == "string" and action ~= "" then rec.keymap[chord] = action end
     end
@@ -1004,7 +1008,8 @@ local function restoredU()
 end
 -- Keys per command (H4): after the owner's third SetBinding on button 1.
 local function keysOnButton1()
-    local p = { pcall(api("GetBindingKey"), "ACTIONBUTTON1") }
+    local E = api("Enum")
+    local p = { pcall(api("GetBindingKey"), "ACTIONBUTTON1", nil, E and E.BindingContext and E.BindingContext.None) }
     if not p[1] then return nil, "GetBindingKey failed" end
     local keys = {}
     for i = 2, #p do if type(p[i]) == "string" then keys[#keys + 1] = p[i] end end
@@ -1505,7 +1510,7 @@ boot:SetScript("OnEvent", function(_, _, name)
     if type(DB.adhoc) ~= "table" then DB.adhoc = {} end
     Probe:UseLog(DB.log, MAX_LOG)
     DB.loads = (DB.loads or 0) + 1
-    say("loaded (" .. DB.loads .. " loads). /fp steps sync stress, audit, catalog, catalog2 or icons, or /fp sync for the commands")
+    say("loaded (" .. DB.loads .. " loads). /fp steps sync stress, audit, catalog, catalog2, icons or contexts, or /fp sync for the commands")
 end)
 
 NS._test = { Probe = Probe, DB = function() return DB end }
