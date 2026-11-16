@@ -25,7 +25,13 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $ProbeDir = Join-Path $RepoRoot "Tools\AltStableSyncProbe"
 $ForeverProbe = if ($env:FOREVERPROBE) { $env:FOREVERPROBE } else { Join-Path (Split-Path -Parent $RepoRoot) "ForeverProbe" }
-$Files = @("AltStableSyncProbe.toc", "AltStableSyncProbe.lua")
+# The TOC names the Lua files, so a file added to it is deployed too (Measure.lua
+# was left behind when #105 added it to the TOC only).
+$toc = Join-Path $ProbeDir "AltStableSyncProbe.toc"
+if (-not (Test-Path -LiteralPath $toc)) { Write-Error "Missing probe file: AltStableSyncProbe.toc"; exit 1 }
+$LuaFiles = @(Get-Content -LiteralPath $toc | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '\.lua$' -and $_ -notmatch '^#' })
+if ($LuaFiles.Count -eq 0) { Write-Error "AltStableSyncProbe.toc names no Lua file"; exit 1 }
+$Files = @("AltStableSyncProbe.toc") + $LuaFiles
 
 if (-not (Test-Path -LiteralPath $AddOnsPath)) { Write-Error "AddOns path not found: $AddOnsPath"; exit 1 }
 foreach ($f in $Files) {
@@ -33,8 +39,10 @@ foreach ($f in $Files) {
 }
 $luac = Join-Path (Split-Path -Parent $Lua) "luac.exe"
 if (Test-Path -LiteralPath $luac) {
-    & $luac -p (Join-Path $ProbeDir "AltStableSyncProbe.lua")
-    if ($LASTEXITCODE -ne 0) { Write-Error "luac -p failed on AltStableSyncProbe.lua"; exit 1 }
+    foreach ($f in $LuaFiles) {
+        & $luac -p (Join-Path $ProbeDir $f)
+        if ($LASTEXITCODE -ne 0) { Write-Error "luac -p failed on $f"; exit 1 }
+    }
     Remove-Item -LiteralPath "luac.out" -ErrorAction SilentlyContinue
 } else {
     Write-Host "  luac -p SKIPPED (no $luac)" -ForegroundColor Yellow
