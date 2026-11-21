@@ -211,10 +211,10 @@ do
     e.updated = 1e308
     local ok, m = pcall(A.Panel.Model, { category = "holy", id = x.id })
     check("E3: the panel renders it", ok, tostring(m))
-    eq("E3: an unshowable time reads ?", ok and m.selected and m.selected.saved, "Saved ? by Alt-Realm")
+    eq("E3: an unshowable time reads ?", ok and m.selected and m.selected.saved, "Saved ? by Alt Realm")
     e.updated = { "table" }
     ok, m = pcall(A.Panel.Model, { category = "holy", id = x.id })
-    check("E3: a table for a time renders too", ok and m.selected and m.selected.saved == "Saved ? by Alt-Realm", tostring(m))
+    check("E3: a table for a time renders too", ok and m.selected and m.selected.saved == "Saved ? by Alt Realm", tostring(m))
 end
 
 ------------------------------------------------------------

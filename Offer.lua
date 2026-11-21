@@ -42,20 +42,15 @@ end
 
 local function MarkHandled() ASS.char.onboarding = { handled = true } end
 
-local function Me()
-    local name, realm = UnitFullName("player")
-    return tostring(name) .. "-" .. tostring(realm)
-end
-
 -- The UI setups this character can be offered: live, not a conflict copy, and
 -- not saved from this character (a missing provenance is not proof it was).
+-- A save from before the realm hotfix still counts as this character's (#117).
 function Offer.Candidates()
     local out = {}
     if not (ASS.db and ASS.Catalog) then return out end
-    local me = Me()
     for _, e in ipairs(ASS.Catalog.ListAll("ui")) do
         local from = type(e.provenance) == "table" and e.provenance.sourceChar
-        if not e.conflict and from ~= me then out[#out + 1] = e end
+        if not e.conflict and not ASS.IsMe(from) then out[#out + 1] = e end
     end
     return out
 end

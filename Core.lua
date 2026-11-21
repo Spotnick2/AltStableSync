@@ -148,6 +148,42 @@ local DB_TABLES = { "presets", "backups" }
 
 local PREFIX = "|cff00ccff[AltStableSync]|r "
 
+-- This character, as a setup's provenance names it (#117). A character is its
+-- full name, unique region-wide: first name, space, surname. Two characters
+-- can share a first name (Karuzo Sumner, Karuzo Mistwalker), so a first name
+-- alone never identifies one. UnitName("player") gives "Zoruka", "Sumner"
+-- (since 70009; 71037 after the realm hotfix, GlassPanel#169); an early beta
+-- build gave "Example Surname", nil.
+function ASS.PlayerName()
+    local first, surname = UnitName("player")
+    first = tostring(first)
+    if type(surname) == "string" and surname ~= "" and not first:find(" ", 1, true) then
+        return first .. " " .. surname
+    end
+    return first
+end
+
+-- The full name a stored sourceChar names. Saves before #117 joined
+-- UnitFullName's two values with "-": "<first>-<surname>" on every build since
+-- 70009 (both accounts' catalogs hold only that form), "<first> <surname>-<realm>"
+-- on the early beta that returned the full name and a realm (porting guide,
+-- "Characters have surnames"). A name has no "-", so the first one splits it.
+-- A "<first>-<realm>" from a character without a surname reads as a name that
+-- matches no one: the setup stays offered, never wrongly hidden.
+function ASS.SourceName(s)
+    s = tostring(s)
+    local name, rest = s:match("^([^-]+)%-(.+)$")
+    if not name then return s end
+    if name:find(" ", 1, true) then return name end
+    return name .. " " .. rest
+end
+
+-- Was this sourceChar saved by this character, in any form it has held?
+function ASS.IsMe(s)
+    if type(s) ~= "string" then return false end
+    return ASS.SourceName(s) == ASS.PlayerName()
+end
+
 -- Text from the catalog, a sync or a pasted string, shown as typed (#75).
 -- Stored text is WoW text: the client stores a typed "|" as "||" and draws
 -- "||" as one "|" (measured, 70338). So only an unpaired pipe could start

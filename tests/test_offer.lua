@@ -214,9 +214,24 @@ do
     settle(); tick(3)
     check("none saved: no offer", not offer())
 
-    boot{ setups = { { name = "Mine", provenance = { sourceChar = "Karuzo-Elegia" } } } }
+    boot{ setups = { { name = "Mine", provenance = { sourceChar = "Karuzo-Sumner" } } } }
     settle(); tick(3)
     check("own setup only: no offer", not offer())
+
+    -- #117: this character in each form a save has held: "<first>-<surname>"
+    -- (above), "<first> <surname>-<realm>" on an early beta, the full name
+    -- from #117 on. A character sharing the first name is someone else.
+    for _, from in ipairs({ "Karuzo Sumner", "Karuzo Sumner-ClassicBetaPvE" }) do
+        boot{ setups = { { name = "Mine", provenance = { sourceChar = from } } } }
+        settle(); tick(3)
+        check("own setup, no offer: " .. from, not offer())
+    end
+    for _, from in ipairs({ "Karuzo-Mistwalker", "Karuzo Mistwalker", "Kaleid-Sumner", "Kaleid Sumner",
+                            "Karuzon-Sumner", "Karuzo-Elegia" }) do
+        boot{ setups = { { name = "Theirs", provenance = { sourceChar = from } } } }
+        settle()
+        check("another character's setup is offered: " .. from, offer() ~= nil)
+    end
 
     boot{ setups = { { name = "Base" } } }
     G.combat = true

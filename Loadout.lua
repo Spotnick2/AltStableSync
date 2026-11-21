@@ -1269,8 +1269,7 @@ function Loadout.Merge(rec, current, characterBindings, drop)
 end
 
 local function Provenance()
-    local name, realm = UnitFullName("player")
-    return { sourceChar = tostring(name) .. "-" .. tostring(realm), build = select(2, GetBuildInfo()) }
+    return { sourceChar = (ASS.PlayerName()), build = select(2, GetBuildInfo()) }
 end
 Loadout.Provenance = Provenance
 

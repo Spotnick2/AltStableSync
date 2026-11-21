@@ -163,10 +163,11 @@ function UnitGUID(unit)
     if unit == "pet" then return G.pet and G.pet.guid end
     return G.guid
 end
-function UnitFullName() return "Karuzo", "Elegia" end
+-- Since the 2026-11-20 realm hotfix the second value is the surname (71037, #117).
+function UnitFullName() return "Karuzo", "Sumner" end
 function UnitName(unit)
     if unit == "pet" then return G.pet and G.pet.name end
-    return "Karuzo", "Elegia"
+    return "Karuzo", "Sumner"
 end
 function UnitExists(unit)
     if unit == "pet" then return G.pet ~= nil end

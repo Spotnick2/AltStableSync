@@ -2,6 +2,9 @@
 
 ## v1.0.1
 
+- **Saved setups name the character by its full name** (#117): "Saved by Zoruka Sumner", where it
+  read "Zoruka-Sumner" as if the surname were a realm. Setups saved by an earlier version show the
+  full name too. A character sharing another's first name is never taken for them.
 - **Macro icons stay as you chose them** (#105). A macro with the "?" icon shows the icon of the
   spell it casts, and saving or loading it no longer freezes it on that spell's icon. Loadouts saved
   by an earlier version keep the macro's own icon, or create it with "?", and say so; an earlier
