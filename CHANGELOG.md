@@ -23,8 +23,9 @@
   window is closed keeps the window as saved, and says so. The Save preview counts every key it
   adds and shows the first changed line of each macro it saves.
 - **Libraries.** LibGlass r12: its fonts follow the client's language, so Russian, Korean and
-  Chinese clients get a font with their alphabet. LibAccountSync r6: catalog sync between your accounts keeps working when another
-  sender floods the shared buffers.
+  Chinese clients get a font with their alphabet. LibAccountSync r8: catalog sync between your accounts keeps working when another
+  sender floods the shared buffers, and an entry sent just after you switch characters is never
+  credited to the previous one.
 - **Safer restores** (audit #95). A restore that can't store its own backup writes nothing. A
   keybinding save the client refuses is rolled back and reported. Chat changes stop before the next
   write when combat starts between two of them.

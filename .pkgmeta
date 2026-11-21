@@ -32,13 +32,15 @@ externals:
   Libs/LibGlass-1.0:
     url: https://github.com/Spotnick2/LibGlass
     tag: r12
-  # r6 (edf8a7d): the receive side's audit hardening (a Battle.net-verified
-  # sender evicts unverified streams at the shared caps; the hello's own-name
-  # check is gone). Wire, store and API are r5's. r5 (76fedef): messages mode
-  # and SendTo, both required by Link.lua.
+  # r8 (f030b5a): every delivery is proven by its MAC, so a new character's
+  # message is never credited to the old one after a switch (r7, #37); a
+  # goodbye sent at PLAYER_LOGOUT is delivered (#38). This addon sends
+  # nothing at logout. r6 (edf8a7d): the receive side's audit hardening.
+  # Wire, store and API are r5's. r5 (76fedef): messages mode and SendTo,
+  # both required by Link.lua.
   Libs/LibAccountSync-1.0:
     url: https://github.com/Spotnick2/LibAccountSync
-    tag: r6
+    tag: r8
 
 # WoW only discovers top-level addon folders: the packager moves the Link
 # addon out of the core folder (AltStable's and GlassChat's pattern).

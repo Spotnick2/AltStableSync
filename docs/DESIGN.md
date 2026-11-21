@@ -846,7 +846,7 @@ tiny addon folder:
   `move-folders` pattern);
 - `## Dependencies: AltStableSync` and `## SavedVariables: AltStableSyncLAS`;
 - it uses `LibAccountSync-1.0` through LibStub. The library ships in the **main** addon's
-  `Libs/LibAccountSync-1.0` (`.pkgmeta` external, tag `r6`), as in AltStable: CurseForge's packager
+  `Libs/LibAccountSync-1.0` (`.pkgmeta` external, tag `r8`), as in AltStable: CurseForge's packager
   doesn't apply ignores to an external inside a moved folder (#66). Where the code lives doesn't
   move the key: it's written by the TOC that declares the SavedVariables;
 - it holds only the sync glue.
