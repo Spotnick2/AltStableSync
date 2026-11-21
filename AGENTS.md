@@ -175,6 +175,12 @@ Repo: `github.com/Spotnick2/AltStableSync` (public). CurseForge project **173355
 `README.curseforge.md`, kept **untracked** (`.git/info/exclude`) and pasted by the owner; `README.md`
 is the GitHub page.
 
+**A release tag (`vX.Y.Z`, not an alpha or beta) updates both READMEs in its prep PR**: `README.md`
+and `README.curseforge.md` describe what that release does (new features, commands, options,
+changed limits, screenshots) and nothing it no longer does. The PR body says whether
+`README.curseforge.md` changed, since the owner pastes it into CurseForge after the release
+(`C:\Projects\WoW\References\Docs\RELEASING.md` §3 and §4).
+
 CurseForge's packager builds from the tag webhook, reading `.pkgmeta`; no API key lives here.
 `git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`. Every tag needs a player-facing
 `CHANGELOG.md` section (`## vX.Y.Z`), which is also the upload's changelog. The same version is a
