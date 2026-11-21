@@ -25,16 +25,30 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $ProbeDir = Join-Path $RepoRoot "Tools\AltStableSyncProbe"
 $ForeverProbe = if ($env:FOREVERPROBE) { $env:FOREVERPROBE } else { Join-Path (Split-Path -Parent $RepoRoot) "ForeverProbe" }
-$Files = @("AltStableSyncProbe.toc", "AltStableSyncProbe.lua")
+# The TOC names the Lua files, so a file added to it is deployed too (Measure.lua
+# was left behind when #105 added it to the TOC only).
+$toc = Join-Path $ProbeDir "AltStableSyncProbe.toc"
+if (-not (Test-Path -LiteralPath $toc)) { Write-Error "Missing probe file: AltStableSyncProbe.toc"; exit 1 }
+$LuaFiles = @(Get-Content -LiteralPath $toc | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '\.lua$' -and $_ -notmatch '^#' })
+if ($LuaFiles.Count -eq 0) { Write-Error "AltStableSyncProbe.toc names no Lua file"; exit 1 }
+$Files = @("AltStableSyncProbe.toc") + $LuaFiles
 
 if (-not (Test-Path -LiteralPath $AddOnsPath)) { Write-Error "AddOns path not found: $AddOnsPath"; exit 1 }
+foreach ($f in $LuaFiles) {
+    # A TOC path is relative to the addon folder and stays inside it.
+    if ([System.IO.Path]::IsPathRooted($f) -or ($f -split '[\\/]') -contains '..') {
+        Write-Error "AltStableSyncProbe.toc names a file outside the probe folder: $f"; exit 1
+    }
+}
 foreach ($f in $Files) {
     if (-not (Test-Path -LiteralPath (Join-Path $ProbeDir $f))) { Write-Error "Missing probe file: $f"; exit 1 }
 }
 $luac = Join-Path (Split-Path -Parent $Lua) "luac.exe"
 if (Test-Path -LiteralPath $luac) {
-    & $luac -p (Join-Path $ProbeDir "AltStableSyncProbe.lua")
-    if ($LASTEXITCODE -ne 0) { Write-Error "luac -p failed on AltStableSyncProbe.lua"; exit 1 }
+    foreach ($f in $LuaFiles) {
+        & $luac -p (Join-Path $ProbeDir $f)
+        if ($LASTEXITCODE -ne 0) { Write-Error "luac -p failed on $f"; exit 1 }
+    }
     Remove-Item -LiteralPath "luac.out" -ErrorAction SilentlyContinue
 } else {
     Write-Host "  luac -p SKIPPED (no $luac)" -ForegroundColor Yellow
@@ -54,6 +68,13 @@ $dest = Join-Path (Resolve-Path -LiteralPath $AddOnsPath).ProviderPath "AltStabl
 if (-not (Test-Path -LiteralPath $dest)) { New-Item -ItemType Directory -Path $dest | Out-Null }
 $old = Join-Path $dest "Probe.lua"
 if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old }
-foreach ($f in $Files) { Copy-Item -LiteralPath (Join-Path $ProbeDir $f) -Destination (Join-Path $dest $f) -Force }
+# The Lua files first, each in its folder (a TOC may name Steps\Measure.lua), and
+# the TOC last: a copy that fails never leaves a TOC naming a missing file.
+foreach ($f in @($LuaFiles) + @("AltStableSyncProbe.toc")) {
+    $target = Join-Path $dest $f
+    $parent = Split-Path -Parent $target
+    if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    Copy-Item -LiteralPath (Join-Path $ProbeDir $f) -Destination $target -Force
+}
 Write-Host "AltStableSyncProbe deployed to $dest." -ForegroundColor Green
 Write-Host "In game: /console scriptErrors 1, /reload, then /fp steps sync stress (or /fp sync for the commands)." -ForegroundColor Yellow
