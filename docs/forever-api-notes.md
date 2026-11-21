@@ -149,6 +149,36 @@ Event counts: UPDATE_BINDINGS ×5, UPDATE_MACROS ×6, ACTIONBAR_SLOT_CHANGED ×2
 - **Consequence for #17/#18:** the envelope is small. A whole profile fits well under LibAccountSync's 16 KB.
 - **Measured with real loadouts on 70291 (#5, 2026-10-09):** the largest of 5 saved entries, covering every bar, encodes to **1,508 bytes** on the wire (envelope plus id and version).
 
+## Build 1.60.1.71037 (2026-11-21) - client update, re-checked by hand
+
+The client was built on Nov 18, 2026, interface 16001, the first live build after launch. The addon
+was never bumped to 70532, 70862, 70888, 70938 or 70959. The diff below runs straight from 70450,
+so it covers all of them.
+
+**Dump diff against 70450** (`Compare-Dumps.ps1`):
+- **On the sync surface, additions only:** `C_ActionBar.IsHighestSpellRank`,
+  `C_BattleNet.GetDefaultTitleWhisperTarget` and `C_BattleNet.IsGameAccountOnSameRealm`.
+  `BNetGameAccountInfo` gains `hasRealmInfo` (71037), which LibAccountSync doesn't read.
+- **Unchanged:** every function and event this addon or LibAccountSync calls. No changed name appears in
+  the addon, its stubs or `Libs/`.
+- **Not in the dump, the 2026-11-20 server hotfix:** `GetRealmName()` returns `""`, and
+  `UnitName`'s and `UnitFullName`'s second value is the surname (measured on 71037,
+  GlassPanel#169). Setup provenance moves to the full name in #117 (PR #119).
+
+**Behaviour.** The owner ran these lines on live, out of combat:
+
+| `/run` line | 71037 | Same as 70450? |
+|---|---|---|
+| `print(GetBuildInfo())` | not pasted; the installed client's `.build.info` names 1.60.1.71037 | - |
+| `print(WOW_PROJECT_ID, GetCurrentRegion(), GetNumSpecGroups(), C_SpecializationInfo.GetActiveSpecGroup(), GetCurrentBindingSet())` | `18 1 1 1 1` | yes, except the **region: 110 → 1** (live US; it was 90 → 110 during the beta). Region is never a flavour key. |
+| `for s=1,12 do local t,i,u=GetActionInfo(s) if t then print(s,t,i,u,GetActionText(s)) end end` | `spell <id> spell` for spells; `item 117 nil` for an item | yes |
+| `local s=1 print(GetActionInfo(s)) print(GetActionText(s)) PickupAction(s) print(GetCursorInfo()) PlaceAction(s)` (Attack) | `spell 6603 spell`; no text; `spell 1 spell 6603 nil` | yes |
+| `for s=1,120 do if GetActionInfo(s)=="macro" then ... end end print("no macro")` | `no macro`: no macro on this character's bars | **not re-checked**; the macro API is unchanged in the dump |
+| `local E=C_EncodingUtil ... print(#s,t.s,t.a)` | `16 1 x` | yes, round trip intact |
+
+**Verdict:** nothing this addon depends on changed. The macro cursor round trip wasn't re-run on
+this build. `MEASURED_ON_BUILD` is now 71037.
+
 ## Build 1.60.1.70450 (2026-10-18) - client update, re-checked by hand
 
 The client was built on Oct 15, 2026, interface 16001. The addon was never bumped to 70374 or 70425;
