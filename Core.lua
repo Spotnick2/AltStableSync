@@ -148,6 +148,36 @@ local DB_TABLES = { "presets", "backups" }
 
 local PREFIX = "|cff00ccff[AltStableSync]|r "
 
+-- This character, as a setup's provenance names it (#117). The realm is
+-- hidden since the 2026-11-20 server hotfix: UnitName's and UnitFullName's
+-- second value is now the surname (measured 71037, GlassPanel#169). So a
+-- character is its full name, unique region-wide: first name, space, surname.
+-- Saves from before #117 hold "<first>-<realm>", or "<first>-<surname>" since
+-- the hotfix. A name has no "-", so the part before the first one is the
+-- first name. Synced entries can still carry the old form: read both.
+function ASS.PlayerName()
+    local first, surname = UnitName("player")
+    first = tostring(first)
+    if type(surname) == "string" and surname ~= "" and not first:find(" ", 1, true) then
+        return first .. " " .. surname, first
+    end
+    return first, first
+end
+
+-- The character a stored sourceChar names, for display.
+function ASS.SourceName(s)
+    s = tostring(s)
+    return s:match("^([^-]+)%-") or s
+end
+
+-- Was this sourceChar saved by this character, in either form?
+function ASS.IsMe(s)
+    if type(s) ~= "string" then return false end
+    local full, first = ASS.PlayerName()
+    if s == full then return true end
+    return s:find("-", 1, true) ~= nil and ASS.SourceName(s) == first
+end
+
 -- Text from the catalog, a sync or a pasted string, shown as typed (#75).
 -- Stored text is WoW text: the client stores a typed "|" as "||" and draws
 -- "||" as one "|" (measured, 70338). So only an unpaired pipe could start

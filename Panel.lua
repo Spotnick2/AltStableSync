@@ -217,8 +217,8 @@ function Panel.Model(sel)
         m.selected = {
             id = selected.id, name = L(selected.name), contents = Contents(selected),
             marks = Marks(selected, rec, copiesOf),
-            saved = ("Saved %s%s"):format(Short(selected.updated), p.sourceChar and (" by " .. L(p.sourceChar)) or ""),
-            savedFull = ("Saved %s%s"):format(When(selected.updated), p.sourceChar and (" by " .. L(p.sourceChar)) or ""),
+            saved = ("Saved %s%s"):format(Short(selected.updated), p.sourceChar and (" by " .. L(ASS.SourceName(p.sourceChar))) or ""),
+            savedFull = ("Saved %s%s"):format(When(selected.updated), p.sourceChar and (" by " .. L(ASS.SourceName(p.sourceChar))) or ""),
             conflictCopy = conflict ~= nil, deletion = conflict and conflict.deletion or false,
             from = conflict and L(conflict.from or "your other account") or nil,
         }
@@ -1253,7 +1253,7 @@ local function RefreshUI()
     if e then
         W.uiContents:SetText(table.concat(ASS.UISetup.Contents(e.modules), "\n"))
         local from = type(e.provenance) == "table" and e.provenance.sourceChar
-        W.uiFoot:SetText(("Saved %s%s"):format(When(e.updated), from and (" by " .. ASS.Literal(from)) or ""))
+        W.uiFoot:SetText(("Saved %s%s"):format(When(e.updated), from and (" by " .. ASS.Literal(ASS.SourceName(from))) or ""))
     else
         W.uiContents:SetText("Save this character's layout, action bars, settings and chat tabs as a UI setup:"
             .. " other characters can then apply it.")

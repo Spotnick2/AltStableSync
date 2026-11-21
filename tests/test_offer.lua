@@ -218,6 +218,21 @@ do
     settle(); tick(3)
     check("own setup only: no offer", not offer())
 
+    -- #117: this character in each form a save has held. Before the realm
+    -- hotfix "<first>-<realm>" (above); since it "<first>-<surname>"; from
+    -- #117 on the full name.
+    boot{ setups = { { name = "Mine", provenance = { sourceChar = "Karuzo-Sumner" } } } }
+    settle(); tick(3)
+    check("own setup, saved since the hotfix: no offer", not offer())
+    boot{ setups = { { name = "Mine", provenance = { sourceChar = "Karuzo Sumner" } } } }
+    settle(); tick(3)
+    check("own setup, full name: no offer", not offer())
+    for _, from in ipairs({ "Kaleid-Elegia", "Kaleid Sumner", "Karuzon-Elegia", "Karuzo Other" }) do
+        boot{ setups = { { name = "Theirs", provenance = { sourceChar = from } } } }
+        settle()
+        check("another character's setup is offered: " .. from, offer() ~= nil)
+    end
+
     boot{ setups = { { name = "Base" } } }
     G.combat = true
     settle(); tick(3)

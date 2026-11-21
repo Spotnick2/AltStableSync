@@ -1271,7 +1271,7 @@ function Commands.ui(arg)
         local rec = ASS.char.loaded and ASS.char.loaded.ui
         for _, e in ipairs(all) do
             local from = type(e.provenance) == "table" and e.provenance.sourceChar
-            Print(("  %s: %s%s%s%s"):format(e.id, tostring(e.name), from and (" (from " .. tostring(from) .. ")") or "",
+            Print(("  %s: %s%s%s%s"):format(e.id, tostring(e.name), from and (" (from " .. ASS.SourceName(from) .. ")") or "",
                 e.conflict and " [conflict]" or "", rec and rec.id == e.id and " [applied here]" or ""))
         end
         return

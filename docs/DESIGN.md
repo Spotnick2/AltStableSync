@@ -154,7 +154,9 @@ AltStableSyncDB = {                 -- account-wide, file AltStableSync.lua
       parent = "f00dbabe0000:9",               -- the version it replaced (nil for a new entry)
       ancestors = { "f00dbabe0000:9", ... },   -- the last 20 versions this one descends from (incl. parent)
       created = <time>, updated = <time>,      -- display metadata only, never ordering
-      provenance = { sourceChar = "Name-Realm", build = "70245" },
+      provenance = { sourceChar = "Name Surname", build = "71037" },
+                  -- the saver's full name (#117); entries saved before it hold "Name-Realm" (or
+                  -- "Name-Surname" after the 2026-11-20 realm hotfix): the part before the "-" is the name
       modules = { actions = {...}, bindings = {...}, macros = {...},    -- loadout
                   -- macros = { [name] = { body, icon, sel = true } }: `sel` (#105, schema 13) says
                   -- `icon` is the macro's chosen icon; without it, an older build recorded the icon
